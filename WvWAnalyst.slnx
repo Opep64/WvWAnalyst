@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/apps/" />
+  <Folder Name="/apps/api/">
+    <Project Path="apps/api/WvWAnalyst.Api/WvWAnalyst.Api.csproj" />
+  </Folder>
+  <Folder Name="/packages/" />
+  <Folder Name="/packages/analytics/">
+    <Project Path="packages/analytics/WvWAnalyst.Analytics/WvWAnalyst.Analytics.csproj" />
+  </Folder>
+  <Folder Name="/packages/contracts/">
+    <Project Path="packages/contracts/WvWAnalyst.Contracts/WvWAnalyst.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/packages/parser-bridge/">
+    <Project Path="packages/parser-bridge/WvWAnalyst.ParserBridge/WvWAnalyst.ParserBridge.csproj" />
+  </Folder>
+</Solution>

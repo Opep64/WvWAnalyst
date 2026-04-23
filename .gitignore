@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+
+storage/cache/*
+storage/db/*
+storage/fights/*
+
+!storage/cache/.gitkeep
+!storage/db/.gitkeep
+!storage/fights/.gitkeep

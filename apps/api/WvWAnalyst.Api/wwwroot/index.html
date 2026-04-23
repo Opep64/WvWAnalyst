@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WvWAnalyst</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="hero">
+            <div class="eyebrow">Local-first Prototype</div>
+            <h1>WvWAnalyst</h1>
+            <p class="hero-copy">
+                Batch process detailed WvW logs into compact fight records, browse the catalog, and keep only the analysis data that matters.
+            </p>
+            <div class="hero-actions">
+                <span class="pill" id="mode-pill">Loading mode...</span>
+                <span class="pill pill-muted">Dark theme prototype</span>
+            </div>
+        </header>
+
+        <main class="grid">
+            <section class="panel panel-wide">
+                <div class="section-heading">
+                    <div>
+                        <h2>Batch Processing</h2>
+                        <p>Point the app at a log directory and either ingest only new files or wipe the local catalog and rebuild it from scratch.</p>
+                    </div>
+                    <p class="workspace-note" id="batch-note"></p>
+                </div>
+                <form class="import-form" id="batch-form">
+                    <div class="browser-controls">
+                        <label class="browser-field browser-field-wide">
+                            <span>Log directory</span>
+                            <input id="log-directory-input" type="text" placeholder="D:\Logs\GW2" spellcheck="false">
+                        </label>
+                        <label class="browser-field">
+                            <span>Mode</span>
+                            <select id="directory-mode">
+                                <option value="new-only">Process only new files</option>
+                                <option value="rebuild-all">Process all and rebuild catalog</option>
+                            </select>
+                        </label>
+                        <label class="browser-field">
+                            <span>Parse workers</span>
+                            <input id="directory-max-parallelism" type="number" min="1" max="16" step="1" value="4">
+                        </label>
+                        <div class="browser-field button-field">
+                            <span>Run</span>
+                            <button class="primary-button" id="directory-button" type="submit">Start batch parse</button>
+                        </div>
+                    </div>
+                </form>
+                <div class="import-status" id="batch-status">No batch parse has been run in this browser session yet.</div>
+                <div class="batch-results-toolbar" id="batch-results-toolbar" hidden>
+                    <label class="batch-toggle">
+                        <input id="batch-results-show-all" type="checkbox">
+                        <span>Show all parsed files</span>
+                    </label>
+                    <label class="batch-toggle">
+                        <input id="batch-results-show-excluded" type="checkbox">
+                        <span>Show excluded fights</span>
+                    </label>
+                </div>
+                <div class="table-shell table-shell-scroll table-shell-batch-results" id="batch-results-shell" hidden>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th>Action</th>
+                                <th>Fight</th>
+                                <th>Parser</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="batch-results-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel panel-wide dossier-panel" id="fight-dossier-panel" hidden>
+                <div class="section-heading">
+                    <div>
+                        <h2 id="dossier-title">Fight dossier</h2>
+                        <p id="dossier-subtitle"></p>
+                    </div>
+                    <a class="action-link" id="dossier-back-link" href="/">Back to dashboard</a>
+                </div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Overview</h3>
+                        <ul class="tag-list" id="dossier-context-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Participants</h3>
+                        <ul class="tag-list" id="dossier-participants-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Artifacts</h3>
+                        <div class="fight-actions" id="dossier-artifact-links"></div>
+                    </div>
+                </div>
+                <div class="dossier-grid dossier-grid-thirds">
+                    <section class="dossier-card">
+                        <h3>Outcome</h3>
+                        <ul class="tag-list" id="dossier-outcome-list"></ul>
+                    </section>
+                    <section class="dossier-card">
+                        <h3 id="dossier-squad-title">Our Squad</h3>
+                        <dl class="stat-pairs" id="dossier-squad-stats"></dl>
+                    </section>
+                    <section class="dossier-card">
+                        <h3 id="dossier-enemy-title">Enemy Team</h3>
+                        <dl class="stat-pairs" id="dossier-enemy-stats"></dl>
+                    </section>
+                </div>
+                <div class="table-shell">
+                    <table class="data-table data-table-compact">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Squad</th>
+                                <th>Enemy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dossier-scoreboard-body"></tbody>
+                    </table>
+                </div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Execution</h3>
+                        <ul class="tag-list" id="dossier-execution-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Confidence &amp; Context</h3>
+                        <ul class="tag-list" id="dossier-confidence-list"></ul>
+                    </div>
+                </div>
+                <div class="pillar-grid dossier-pillar-grid" id="dossier-pillar-grid"></div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Commander Lens</h3>
+                        <ul class="tag-list" id="dossier-commander-focus-list"></ul>
+                    </div>
+                </div>
+                <div class="table-shell table-shell-scroll table-shell-fight-browser">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Player</th>
+                                <th>Role</th>
+                                <th>Pressure</th>
+                                <th>Support</th>
+                                <th>Survival</th>
+                                <th>Positioning</th>
+                                <th>Summary</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dossier-player-body"></tbody>
+                    </table>
+                </div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Parser</h3>
+                        <ul class="tag-list" id="dossier-parser-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Commanders</h3>
+                        <ul class="tag-list" id="dossier-commanders-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Extensions</h3>
+                        <ul class="tag-list" id="dossier-extensions-list"></ul>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel panel-wide">
+                <div class="section-heading">
+                    <div>
+                        <h2>Recent Parses</h2>
+                        <p>Most recent stored parser results, ordered by parse time.</p>
+                    </div>
+                    <p class="workspace-note" id="recent-parses-summary"></p>
+                </div>
+                <div class="table-shell">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Parsed</th>
+                                <th>Fight</th>
+                                <th>Outcome</th>
+                                <th>Score</th>
+                                <th>Squad</th>
+                                <th>Enemy</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-parses-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel panel-wide">
+                <div class="section-heading">
+                    <div>
+                        <h2>Fight Browser</h2>
+                        <p>Browse the stored catalog by fight time, outcome, commander, or parser version.</p>
+                    </div>
+                    <p class="workspace-note" id="fight-browser-summary"></p>
+                </div>
+                <div class="browser-controls">
+                    <label class="browser-field browser-field-wide">
+                        <span>Search</span>
+                        <input id="fight-browser-search" type="search" placeholder="Fight, commander, source file, parser version">
+                    </label>
+                    <label class="browser-field">
+                        <span>Outcome</span>
+                        <select id="fight-browser-outcome">
+                            <option value="all">All</option>
+                            <option value="squad">Our Squad</option>
+                            <option value="enemy">Enemy Team</option>
+                            <option value="draw">Draw</option>
+                            <option value="unknown">Unavailable</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="table-shell table-shell-scroll table-shell-fight-browser">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="fightTime">Fight time</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="commander">Commander</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="duration">Duration</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="outcome">Outcome</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="score">Score</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="squad">Squad</button></th>
+                                <th><button class="sort-header" type="button" data-fight-browser-sort="enemy">Enemy</button></th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fight-browser-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel panel-wide">
+                <div class="section-heading">
+                    <div>
+                        <h2>Analysis</h2>
+                        <p>Filter the stored fight catalog and inspect team trends, then drill into players, classes, lanes, and threat boons in focused views.</p>
+                    </div>
+                    <p class="workspace-note" id="analysis-summary"></p>
+                </div>
+                <div class="browser-controls">
+                    <label class="browser-field">
+                        <span>Commander</span>
+                        <select id="analysis-commander">
+                            <option value="">All commanders</option>
+                        </select>
+                    </label>
+                    <label class="browser-field">
+                        <span>Start date</span>
+                        <input id="analysis-start-date" type="date">
+                    </label>
+                    <label class="browser-field">
+                        <span>End date</span>
+                        <input id="analysis-end-date" type="date">
+                    </label>
+                    <label class="browser-field">
+                        <span>Outcome</span>
+                        <select id="analysis-outcome">
+                            <option value="all">All fights</option>
+                            <option value="squad">Wins</option>
+                            <option value="enemy">Losses</option>
+                            <option value="draw">Draws</option>
+                        </select>
+                    </label>
+                    <div class="browser-field button-field">
+                        <span>Run</span>
+                        <button class="primary-button" id="analysis-apply-button" type="button">Refresh analysis</button>
+                    </div>
+                </div>
+                <div class="stats-grid" id="analysis-overview-cards"></div>
+                <div class="pillar-grid" id="analysis-chart-grid"></div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Filter scope</h3>
+                        <ul class="tag-list" id="analysis-scope-list"></ul>
+                    </div>
+                </div>
+                <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
+                    <button class="analysis-tab is-active" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="true">Players</button>
+                    <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
+                    <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
+                    <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
+                </div>
+                <div class="analysis-panel is-active" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players">
+                    <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. By default the table shows players with at least 40 filtered fights, but search can surface smaller samples.</p>
+                    <div class="browser-controls analysis-player-toolbar">
+                        <label class="browser-field browser-field-wide">
+                            <span>Search players</span>
+                            <input id="analysis-player-search" type="search" placeholder="Guild Wars ID or character name">
+                        </label>
+                        <label class="browser-field">
+                            <span>Impact lane</span>
+                            <select id="analysis-player-lane-filter">
+                                <option value="all">All lanes</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="workspace-note analysis-panel-note" id="analysis-players-summary"></p>
+                    <div class="table-shell table-shell-scroll table-shell-analysis-players">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th><button class="sort-header" type="button" data-analysis-player-sort="player">Player</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-player-sort="appearances">Appearances</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-player-sort="record">Record</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-player-sort="impact">Impact</button></th>
+                                    <th>Classes</th>
+                                    <th>Lane fit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-players-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="analysis-player-detail"></div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-classes" data-analysis-panel="classes" role="tabpanel" aria-labelledby="analysis-tab-classes" hidden>
+                    <p class="workspace-note analysis-panel-note">A compact view of what each class contributed across the filtered fights and who tended to drive that value. The main class list requires at least 40 class appearances, and the class player list requires at least 20 appearances on that class.</p>
+                    <div class="table-shell table-shell-scroll table-shell-analysis-classes">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th><button class="sort-header" type="button" data-analysis-class-sort="class">Class</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-class-sort="samples">Samples</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-class-sort="impact">Impact</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-class-sort="record">Record</button></th>
+                                    <th>Top player</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-classes-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="analysis-class-detail"></div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-lanes" data-analysis-panel="lanes" role="tabpanel" aria-labelledby="analysis-tab-lanes" hidden>
+                    <p class="workspace-note analysis-panel-note">Shows which lanes appeared most often, how strong they were, and which classes or players anchored them. Lane detail uses similar sample thresholds to the other views.</p>
+                    <div class="table-shell">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Lane</th>
+                                    <th>Use</th>
+                                    <th>Strength</th>
+                                    <th>Coverage</th>
+                                    <th>Top class</th>
+                                    <th>Top player</th>
+                                    <th>Evidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-lanes-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="analysis-lane-detail"></div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-boons" data-analysis-panel="boons" role="tabpanel" aria-labelledby="analysis-tab-boons" hidden>
+                    <p class="workspace-note analysis-panel-note">Threat-boon relevance around pressured squad samples, with selected-boon detail showing which classes generated that boon best across the filtered fights.</p>
+                    <div class="table-shell">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Boon</th>
+                                    <th>Type</th>
+                                    <th>Fights</th>
+                                    <th>Coverage</th>
+                                    <th>Stacks</th>
+                                    <th>Overapplication</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-boons-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="analysis-boon-detail"></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading">
+                    <h2>Workspace</h2>
+                    <p>Neighbor repos and local storage roots detected by the prototype.</p>
+                </div>
+                <div class="stats-grid" id="workspace-cards"></div>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading">
+                    <h2>Workstreams</h2>
+                    <p>Current prototype lanes.</p>
+                </div>
+                <div class="workstreams" id="workstreams-list"></div>
+            </section>
+
+            <section class="panel panel-wide">
+                <div class="section-heading">
+                    <h2>Fight Execution Score v1</h2>
+                    <p id="scorecard-summary"></p>
+                </div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Non-scored context</h3>
+                        <ul class="tag-list" id="context-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Outcome headline</h3>
+                        <ul class="tag-list" id="outcome-list"></ul>
+                    </div>
+                </div>
+                <div class="pillar-grid" id="pillar-grid"></div>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading">
+                    <h2>Retention posture</h2>
+                    <p>Keep compact catalog data and treat parser payloads as temporary ingest artifacts.</p>
+                </div>
+                <div class="tag-block">
+                    <div>
+                        <h3>Keep always</h3>
+                        <ul class="tag-list" id="keep-list"></ul>
+                    </div>
+                    <div>
+                        <h3>Purge first</h3>
+                        <ul class="tag-list" id="purge-list"></ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/app.js" defer></script>
+</body>
+</html>
