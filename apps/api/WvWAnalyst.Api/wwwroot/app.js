@@ -16,7 +16,7 @@ let analysisClassSortState = { key: "impact", direction: "desc" };
 let analysisClassPlayerSortState = { key: "impact", direction: "desc" };
 let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
-let selectedAnalysisLaneKey = null;
+let selectedAnalysisLaneKeys = [];
 let selectedAnalysisBoonId = null;
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
@@ -1249,6 +1249,115 @@ function getLaneContributionByKey(collection, laneKey) {
     return (collection ?? []).find(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey)) ?? null;
 }
 
+function getSelectedAnalysisLaneRows(snapshot) {
+    const availableLanes = snapshot?.topLanes ?? [];
+    const normalizedSelected = [...new Set((selectedAnalysisLaneKeys ?? [])
+        .filter(Boolean)
+        .map(key => String(key)))]
+        .filter(key => availableLanes.some(lane => stringEqualsIgnoreCase(lane.laneKey, key)));
+
+    if (normalizedSelected.length === 0 && availableLanes.length > 0) {
+        selectedAnalysisLaneKeys = [availableLanes[0].laneKey];
+    } else {
+        selectedAnalysisLaneKeys = normalizedSelected;
+    }
+
+    return selectedAnalysisLaneKeys
+        .map(key => availableLanes.find(lane => stringEqualsIgnoreCase(lane.laneKey, key)) ?? null)
+        .filter(Boolean);
+}
+
+function isAnalysisLaneSelected(snapshot, laneKey) {
+    return getSelectedAnalysisLaneRows(snapshot)
+        .some(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey));
+}
+
+function setSelectedAnalysisLaneKeys(snapshot, laneKeys) {
+    const availableLanes = snapshot?.topLanes ?? [];
+    const nextKeys = [...new Set((laneKeys ?? [])
+        .filter(Boolean)
+        .map(key => String(key)))]
+        .filter(key => availableLanes.some(lane => stringEqualsIgnoreCase(lane.laneKey, key)));
+
+    if (nextKeys.length === 0 && availableLanes.length > 0) {
+        selectedAnalysisLaneKeys = [availableLanes[0].laneKey];
+        return;
+    }
+
+    selectedAnalysisLaneKeys = nextKeys;
+}
+
+function toggleSelectedAnalysisLane(snapshot, laneKey) {
+    if (!laneKey) {
+        return;
+    }
+
+    const currentKeys = getSelectedAnalysisLaneRows(snapshot).map(lane => lane.laneKey);
+    const isSelected = currentKeys.some(key => stringEqualsIgnoreCase(key, laneKey));
+    if (isSelected) {
+        if (currentKeys.length <= 1) {
+            return;
+        }
+
+        setSelectedAnalysisLaneKeys(
+            snapshot,
+            currentKeys.filter(key => !stringEqualsIgnoreCase(key, laneKey)));
+        return;
+    }
+
+    setSelectedAnalysisLaneKeys(snapshot, [...currentKeys, laneKey]);
+}
+
+function buildAnalysisLaneSelectionToggle(lane, isActive) {
+    const inputId = `analysis-lane-toggle-${lane.laneKey}`;
+    return `
+        <label class="comp-helper-favorite ${isActive ? "is-active" : ""}" for="${escapeHtml(inputId)}">
+            <input
+                id="${escapeHtml(inputId)}"
+                type="checkbox"
+                data-analysis-lane-toggle="${escapeHtml(lane.laneKey)}"
+                ${isActive ? "checked" : ""}>
+            <span>${escapeHtml(lane.laneLabel)}</span>
+        </label>
+    `;
+}
+
+function buildCombinedLaneContribution(selectedLaneRows, laneContributions) {
+    if (!selectedLaneRows?.length) {
+        return null;
+    }
+
+    const selectedEntries = selectedLaneRows.map(selectedLane => {
+        const match = getLaneContributionByKey(laneContributions, selectedLane.laneKey);
+        return {
+            selectedLane,
+            lane: match
+        };
+    });
+    const matchedEntries = selectedEntries.filter(entry => entry.lane);
+    const divisor = Math.max(1, selectedEntries.length);
+    const averageMetric = selector => Math.round((selectedEntries
+        .reduce((sum, entry) => sum + Number(entry.lane ? selector(entry.lane) : 0), 0) / divisor) * 10) / 10;
+    const strongestMatch = [...matchedEntries]
+        .sort((left, right) => Number(right.lane?.overallStrengthPercent ?? 0) - Number(left.lane?.overallStrengthPercent ?? 0))[0];
+
+    return {
+        laneKey: selectedLaneRows.map(lane => lane.laneKey).join("+"),
+        laneLabel: selectedLaneRows.map(lane => lane.laneLabel).join(" + "),
+        averageStrengthPercent: averageMetric(lane => lane.averageStrengthPercent),
+        averageSharePercent: averageMetric(lane => lane.averageSharePercent),
+        overallStrengthPercent: averageMetric(lane => lane.overallStrengthPercent),
+        overallSharePercent: averageMetric(lane => lane.overallSharePercent),
+        appearanceRatePercent: averageMetric(lane => lane.appearanceRatePercent),
+        samples: matchedEntries.reduce((sum, entry) => sum + Number(entry.lane?.samples ?? 0), 0),
+        totalSamplesAll: matchedEntries.reduce((sum, entry) => sum + Number(entry.lane?.totalSamplesAll ?? entry.lane?.samples ?? 0), 0),
+        matchedLaneCount: matchedEntries.length,
+        selectedLaneCount: selectedLaneRows.length,
+        coverageRatePercent: Math.round((matchedEntries.length / divisor) * 1000) / 10,
+        strongestLaneLabel: strongestMatch?.lane?.laneLabel ?? null
+    };
+}
+
 function getSelectedAnalysisPlayerImpactValue(player) {
     const laneKey = getSelectedAnalysisPlayerLaneKey();
     if (stringEqualsIgnoreCase(laneKey, "all")) {
@@ -1309,14 +1418,77 @@ function getQualifiedLanePlayers(snapshot, laneKey) {
                 totalFightCount: player.totalFightCountAll ?? player.fightCount,
                 characterName: match.character.characterName,
                 classLabel: match.character.classLabel,
-                lane: match.lane,
+                lane: {
+                    ...match.lane,
+                    matchedLaneCount: 1,
+                    selectedLaneCount: 1,
+                    coverageRatePercent: 100
+                },
                 impactScore: Number(match.lane.overallStrengthPercent ?? 0),
+                rankingScore: Number(match.lane.overallStrengthPercent ?? 0),
                 winRatePercent: Number(match.character.winRatePercent ?? 0),
                 characterFightCount: Number(match.character.totalFightCountAll ?? match.character.fightCount ?? 0)
             };
         })
         .filter(Boolean)
-        .sort((left, right) => Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
+        .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+            || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
+            || Number(right.lane?.totalSamplesAll ?? right.lane?.samples ?? 0) - Number(left.lane?.totalSamplesAll ?? left.lane?.samples ?? 0)
+            || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase()));
+}
+
+function getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows) {
+    return (snapshot.topPlayers ?? [])
+        .filter(player => Number(player.totalFightCountAll ?? player.fightCount ?? 0) >= MINIMUM_PLAYER_TABLE_FIGHTS)
+        .map(player => {
+            const bestCharacter = (player.characters ?? [])
+                .filter(character => Number(character.totalFightCountAll ?? character.fightCount ?? 0) >= 10)
+                .map(character => {
+                    const lane = buildCombinedLaneContribution(selectedLaneRows, character.laneContributions ?? []);
+                    if (!lane || Number(lane.totalSamplesAll ?? 0) < MINIMUM_LANE_FILTER_APPEARANCES) {
+                        return null;
+                    }
+
+                    const rankingScore = Math.round((
+                        Number(lane.overallStrengthPercent ?? 0) * 0.70
+                        + Number(lane.overallSharePercent ?? 0) * 0.20
+                        + Number(lane.coverageRatePercent ?? 0) * 0.10) * 10) / 10;
+
+                    return {
+                        character,
+                        lane,
+                        rankingScore
+                    };
+                })
+                .filter(Boolean)
+                .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+                    || Number(right.lane?.overallStrengthPercent ?? 0) - Number(left.lane?.overallStrengthPercent ?? 0)
+                    || Number(right.lane?.coverageRatePercent ?? 0) - Number(left.lane?.coverageRatePercent ?? 0)
+                    || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
+                    || Number(right.character?.totalFightCountAll ?? right.character?.fightCount ?? 0) - Number(left.character?.totalFightCountAll ?? left.character?.fightCount ?? 0)
+                    || compareFightBrowserValues(String(left.character?.characterName ?? "").toLowerCase(), String(right.character?.characterName ?? "").toLowerCase()))[0];
+
+            if (!bestCharacter) {
+                return null;
+            }
+
+            return {
+                account: player.account,
+                displayName: player.displayName,
+                filteredFightCount: player.fightCount,
+                totalFightCount: player.totalFightCountAll ?? player.fightCount,
+                characterName: bestCharacter.character.characterName,
+                classLabel: bestCharacter.character.classLabel,
+                lane: bestCharacter.lane,
+                impactScore: Number(bestCharacter.lane.overallStrengthPercent ?? 0),
+                rankingScore: Number(bestCharacter.rankingScore ?? 0),
+                winRatePercent: Number(bestCharacter.character.winRatePercent ?? 0),
+                characterFightCount: Number(bestCharacter.character.totalFightCountAll ?? bestCharacter.character.fightCount ?? 0)
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+            || Number(right.lane?.coverageRatePercent ?? 0) - Number(left.lane?.coverageRatePercent ?? 0)
             || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
             || Number(right.lane?.totalSamplesAll ?? right.lane?.samples ?? 0) - Number(left.lane?.totalSamplesAll ?? left.lane?.samples ?? 0)
             || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase()));
@@ -1333,13 +1505,49 @@ function getQualifiedLaneClasses(snapshot, laneKey) {
             return {
                 classLabel: classRow.classLabel,
                 sampleCount: classRow.sampleCount,
-                contributionScore: classRow.contributionScore,
+                impactScore: Number(lane.overallStrengthPercent ?? 0),
+                rankingScore: Number(lane.overallStrengthPercent ?? 0),
+                topPlayerDisplayName: classRow.topPlayerDisplayName,
+                lane: {
+                    ...lane,
+                    matchedLaneCount: 1,
+                    selectedLaneCount: 1,
+                    coverageRatePercent: 100
+                }
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+            || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
+            || Number(right.sampleCount ?? 0) - Number(left.sampleCount ?? 0)
+            || compareFightBrowserValues(String(left.classLabel ?? "").toLowerCase(), String(right.classLabel ?? "").toLowerCase()));
+}
+
+function getQualifiedCombinedLaneClasses(snapshot, selectedLaneRows) {
+    return (snapshot.topClasses ?? [])
+        .map(classRow => {
+            const lane = buildCombinedLaneContribution(selectedLaneRows, classRow.laneContributions ?? []);
+            if (!lane || Number(lane.totalSamplesAll ?? 0) < MINIMUM_LANE_FILTER_APPEARANCES) {
+                return null;
+            }
+
+            const rankingScore = Math.round((
+                Number(lane.overallStrengthPercent ?? 0) * 0.70
+                + Number(lane.overallSharePercent ?? 0) * 0.20
+                + Number(lane.coverageRatePercent ?? 0) * 0.10) * 10) / 10;
+
+            return {
+                classLabel: classRow.classLabel,
+                sampleCount: classRow.sampleCount,
+                impactScore: Number(lane.overallStrengthPercent ?? 0),
+                rankingScore,
                 topPlayerDisplayName: classRow.topPlayerDisplayName,
                 lane
             };
         })
         .filter(Boolean)
-        .sort((left, right) => Number(right.lane?.overallStrengthPercent ?? 0) - Number(left.lane?.overallStrengthPercent ?? 0)
+        .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+            || Number(right.lane?.coverageRatePercent ?? 0) - Number(left.lane?.coverageRatePercent ?? 0)
             || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
             || Number(right.sampleCount ?? 0) - Number(left.sampleCount ?? 0)
             || compareFightBrowserValues(String(left.classLabel ?? "").toLowerCase(), String(right.classLabel ?? "").toLowerCase()));
@@ -2889,20 +3097,24 @@ function renderAnalysisClasses(snapshot) {
 }
 
 function renderAnalysisLanes(snapshot) {
+    const laneSelectionContainer = document.querySelector("#analysis-lane-selection");
+    getSelectedAnalysisLaneRows(snapshot);
     setInnerHtml(
         "#analysis-lanes-body",
         (snapshot.topLanes?.length
             ? snapshot.topLanes.map(buildAnalysisLaneRow).join("")
             : `<tr><td colspan="7">No lane summaries matched the current filters.</td></tr>`));
 
-    if (!snapshot.topLanes?.length) {
-        selectedAnalysisLaneKey = null;
-        renderAnalysisLaneDetail(snapshot);
-        return;
+    if (laneSelectionContainer) {
+        laneSelectionContainer.innerHTML = (snapshot.topLanes?.length ?? 0) > 0
+            ? snapshot.topLanes.map(lane => buildAnalysisLaneSelectionToggle(lane, isAnalysisLaneSelected(snapshot, lane.laneKey))).join("")
+            : `<span class="table-inline-note">No lane toggles are available for this selection.</span>`;
     }
 
-    if (!snapshot.topLanes.some(lane => stringEqualsIgnoreCase(lane.laneKey, selectedAnalysisLaneKey))) {
-        selectedAnalysisLaneKey = snapshot.topLanes[0].laneKey;
+    if (!snapshot.topLanes?.length) {
+        selectedAnalysisLaneKeys = [];
+        renderAnalysisLaneDetail(snapshot);
+        return;
     }
 
     setInnerHtml(
@@ -2913,7 +3125,7 @@ function renderAnalysisLanes(snapshot) {
 
 function buildAnalysisLaneRow(lane) {
     const rowClasses = ["is-clickable"];
-    if (stringEqualsIgnoreCase(lane.laneKey, selectedAnalysisLaneKey)) {
+    if ((selectedAnalysisLaneKeys ?? []).some(key => stringEqualsIgnoreCase(key, lane.laneKey))) {
         rowClasses.push("is-selected");
     }
 
@@ -2955,6 +3167,12 @@ function buildLaneDetailPlayerRow(player) {
     const playerNote = player.displayName && !stringEqualsIgnoreCase(player.displayName, player.account)
         ? `Most-played character: ${player.displayName}`
         : null;
+    const laneCoverageNote = Number(player.lane?.selectedLaneCount ?? 1) > 1
+        ? `${player.lane.matchedLaneCount}/${player.lane.selectedLaneCount} lanes | ${formatPercent(player.lane.overallSharePercent)} overall share`
+        : `${formatPercent(player.lane.overallSharePercent)} overall share`;
+    const laneFitNote = Number(player.lane?.selectedLaneCount ?? 1) > 1
+        ? `${formatPercent(player.lane.appearanceRatePercent)} avg appearance | ${formatPercent(player.lane.coverageRatePercent)} lane coverage`
+        : `${formatPercent(player.lane.appearanceRatePercent)} appearance | ${player.lane.rateBand ?? "Unrated"}`;
 
     return `
         <tr>
@@ -2974,16 +3192,23 @@ function buildLaneDetailPlayerRow(player) {
             <td>${escapeHtml(formatPercent(player.winRatePercent))}</td>
             <td>
                 <div class="table-stack">
-                    <strong>${escapeHtml(formatPercent(player.impactScore))}</strong>
-                    <span class="table-inline-note">${escapeHtml(`${formatPercent(player.lane.overallSharePercent)} overall share`)}</span>
+                    <strong>${escapeHtml(formatPercent(player.rankingScore ?? player.impactScore))}</strong>
+                    <span class="table-inline-note">${escapeHtml(laneCoverageNote)}</span>
                 </div>
             </td>
-            <td>${escapeHtml(`${formatPercent(player.lane.appearanceRatePercent)} appearance | ${player.lane.rateBand ?? "Unrated"}`)}</td>
+            <td>${escapeHtml(laneFitNote)}</td>
         </tr>
     `;
 }
 
 function buildLaneDetailClassRow(classRow) {
+    const laneFitNote = Number(classRow.lane?.selectedLaneCount ?? 1) > 1
+        ? `${formatPercent(classRow.lane.appearanceRatePercent)} avg appearance | ${formatPercent(classRow.lane.coverageRatePercent)} lane coverage`
+        : `${formatPercent(classRow.lane.appearanceRatePercent)} appearance | ${formatPercent(classRow.lane.overallSharePercent)} overall share`;
+    const impactNote = Number(classRow.lane?.selectedLaneCount ?? 1) > 1
+        ? `${formatPercent(classRow.lane.overallSharePercent)} overall share | ${classRow.lane.matchedLaneCount}/${classRow.lane.selectedLaneCount} lanes`
+        : `${formatPercent(classRow.lane.overallSharePercent)} overall share`;
+
     return `
         <tr>
             <td><strong>${escapeHtml(classRow.classLabel)}</strong></td>
@@ -2993,9 +3218,14 @@ function buildLaneDetailClassRow(classRow) {
                     <span class="table-inline-note">${escapeHtml("Qualified class samples")}</span>
                 </div>
             </td>
-            <td>${escapeHtml(formatNumber(classRow.contributionScore, 1))}</td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(formatPercent(classRow.rankingScore ?? classRow.impactScore))}</strong>
+                    <span class="table-inline-note">${escapeHtml(impactNote)}</span>
+                </div>
+            </td>
             <td>${escapeHtml(formatPercent(classRow.lane.overallStrengthPercent))}</td>
-            <td>${escapeHtml(`${formatPercent(classRow.lane.appearanceRatePercent)} appearance | ${formatPercent(classRow.lane.overallSharePercent)} overall share`)}</td>
+            <td>${escapeHtml(laneFitNote)}</td>
             <td>${escapeHtml(classRow.topPlayerDisplayName ?? "-")}</td>
         </tr>
     `;
@@ -3003,43 +3233,61 @@ function buildLaneDetailClassRow(classRow) {
 
 function renderAnalysisLaneDetail(snapshot) {
     const container = document.querySelector("#analysis-lane-detail");
-    if (!selectedAnalysisLaneKey) {
+    const selectedLaneRows = getSelectedAnalysisLaneRows(snapshot);
+    if (selectedLaneRows.length === 0) {
         container.innerHTML = "";
         return;
     }
 
-    const laneRow = (snapshot.topLanes ?? []).find(lane => stringEqualsIgnoreCase(lane.laneKey, selectedAnalysisLaneKey));
-    if (!laneRow) {
-        container.innerHTML = "";
-        return;
-    }
-
-    const lanePlayers = getQualifiedLanePlayers(snapshot, selectedAnalysisLaneKey);
-    const laneClasses = getQualifiedLaneClasses(snapshot, selectedAnalysisLaneKey);
+    const laneLabel = selectedLaneRows.map(lane => lane.laneLabel).join(" + ");
+    const isCombinedLaneView = selectedLaneRows.length > 1;
+    const combinedLane = {
+        laneLabel,
+        samples: selectedLaneRows.reduce((sum, lane) => sum + Number(lane.samples ?? 0), 0),
+        averageStrengthPercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.averageStrengthPercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
+        appearanceRatePercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.appearanceRatePercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
+        averageSharePercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.averageSharePercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
+        evidenceLine: isCombinedLaneView
+            ? "Selected lanes are scored together; missing lanes count against the combined fit so balanced cards rise."
+            : selectedLaneRows[0].evidenceLine
+    };
+    const lanePlayers = isCombinedLaneView
+        ? getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows)
+        : getQualifiedLanePlayers(snapshot, selectedLaneRows[0].laneKey);
+    const laneClasses = isCombinedLaneView
+        ? getQualifiedCombinedLaneClasses(snapshot, selectedLaneRows)
+        : getQualifiedLaneClasses(snapshot, selectedLaneRows[0].laneKey);
+    const laneThresholdCopy = isCombinedLaneView
+        ? `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total appearances across the selected lanes. Best classes come from the qualified class list and are scored on the selected lanes together.`
+        : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneRows[0].laneLabel} appearances. Best classes come from the qualified class list.`;
+    const laneProfileCopy = isCombinedLaneView
+        ? `${formatPercent(combinedLane.averageSharePercent)} average share across the selected lanes.`
+        : `${formatPercent(combinedLane.averageSharePercent)} average share across retained lane samples.`;
 
     container.className = "analysis-player-detail";
     container.innerHTML = `
         <div class="section-heading">
             <div>
-                <h3>${escapeHtml(laneRow.laneLabel)}</h3>
-                <p>${escapeHtml(`Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${laneRow.laneLabel} appearances. Best classes come from the qualified class list.`)}</p>
+                <h3>${escapeHtml(laneLabel)}</h3>
+                <p>${escapeHtml(laneThresholdCopy)}</p>
             </div>
         </div>
         <div class="analysis-character-grid">
             <article class="analysis-character-card">
                 <div class="analysis-character-header">
                     <div>
-                        <strong>${escapeHtml(laneRow.laneLabel)}</strong>
-                        <div class="table-inline-note">Lane profile across the current analysis filter</div>
+                        <strong>${escapeHtml(laneLabel)}</strong>
+                        <div class="table-inline-note">${escapeHtml(isCombinedLaneView ? "Combined lane profile across the current analysis filter" : "Lane profile across the current analysis filter")}</div>
                     </div>
                     <div class="analysis-character-meta">
-                        <span class="analysis-character-pill">${escapeHtml(`${laneRow.samples} samples`)}</span>
-                        <span class="analysis-character-pill">${escapeHtml(`${formatPercent(laneRow.averageStrengthPercent)} strength`)}</span>
-                        <span class="analysis-character-pill">${escapeHtml(`${formatPercent(laneRow.appearanceRatePercent)} fight coverage`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`${combinedLane.samples} samples`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`${formatPercent(combinedLane.averageStrengthPercent)} strength`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`${formatPercent(combinedLane.appearanceRatePercent)} fight coverage`)}</span>
+                        ${isCombinedLaneView ? `<span class="analysis-character-pill">${escapeHtml(`${selectedLaneRows.length} lanes selected`)}</span>` : ""}
                     </div>
                 </div>
-                <p class="analysis-character-copy">${escapeHtml(`${formatPercent(laneRow.averageSharePercent)} average share across retained lane samples.`)}</p>
-                <p class="table-inline-note">${escapeHtml(laneRow.evidenceLine ?? "No extra lane evidence was retained for this lane.")}</p>
+                <p class="analysis-character-copy">${escapeHtml(laneProfileCopy)}</p>
+                <p class="table-inline-note">${escapeHtml(combinedLane.evidenceLine ?? "No extra lane evidence was retained for this lane.")}</p>
             </article>
         </div>
         <div class="analysis-tabs" role="tablist" aria-label="Lane detail sections">
@@ -3923,6 +4171,7 @@ async function refreshAnalysis() {
         setInnerHtml("#analysis-player-detail", "");
         setInnerHtml("#analysis-classes-body", `<tr><td colspan="9">Analysis data could not be loaded.</td></tr>`);
         setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">Analysis data could not be loaded.</td></tr>`);
+        setInnerHtml("#analysis-lane-selection", "");
         setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">Analysis data could not be loaded.</td></tr>`);
         setInnerHtml("#analysis-boon-detail", "");
         document.querySelector("#analysis-comp-helper-summary").textContent = "Analysis data could not be loaded.";
@@ -4169,10 +4418,19 @@ document.querySelector("#analysis-lanes-body").addEventListener("click", event =
         return;
     }
 
-    selectedAnalysisLaneKey = row.dataset.laneKey ?? null;
+    setSelectedAnalysisLaneKeys(currentAnalysisSnapshot, [row.dataset.laneKey ?? null]);
     if (currentAnalysisSnapshot) {
         renderAnalysisLanes(currentAnalysisSnapshot);
     }
+});
+document.querySelector("#analysis-lane-selection").addEventListener("change", event => {
+    const input = event.target.closest("[data-analysis-lane-toggle]");
+    if (!input || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    toggleSelectedAnalysisLane(currentAnalysisSnapshot, input.dataset.analysisLaneToggle);
+    renderAnalysisLanes(currentAnalysisSnapshot);
 });
 document.querySelector("#analysis-boons-body").addEventListener("click", event => {
     const row = event.target.closest("tr[data-boon-id]");
