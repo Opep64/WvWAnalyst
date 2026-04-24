@@ -196,6 +196,59 @@ function buildStatPairsHtml(items, fallback = "No side summary is stored for thi
         .join("");
 }
 
+function buildDossierClassListHtml(items, fallback = "No enemy class summary is stored for this fight yet.") {
+    const filtered = (items ?? []).filter(item => item?.classLabel && item?.count > 0);
+    if (filtered.length === 0) {
+        return `<p class="dossier-empty-note">${escapeHtml(fallback)}</p>`;
+    }
+
+    return `
+        <div class="dossier-class-list">
+            ${filtered.map(item => `
+                <div class="dossier-class-row">
+                    ${item.icon
+                        ? `<img class="dossier-class-icon" src="${escapeHtml(item.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+                        : `<span class="dossier-class-icon" aria-hidden="true"></span>`}
+                    <span class="dossier-class-name">${escapeHtml(item.classLabel)}</span>
+                    <span class="dossier-class-count">x${escapeHtml(formatNumber(item.count))}</span>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function buildDossierFactListHtml(items, fallback = "Nothing recorded.") {
+    const filtered = (items ?? []).filter(Boolean);
+    if (filtered.length === 0) {
+        return `<p class="dossier-empty-note">${escapeHtml(fallback)}</p>`;
+    }
+
+    return `
+        <div class="dossier-fact-list">
+            ${filtered.map(item => {
+                const text = String(item ?? "").trim();
+                const separatorIndex = text.indexOf(": ");
+                if (separatorIndex > 0 && separatorIndex < 40) {
+                    const label = text.slice(0, separatorIndex);
+                    const value = text.slice(separatorIndex + 2);
+                    return `
+                        <div class="dossier-fact-row">
+                            <span class="dossier-fact-label">${escapeHtml(label)}</span>
+                            <span class="dossier-fact-value">${escapeHtml(value)}</span>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="dossier-fact-row dossier-fact-row-full">
+                        <span class="dossier-fact-value">${escapeHtml(text)}</span>
+                    </div>
+                `;
+            }).join("")}
+        </div>
+    `;
+}
+
 function buildScoreboardRow(label, squadValue, enemyValue) {
     return `
         <tr>
@@ -505,6 +558,22 @@ async function loadAnalysis(filters = {}) {
     if (filters.outcome && filters.outcome !== "all") {
         params.set("outcome", filters.outcome);
     }
+    const squadIncludeClasses = joinClassFilterLabels(filters.squadIncludeClasses);
+    const squadExcludeClasses = joinClassFilterLabels(filters.squadExcludeClasses);
+    const enemyIncludeClasses = joinClassFilterLabels(filters.enemyIncludeClasses);
+    const enemyExcludeClasses = joinClassFilterLabels(filters.enemyExcludeClasses);
+    if (squadIncludeClasses) {
+        params.set("squadIncludeClasses", squadIncludeClasses);
+    }
+    if (squadExcludeClasses) {
+        params.set("squadExcludeClasses", squadExcludeClasses);
+    }
+    if (enemyIncludeClasses) {
+        params.set("enemyIncludeClasses", enemyIncludeClasses);
+    }
+    if (enemyExcludeClasses) {
+        params.set("enemyExcludeClasses", enemyExcludeClasses);
+    }
 
     const query = params.toString();
     const response = await fetch(`/api/analysis${query ? `?${query}` : ""}`);
@@ -615,6 +684,210 @@ function getExecutionScoreLabel(fight) {
         : String(execution.overallScore);
 }
 
+function normalizeClassFilterLabels(values) {
+    const rawValues = Array.isArray(values)
+        ? values
+        : String(values ?? "").split(/[,\n;\r]+/);
+
+    return [...new Set(rawValues
+        .map(label => String(label ?? "").trim())
+        .filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+}
+
+function joinClassFilterLabels(labels) {
+    return normalizeClassFilterLabels(labels).join(", ");
+}
+
+function buildFightPlayerClassLabel(player) {
+    return String(player?.eliteSpec ?? player?.profession ?? "").trim();
+}
+
+function getClassFilterEmptySummary(selector) {
+    return selector.includes("lacks")
+        ? "None excluded"
+        : "Any class";
+}
+
+function buildClassFilterSummaryText(selector, values) {
+    const labels = normalizeClassFilterLabels(values);
+    if (labels.length === 0) {
+        return getClassFilterEmptySummary(selector);
+    }
+
+    if (labels.length <= 2) {
+        return labels.join(", ");
+    }
+
+    return `${labels[0]}, ${labels[1]} +${labels.length - 2} more`;
+}
+
+function updateClassFilterGroupSummary(selector, values = null) {
+    const summary = document.querySelector(`${selector}-summary`);
+    if (!summary) {
+        return;
+    }
+
+    const selectedValues = values ?? getSelectedClassFilterValues(selector);
+    summary.textContent = buildClassFilterSummaryText(selector, selectedValues);
+}
+
+function getSelectedClassFilterValues(selector) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return [];
+    }
+
+    return normalizeClassFilterLabels(Array.from(container.querySelectorAll("input[type='checkbox']:checked"))
+        .map(input => input.value));
+}
+
+function setSelectedClassFilterValues(selector, values) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return;
+    }
+
+    const selectedValues = new Set(normalizeClassFilterLabels(values)
+        .map(label => label.toLocaleLowerCase()));
+
+    container.querySelectorAll("input[type='checkbox']").forEach(input => {
+        input.checked = selectedValues.has(String(input.value ?? "").trim().toLocaleLowerCase());
+    });
+
+    updateClassFilterGroupSummary(selector, values);
+}
+
+function clearSelectedClassFilterValues(selector) {
+    setSelectedClassFilterValues(selector, []);
+}
+
+function getFightSideClassLabels(fight, sideKey) {
+    const fightIndex = fight?.fightIndex ?? {};
+    const side = stringEqualsIgnoreCase(sideKey, "enemy")
+        ? fightIndex.enemySide
+        : fightIndex.squadSide;
+    const retainedLabels = [...new Set((side?.classes ?? [])
+        .map(entry => String(entry?.classLabel ?? "").trim())
+        .filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+
+    if (retainedLabels.length > 0) {
+        return { labels: retainedLabels, hasData: true };
+    }
+
+    if (!stringEqualsIgnoreCase(sideKey, "enemy")) {
+        const fallbackLabels = [...new Set((fightIndex.players ?? [])
+            .map(buildFightPlayerClassLabel)
+            .filter(Boolean))]
+            .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+
+        if (fallbackLabels.length > 0) {
+            return { labels: fallbackLabels, hasData: true };
+        }
+    }
+
+    return { labels: [], hasData: false };
+}
+
+function collectClassOptionsFromFights(fights) {
+    return [...new Set((fights ?? [])
+        .flatMap(fight => [
+            ...getFightSideClassLabels(fight, "squad").labels,
+            ...getFightSideClassLabels(fight, "enemy").labels
+        ])
+        .filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+}
+
+function renderClassFilterGroup(selector, options, selectedValues) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return;
+    }
+
+    const normalizedOptions = normalizeClassFilterLabels(options);
+    const selected = new Set(normalizeClassFilterLabels(selectedValues)
+        .map(label => label.toLocaleLowerCase()));
+
+    if (normalizedOptions.length === 0) {
+        container.innerHTML = `<p class="class-filter-empty">No retained class data is available yet.</p>`;
+        updateClassFilterGroupSummary(selector, ["No class data"]);
+        return;
+    }
+
+    container.innerHTML = normalizedOptions
+        .map((option, index) => `
+            <label class="class-filter-option" for="${escapeHtml(`${selector.slice(1)}-${index}`)}">
+                <input id="${escapeHtml(`${selector.slice(1)}-${index}`)}" type="checkbox" value="${escapeHtml(option)}" ${selected.has(option.toLocaleLowerCase()) ? "checked" : ""}>
+                <span>${escapeHtml(option)}</span>
+            </label>
+        `)
+        .join("");
+
+    updateClassFilterGroupSummary(selector, selectedValues);
+}
+
+function getFightBrowserClassFiltersFromUi() {
+    return {
+        squadIncludeClasses: getSelectedClassFilterValues("#fight-browser-squad-has"),
+        squadExcludeClasses: getSelectedClassFilterValues("#fight-browser-squad-lacks"),
+        enemyIncludeClasses: getSelectedClassFilterValues("#fight-browser-enemy-has"),
+        enemyExcludeClasses: getSelectedClassFilterValues("#fight-browser-enemy-lacks")
+    };
+}
+
+function renderFightBrowserClassFilters(options, selectedFilters) {
+    renderClassFilterGroup("#fight-browser-squad-has", options, selectedFilters?.squadIncludeClasses ?? []);
+    renderClassFilterGroup("#fight-browser-squad-lacks", options, selectedFilters?.squadExcludeClasses ?? []);
+    renderClassFilterGroup("#fight-browser-enemy-has", options, selectedFilters?.enemyIncludeClasses ?? []);
+    renderClassFilterGroup("#fight-browser-enemy-lacks", options, selectedFilters?.enemyExcludeClasses ?? []);
+}
+
+function renderAnalysisClassFilters(options, selectedFilters) {
+    renderClassFilterGroup("#analysis-squad-has", options, selectedFilters?.squadIncludeClasses ?? []);
+    renderClassFilterGroup("#analysis-squad-lacks", options, selectedFilters?.squadExcludeClasses ?? []);
+    renderClassFilterGroup("#analysis-enemy-has", options, selectedFilters?.enemyIncludeClasses ?? []);
+    renderClassFilterGroup("#analysis-enemy-lacks", options, selectedFilters?.enemyExcludeClasses ?? []);
+}
+
+function clearFightBrowserClassFilters() {
+    clearSelectedClassFilterValues("#fight-browser-squad-has");
+    clearSelectedClassFilterValues("#fight-browser-squad-lacks");
+    clearSelectedClassFilterValues("#fight-browser-enemy-has");
+    clearSelectedClassFilterValues("#fight-browser-enemy-lacks");
+}
+
+function clearAnalysisClassFilters() {
+    clearSelectedClassFilterValues("#analysis-squad-has");
+    clearSelectedClassFilterValues("#analysis-squad-lacks");
+    clearSelectedClassFilterValues("#analysis-enemy-has");
+    clearSelectedClassFilterValues("#analysis-enemy-lacks");
+}
+
+function matchesFightSideClassFilters(fight, sideKey, requiredClasses, excludedClasses) {
+    if ((requiredClasses?.length ?? 0) === 0 && (excludedClasses?.length ?? 0) === 0) {
+        return true;
+    }
+
+    const { labels, hasData } = getFightSideClassLabels(fight, sideKey);
+    if (!hasData) {
+        return false;
+    }
+
+    if ((requiredClasses ?? []).some(required =>
+        !labels.some(label => stringEqualsIgnoreCase(label, required)))) {
+        return false;
+    }
+
+    if ((excludedClasses ?? []).some(excluded =>
+        labels.some(label => stringEqualsIgnoreCase(label, excluded)))) {
+        return false;
+    }
+
+    return true;
+}
+
 function getFightSearchText(fight) {
     const fightIndex = fight.fightIndex;
     return [
@@ -638,6 +911,8 @@ function getFightSearchText(fight) {
         fightIndex?.execution?.detail,
         fightIndex?.execution?.strongestPillarLabel,
         fightIndex?.execution?.weakestPillarLabel,
+        ...getFightSideClassLabels(fight, "squad").labels,
+        ...getFightSideClassLabels(fight, "enemy").labels,
         ...(fightIndex?.commanderDisplayNames ?? []),
         ...(fightIndex?.activeExtensions ?? [])
     ]
@@ -855,7 +1130,11 @@ function getAnalysisFiltersFromUi() {
         commander: document.querySelector("#analysis-commander").value || "",
         startDate: document.querySelector("#analysis-start-date").value || "",
         endDate: document.querySelector("#analysis-end-date").value || "",
-        outcome: document.querySelector("#analysis-outcome").value || "all"
+        outcome: document.querySelector("#analysis-outcome").value || "all",
+        squadIncludeClasses: getSelectedClassFilterValues("#analysis-squad-has"),
+        squadExcludeClasses: getSelectedClassFilterValues("#analysis-squad-lacks"),
+        enemyIncludeClasses: getSelectedClassFilterValues("#analysis-enemy-has"),
+        enemyExcludeClasses: getSelectedClassFilterValues("#analysis-enemy-lacks")
     };
 }
 
@@ -888,6 +1167,12 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
     }
 
     outcomeSelect.value = snapshot.selection?.outcomeCode ?? "all";
+    renderAnalysisClassFilters(snapshot.options?.classOptions ?? [], {
+        squadIncludeClasses: snapshot.selection?.squadIncludeClasses ?? [],
+        squadExcludeClasses: snapshot.selection?.squadExcludeClasses ?? [],
+        enemyIncludeClasses: snapshot.selection?.enemyIncludeClasses ?? [],
+        enemyExcludeClasses: snapshot.selection?.enemyExcludeClasses ?? []
+    });
 }
 
 function buildAnalysisOverviewCards(snapshot) {
@@ -3521,7 +3806,19 @@ function renderAnalysis(snapshot) {
             snapshot.selection.endDate ? `End: ${snapshot.selection.endDate}` : "End: latest",
             snapshot.selection.outcomeCode && snapshot.selection.outcomeCode !== "all"
                 ? `Outcome filter: ${snapshot.selection.outcomeCode}`
-                : "Outcome filter: all"
+                : "Outcome filter: all",
+            (snapshot.selection?.squadIncludeClasses?.length ?? 0) > 0
+                ? `Our side has: ${joinClassFilterLabels(snapshot.selection.squadIncludeClasses)}`
+                : "Our side has: any",
+            (snapshot.selection?.squadExcludeClasses?.length ?? 0) > 0
+                ? `Our side lacks: ${joinClassFilterLabels(snapshot.selection.squadExcludeClasses)}`
+                : "Our side lacks: none",
+            (snapshot.selection?.enemyIncludeClasses?.length ?? 0) > 0
+                ? `Enemy has: ${joinClassFilterLabels(snapshot.selection.enemyIncludeClasses)}`
+                : "Enemy has: any",
+            (snapshot.selection?.enemyExcludeClasses?.length ?? 0) > 0
+                ? `Enemy lacks: ${joinClassFilterLabels(snapshot.selection.enemyExcludeClasses)}`
+                : "Enemy lacks: none"
         ]));
 
     renderAnalysisPlayers(snapshot);
@@ -3585,6 +3882,7 @@ function renderRecentParses(snapshot, selectedFightId) {
 function applyFightBrowserFilters(snapshot) {
     const searchValue = document.querySelector("#fight-browser-search").value.trim().toLowerCase();
     const outcomeValue = document.querySelector("#fight-browser-outcome").value;
+    const classFilters = getFightBrowserClassFiltersFromUi();
 
     let fights = snapshot.fightBrowser.fights;
 
@@ -3595,6 +3893,10 @@ function applyFightBrowserFilters(snapshot) {
     if (outcomeValue !== "all") {
         fights = fights.filter(fight => getOutcomeCode(fight) === outcomeValue);
     }
+
+    fights = fights
+        .filter(fight => matchesFightSideClassFilters(fight, "squad", classFilters.squadIncludeClasses, classFilters.squadExcludeClasses))
+        .filter(fight => matchesFightSideClassFilters(fight, "enemy", classFilters.enemyIncludeClasses, classFilters.enemyExcludeClasses));
 
     return sortFights(fights);
 }
@@ -3694,6 +3996,9 @@ function renderFightBrowserTopBursts(filteredFights) {
 function renderFightBrowser(snapshot, selectedFightId) {
     const summary = document.querySelector("#fight-browser-summary");
     const body = document.querySelector("#fight-browser-body");
+    renderFightBrowserClassFilters(
+        collectClassOptionsFromFights(snapshot.fightBrowser.fights),
+        getFightBrowserClassFiltersFromUi());
     const filteredFights = applyFightBrowserFilters(snapshot);
     updateFightBrowserSortHeaders();
     renderFightBrowserTopBursts(filteredFights);
@@ -3896,15 +4201,15 @@ function renderFightDossier(detail) {
             </tr>
         `;
 
-    setInnerHtml("#dossier-context-list", buildTagListHtml(overviewItems));
-    setInnerHtml("#dossier-participants-list", buildTagListHtml(participantItems));
-    setInnerHtml("#dossier-outcome-list", buildTagListHtml(outcomeItems, "No outcome detail is stored for this fight yet."));
-    setInnerHtml("#dossier-execution-list", buildTagListHtml(executionItems));
-    setInnerHtml("#dossier-confidence-list", buildTagListHtml(confidenceItems));
-    setInnerHtml("#dossier-commander-focus-list", buildTagListHtml(commanderFocusItems));
-    setInnerHtml("#dossier-parser-list", buildTagListHtml(parserItems));
-    setInnerHtml("#dossier-commanders-list", buildTagListHtml(commanders));
-    setInnerHtml("#dossier-extensions-list", buildTagListHtml(extensions));
+    setInnerHtml("#dossier-context-list", buildDossierFactListHtml(overviewItems));
+    setInnerHtml("#dossier-participants-list", buildDossierFactListHtml(participantItems));
+    setInnerHtml("#dossier-outcome-list", buildDossierFactListHtml(outcomeItems, "No outcome detail is stored for this fight yet."));
+    setInnerHtml("#dossier-execution-list", buildDossierFactListHtml(executionItems));
+    setInnerHtml("#dossier-confidence-list", buildDossierFactListHtml(confidenceItems));
+    setInnerHtml("#dossier-commander-focus-list", buildDossierFactListHtml(commanderFocusItems));
+    setInnerHtml("#dossier-parser-list", buildDossierFactListHtml(parserItems));
+    setInnerHtml("#dossier-commanders-list", buildDossierFactListHtml(commanders));
+    setInnerHtml("#dossier-extensions-list", buildDossierFactListHtml(extensions));
 
     setInnerHtml("#dossier-artifact-links", [
         buildActionLink(detail.artifactLinks.parserConsoleLogUrl, "Parser log"),
@@ -3917,6 +4222,7 @@ function renderFightDossier(detail) {
     document.querySelector("#dossier-enemy-title").textContent = enemySide?.displayLabel ?? "Enemy Team";
     setInnerHtml("#dossier-squad-stats", buildStatPairsHtml(squadStats));
     setInnerHtml("#dossier-enemy-stats", buildStatPairsHtml(enemyStats));
+    setInnerHtml("#dossier-enemy-classes", buildDossierClassListHtml(enemySide?.classes ?? []));
     setInnerHtml(
         "#dossier-scoreboard-body",
         scoreboardRows || `
@@ -3942,6 +4248,7 @@ function clearFightDossier() {
     setInnerHtml("#dossier-pillar-grid", "");
     setInnerHtml("#dossier-player-body", "");
     setInnerHtml("#dossier-commander-focus-list", "");
+    setInnerHtml("#dossier-enemy-classes", "");
 }
 
 function renderFightDossierError(fightId, error) {
@@ -3960,6 +4267,7 @@ function renderFightDossierError(fightId, error) {
     setInnerHtml("#dossier-artifact-links", "");
     setInnerHtml("#dossier-squad-stats", "");
     setInnerHtml("#dossier-enemy-stats", "");
+    setInnerHtml("#dossier-enemy-classes", "");
     setInnerHtml("#dossier-scoreboard-body", "");
     setInnerHtml("#dossier-pillar-grid", "");
     setInnerHtml("#dossier-player-body", "");
@@ -4315,7 +4623,40 @@ document.querySelector("#batch-results-show-all").addEventListener("change", () 
 document.querySelector("#batch-results-show-excluded").addEventListener("change", () => renderBatchResults(lastBatchResult));
 document.querySelector("#fight-browser-search").addEventListener("input", handleFightBrowserChange);
 document.querySelector("#fight-browser-outcome").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-class-filters").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-class-filters").addEventListener("click", event => {
+    const button = event.target.closest("[data-class-filter-clear]");
+    if (!button) {
+        return;
+    }
+
+    clearSelectedClassFilterValues(`#${button.dataset.classFilterClear}`);
+    handleFightBrowserChange();
+});
+document.querySelector("#fight-browser-clear-class-filters").addEventListener("click", () => {
+    clearFightBrowserClassFilters();
+    handleFightBrowserChange();
+});
+document.querySelector("#analysis-class-filters").addEventListener("change", event => {
+    const box = event.target.closest(".class-filter-box");
+    if (!box) {
+        return;
+    }
+
+    updateClassFilterGroupSummary(`#${box.id}`);
+});
 document.querySelector("#fight-browser-top-bursts-toggle").addEventListener("click", toggleFightBrowserTopBursts);
+document.querySelector("#analysis-class-filters").addEventListener("click", event => {
+    const button = event.target.closest("[data-class-filter-clear]");
+    if (!button) {
+        return;
+    }
+
+    clearSelectedClassFilterValues(`#${button.dataset.classFilterClear}`);
+});
+document.querySelector("#analysis-clear-class-filters").addEventListener("click", () => {
+    clearAnalysisClassFilters();
+});
 document.querySelector("#analysis-player-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);

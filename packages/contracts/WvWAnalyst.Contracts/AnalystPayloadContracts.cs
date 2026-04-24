@@ -104,7 +104,18 @@ public sealed class WvWAnalystSideDto
 
     public WvWAnalystCommanderDto Commander { get; set; } = new();
 
+    public IReadOnlyList<WvWAnalystSideClassSummaryDto> Classes { get; set; } = Array.Empty<WvWAnalystSideClassSummaryDto>();
+
     public WvWAnalystSideTotalsDto Totals { get; set; } = new();
+}
+
+public sealed class WvWAnalystSideClassSummaryDto
+{
+    public string ClassLabel { get; set; } = string.Empty;
+
+    public string Icon { get; set; } = string.Empty;
+
+    public int Count { get; set; }
 }
 
 public sealed class WvWAnalystCommanderDto

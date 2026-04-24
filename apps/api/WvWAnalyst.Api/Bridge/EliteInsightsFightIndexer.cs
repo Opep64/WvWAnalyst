@@ -53,6 +53,9 @@ public sealed class EliteInsightsFightIndexer
             var commanderDisplayNames = BuildCommanderDisplayNames(payload);
             var outcome = BuildOutcomeFromAnalystPayload(payload);
             var execution = BuildExecutionFromAnalystPayload(payload);
+            var players = BuildPlayersFromAnalystPayload(payload.Players);
+            var squadSide = BuildSideFromAnalystPayload(squad, players);
+            var enemySide = BuildSideFromAnalystPayload(enemy);
 
             return new FightIndexDto(
                 FightName: fightName,
@@ -65,14 +68,14 @@ public sealed class EliteInsightsFightIndexer
                 DetailedWvW: string.Equals(payload.Fight.Mode, "wvw_detailed", StringComparison.OrdinalIgnoreCase),
                 Success: string.Equals(outcome.OutcomeCode, "squad", StringComparison.OrdinalIgnoreCase),
                 Outcome: outcome,
-                SquadSide: BuildSideFromAnalystPayload(squad),
-                EnemySide: BuildSideFromAnalystPayload(enemy),
+                SquadSide: squadSide,
+                EnemySide: enemySide,
                 CommanderSummary: BuildCommanderSummaryFromAnalystPayload(payload.CommanderSummary),
                 DefenseSaves: BuildDefenseSavesFromAnalystPayload(payload.DefenseSaves),
                 Obliterate: BuildObliterateFromAnalystPayload(payload.Obliterate),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
                 TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
-                Players: BuildPlayersFromAnalystPayload(payload.Players),
+                Players: players,
                 Execution: execution,
                 Duration: BuildDurationLabel(payload.Fight.DurationMs),
                 DurationMilliseconds: payload.Fight.DurationMs,
@@ -300,12 +303,16 @@ public sealed class EliteInsightsFightIndexer
             Detail: detail);
     }
 
-    private static FightSideIndexDto? BuildSideFromAnalystPayload(WvWAnalystSideDto? side)
+    private static FightSideIndexDto? BuildSideFromAnalystPayload(
+        WvWAnalystSideDto? side,
+        IReadOnlyList<FightPlayerIndexDto>? fallbackPlayers = null)
     {
         if (side is null)
         {
             return null;
         }
+
+        var classes = BuildSideClassesFromAnalystPayload(side.Classes, fallbackPlayers);
 
         return new FightSideIndexDto(
             SideId: NullIfWhiteSpace(side.SideId) ?? string.Empty,
@@ -325,7 +332,42 @@ public sealed class EliteInsightsFightIndexer
             Strips: side.Totals?.Strips ?? 0,
             ReceivedCrowdControl: side.Totals?.ReceivedCrowdControl ?? 0,
             StripsPerMinute: side.Totals?.StripsPerMinute ?? 0,
-            CleansesPerMinute: side.Totals?.CleansesPerMinute ?? 0);
+            CleansesPerMinute: side.Totals?.CleansesPerMinute ?? 0,
+            Classes: classes);
+    }
+
+    private static IReadOnlyList<FightSideClassIndexDto> BuildSideClassesFromAnalystPayload(
+        IReadOnlyList<WvWAnalystSideClassSummaryDto>? classes,
+        IReadOnlyList<FightPlayerIndexDto>? fallbackPlayers = null)
+    {
+        var sideClasses = (classes ?? Array.Empty<WvWAnalystSideClassSummaryDto>())
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ClassLabel))
+            .GroupBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightSideClassIndexDto(
+                ClassLabel: group.First().ClassLabel.Trim(),
+                Icon: group.Select(entry => NullIfWhiteSpace(entry.Icon)).FirstOrDefault(icon => icon is not null),
+                Count: group.Sum(entry => Math.Max(0, entry.Count))))
+            .OrderByDescending(entry => entry.Count)
+            .ThenBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (sideClasses.Length > 0 || fallbackPlayers is null || fallbackPlayers.Count == 0)
+        {
+            return sideClasses;
+        }
+
+        return fallbackPlayers
+            .Select(BuildPlayerClassLabel)
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Select(label => label!)
+            .GroupBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightSideClassIndexDto(
+                ClassLabel: group.First(),
+                Icon: null,
+                Count: group.Count()))
+            .OrderByDescending(entry => entry.Count)
+            .ThenBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static FightCommanderIndexDto? BuildCommanderSummaryFromAnalystPayload(WvWAnalystCommanderSummaryDto? summary)
@@ -508,6 +550,13 @@ public sealed class EliteInsightsFightIndexer
                     .ToArray()
                     ?? Array.Empty<FightPlayerProvidedBoonIndexDto>()))
             .ToArray();
+    }
+
+    private static string? BuildPlayerClassLabel(FightPlayerIndexDto player)
+    {
+        return !string.IsNullOrWhiteSpace(player.EliteSpec)
+            ? player.EliteSpec
+            : NullIfWhiteSpace(player.Profession);
     }
 
     private static IReadOnlyList<FightThreatBoonIndexDto> BuildThreatBoonsFromAnalystPayload(IReadOnlyList<WvWAnalystThreatBoonSummaryDto>? boons)

@@ -48,8 +48,20 @@ app.MapGet("/api/analysis", (
     string? startDate,
     string? endDate,
     string? outcome,
+    string? squadIncludeClasses,
+    string? squadExcludeClasses,
+    string? enemyIncludeClasses,
+    string? enemyExcludeClasses,
     FightAnalysisService service) =>
-    Results.Ok(service.BuildSnapshot(commander, startDate, endDate, outcome)));
+    Results.Ok(service.BuildSnapshot(
+        commander,
+        startDate,
+        endDate,
+        outcome,
+        squadIncludeClasses,
+        squadExcludeClasses,
+        enemyIncludeClasses,
+        enemyExcludeClasses)));
 app.MapGet("/api/fights/{fightId}", (string fightId, FightCatalogService catalog) =>
     catalog.TryGetFightDetail(fightId, out var detail)
         ? Results.Ok(detail)

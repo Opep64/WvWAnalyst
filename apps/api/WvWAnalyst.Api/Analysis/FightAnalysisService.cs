@@ -16,7 +16,15 @@ public sealed class FightAnalysisService
         _fightCatalog = fightCatalog;
     }
 
-    public FightAnalysisSnapshotDto BuildSnapshot(string? commander, string? startDate, string? endDate, string? outcomeCode)
+    public FightAnalysisSnapshotDto BuildSnapshot(
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses)
     {
         var allFights = _fightCatalog.GetFightBrowserSnapshot().Fights
             .Where(fight => fight.FightIndex is not null)
@@ -29,6 +37,7 @@ public sealed class FightAnalysisService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var classOptions = BuildClassOptions(allFights);
 
         var minDate = allFights
             .Select(GetFightLocalDate)
@@ -44,11 +53,17 @@ public sealed class FightAnalysisService
         string? normalizedCommander = string.IsNullOrWhiteSpace(commander) ? null : commander.Trim();
         DateOnly? normalizedStartDate = ParseDateOnly(startDate);
         DateOnly? normalizedEndDate = ParseDateOnly(endDate);
+        var normalizedSquadIncludeClasses = NormalizeClassFilter(squadIncludeClasses);
+        var normalizedSquadExcludeClasses = NormalizeClassFilter(squadExcludeClasses);
+        var normalizedEnemyIncludeClasses = NormalizeClassFilter(enemyIncludeClasses);
+        var normalizedEnemyExcludeClasses = NormalizeClassFilter(enemyExcludeClasses);
 
         var filteredFights = allFights
             .Where(fight => MatchesCommander(fight, normalizedCommander))
             .Where(fight => MatchesOutcome(fight, normalizedOutcome))
             .Where(fight => MatchesDateRange(fight, normalizedStartDate, normalizedEndDate))
+            .Where(fight => MatchesSideClassFilters(fight, "squad", normalizedSquadIncludeClasses, normalizedSquadExcludeClasses))
+            .Where(fight => MatchesSideClassFilters(fight, "enemy", normalizedEnemyIncludeClasses, normalizedEnemyExcludeClasses))
             .OrderBy(fight => GetFightSortValue(fight))
             .ToArray();
 
@@ -61,13 +76,18 @@ public sealed class FightAnalysisService
         return new FightAnalysisSnapshotDto(
             Options: new FightAnalysisFilterOptionsDto(
                 Commanders: commanderOptions,
+                ClassOptions: classOptions,
                 MinFightDate: minDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 MaxFightDate: maxDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
             Selection: new FightAnalysisSelectionDto(
                 Commander: normalizedCommander,
                 StartDate: normalizedStartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 EndDate: normalizedEndDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                OutcomeCode: normalizedOutcome),
+                OutcomeCode: normalizedOutcome,
+                SquadIncludeClasses: normalizedSquadIncludeClasses,
+                SquadExcludeClasses: normalizedSquadExcludeClasses,
+                EnemyIncludeClasses: normalizedEnemyIncludeClasses,
+                EnemyExcludeClasses: normalizedEnemyExcludeClasses),
             Scope: BuildScope(allFights, filteredFights),
             Overview: BuildOverview(filteredFights),
             Trends: BuildTrends(filteredFights),
@@ -1681,6 +1701,98 @@ public sealed class FightAnalysisService
         return fightTime.HasValue ? DateOnly.FromDateTime(fightTime.Value) : null;
     }
 
+    private static IReadOnlyList<string> BuildClassOptions(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .SelectMany(fight =>
+            {
+                var labels = new List<string>();
+                labels.AddRange(GetFightSideClassLabels(fight, "squad", out _));
+                labels.AddRange(GetFightSideClassLabels(fight, "enemy", out _));
+                return labels;
+            })
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool MatchesSideClassFilters(
+        FightArtifactSummaryDto fight,
+        string sideId,
+        IReadOnlyCollection<string> requiredClasses,
+        IReadOnlyCollection<string> excludedClasses)
+    {
+        if (requiredClasses.Count == 0 && excludedClasses.Count == 0)
+        {
+            return true;
+        }
+
+        var classLabels = GetFightSideClassLabels(fight, sideId, out bool hasData);
+        if (!hasData)
+        {
+            return false;
+        }
+
+        if (requiredClasses.Any(required =>
+            !classLabels.Any(label => string.Equals(label, required, StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        if (excludedClasses.Any(excluded =>
+            classLabels.Any(label => string.Equals(label, excluded, StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<string> GetFightSideClassLabels(
+        FightArtifactSummaryDto fight,
+        string sideId,
+        out bool hasData)
+    {
+        var side = string.Equals(sideId, "enemy", StringComparison.OrdinalIgnoreCase)
+            ? fight.FightIndex?.EnemySide
+            : fight.FightIndex?.SquadSide;
+
+        var retainedLabels = (side?.Classes ?? Array.Empty<FightSideClassIndexDto>())
+            .Select(entry => entry.ClassLabel?.Trim())
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Select(label => label!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (retainedLabels.Length > 0)
+        {
+            hasData = true;
+            return retainedLabels;
+        }
+
+        if (string.Equals(sideId, "squad", StringComparison.OrdinalIgnoreCase))
+        {
+            var fallbackLabels = (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .Select(BuildClassLabel)
+                .Where(label => !string.IsNullOrWhiteSpace(label))
+                .Select(label => label!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (fallbackLabels.Length > 0)
+            {
+                hasData = true;
+                return fallbackLabels;
+            }
+        }
+
+        hasData = false;
+        return Array.Empty<string>();
+    }
+
     private static bool MatchesCommander(FightArtifactSummaryDto fight, string? commander)
     {
         if (string.IsNullOrWhiteSpace(commander))
@@ -1733,6 +1845,16 @@ public sealed class FightAnalysisService
             "draw" => "draw",
             _ => "all"
         };
+    }
+
+    private static string[] NormalizeClassFilter(string? value)
+    {
+        return (value ?? string.Empty)
+            .Split([',', ';', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static DateOnly? ParseDateOnly(string? value)

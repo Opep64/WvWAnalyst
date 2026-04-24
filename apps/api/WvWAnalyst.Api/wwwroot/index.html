@@ -90,11 +90,11 @@
                 <div class="tag-block">
                     <div>
                         <h3>Overview</h3>
-                        <ul class="tag-list" id="dossier-context-list"></ul>
+                        <div id="dossier-context-list"></div>
                     </div>
                     <div>
                         <h3>Participants</h3>
-                        <ul class="tag-list" id="dossier-participants-list"></ul>
+                        <div id="dossier-participants-list"></div>
                     </div>
                     <div>
                         <h3>Artifacts</h3>
@@ -104,7 +104,7 @@
                 <div class="dossier-grid dossier-grid-thirds">
                     <section class="dossier-card">
                         <h3>Outcome</h3>
-                        <ul class="tag-list" id="dossier-outcome-list"></ul>
+                        <div id="dossier-outcome-list"></div>
                     </section>
                     <section class="dossier-card">
                         <h3 id="dossier-squad-title">Our Squad</h3>
@@ -113,6 +113,10 @@
                     <section class="dossier-card">
                         <h3 id="dossier-enemy-title">Enemy Team</h3>
                         <dl class="stat-pairs" id="dossier-enemy-stats"></dl>
+                        <div class="dossier-side-section">
+                            <h4>Classes</h4>
+                            <div id="dossier-enemy-classes"></div>
+                        </div>
                     </section>
                 </div>
                 <div class="table-shell">
@@ -130,18 +134,18 @@
                 <div class="tag-block">
                     <div>
                         <h3>Execution</h3>
-                        <ul class="tag-list" id="dossier-execution-list"></ul>
+                        <div id="dossier-execution-list"></div>
                     </div>
                     <div>
                         <h3>Confidence &amp; Context</h3>
-                        <ul class="tag-list" id="dossier-confidence-list"></ul>
+                        <div id="dossier-confidence-list"></div>
                     </div>
                 </div>
                 <div class="pillar-grid dossier-pillar-grid" id="dossier-pillar-grid"></div>
                 <div class="tag-block">
                     <div>
                         <h3>Commander Lens</h3>
-                        <ul class="tag-list" id="dossier-commander-focus-list"></ul>
+                        <div id="dossier-commander-focus-list"></div>
                     </div>
                 </div>
                 <div class="table-shell table-shell-scroll table-shell-fight-browser">
@@ -163,15 +167,15 @@
                 <div class="tag-block">
                     <div>
                         <h3>Parser</h3>
-                        <ul class="tag-list" id="dossier-parser-list"></ul>
+                        <div id="dossier-parser-list"></div>
                     </div>
                     <div>
                         <h3>Commanders</h3>
-                        <ul class="tag-list" id="dossier-commanders-list"></ul>
+                        <div id="dossier-commanders-list"></div>
                     </div>
                     <div>
                         <h3>Extensions</h3>
-                        <ul class="tag-list" id="dossier-extensions-list"></ul>
+                        <div id="dossier-extensions-list"></div>
                     </div>
                 </div>
             </section>
@@ -229,6 +233,76 @@
                             <option value="unknown">Unavailable</option>
                         </select>
                     </label>
+                </div>
+                <div class="class-filter-toolbar">
+                    <p class="workspace-note">Check one or more classes to require them or exclude them. Leave everything unchecked to include all fights.</p>
+                    <button class="action-link action-link-button" id="fight-browser-clear-class-filters" type="button">Clear all class filters</button>
+                </div>
+                <div class="class-filter-grid" id="fight-browser-class-filters">
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Our side has</strong>
+                                <span class="class-filter-summary" id="fight-browser-squad-has-summary">Any class</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Require one or more classes on our side.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="fight-browser-squad-has">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="fight-browser-squad-has"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Our side lacks</strong>
+                                <span class="class-filter-summary" id="fight-browser-squad-lacks-summary">None excluded</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Exclude fights where our side had these classes.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="fight-browser-squad-lacks">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="fight-browser-squad-lacks"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Enemy has</strong>
+                                <span class="class-filter-summary" id="fight-browser-enemy-has-summary">Any class</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Require one or more classes on the enemy side.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="fight-browser-enemy-has">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="fight-browser-enemy-has"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Enemy lacks</strong>
+                                <span class="class-filter-summary" id="fight-browser-enemy-lacks-summary">None excluded</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Exclude fights where the enemy side had these classes.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="fight-browser-enemy-lacks">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="fight-browser-enemy-lacks"></div>
+                        </div>
+                    </details>
                 </div>
                 <div class="table-shell table-shell-scroll table-shell-fight-browser">
                     <table class="data-table">
@@ -312,6 +386,76 @@
                         <span>Run</span>
                         <button class="primary-button" id="analysis-apply-button" type="button">Refresh analysis</button>
                     </div>
+                </div>
+                <div class="class-filter-toolbar">
+                    <p class="workspace-note">Check classes to require or exclude them on either side. Leave everything unchecked to include all fights.</p>
+                    <button class="action-link action-link-button" id="analysis-clear-class-filters" type="button">Clear all class filters</button>
+                </div>
+                <div class="class-filter-grid" id="analysis-class-filters">
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Our side has</strong>
+                                <span class="class-filter-summary" id="analysis-squad-has-summary">Any class</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Require one or more classes on our side.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-has">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="analysis-squad-has"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Our side lacks</strong>
+                                <span class="class-filter-summary" id="analysis-squad-lacks-summary">None excluded</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Exclude fights where our side had these classes.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-lacks">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="analysis-squad-lacks"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Enemy has</strong>
+                                <span class="class-filter-summary" id="analysis-enemy-has-summary">Any class</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Require one or more classes on the enemy side.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-has">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="analysis-enemy-has"></div>
+                        </div>
+                    </details>
+                    <details class="class-filter-field">
+                        <summary class="class-filter-trigger">
+                            <span class="class-filter-title-block">
+                                <strong>Enemy lacks</strong>
+                                <span class="class-filter-summary" id="analysis-enemy-lacks-summary">None excluded</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Choose</span>
+                        </summary>
+                        <div class="class-filter-panel">
+                            <div class="class-filter-panel-actions">
+                                <p class="workspace-note">Exclude fights where the enemy side had these classes.</p>
+                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-lacks">Clear</button>
+                            </div>
+                            <div class="class-filter-box" id="analysis-enemy-lacks"></div>
+                        </div>
+                    </details>
                 </div>
                 <div class="stats-grid" id="analysis-overview-cards"></div>
                 <div class="pillar-grid" id="analysis-chart-grid"></div>

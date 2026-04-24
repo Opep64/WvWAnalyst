@@ -262,7 +262,13 @@ public sealed record FightSideIndexDto(
     long Strips,
     int ReceivedCrowdControl,
     double StripsPerMinute,
-    double CleansesPerMinute);
+    double CleansesPerMinute,
+    IReadOnlyList<FightSideClassIndexDto> Classes);
+
+public sealed record FightSideClassIndexDto(
+    string ClassLabel,
+    string? Icon,
+    int Count);
 
 public sealed record FightCommanderIndexDto(
     int ActorId,

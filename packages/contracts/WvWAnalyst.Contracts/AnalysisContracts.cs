@@ -13,6 +13,7 @@ public sealed record FightAnalysisSnapshotDto(
 
 public sealed record FightAnalysisFilterOptionsDto(
     IReadOnlyList<string> Commanders,
+    IReadOnlyList<string> ClassOptions,
     string? MinFightDate,
     string? MaxFightDate);
 
@@ -20,7 +21,11 @@ public sealed record FightAnalysisSelectionDto(
     string? Commander,
     string? StartDate,
     string? EndDate,
-    string OutcomeCode);
+    string OutcomeCode,
+    IReadOnlyList<string> SquadIncludeClasses,
+    IReadOnlyList<string> SquadExcludeClasses,
+    IReadOnlyList<string> EnemyIncludeClasses,
+    IReadOnlyList<string> EnemyExcludeClasses);
 
 public sealed record FightAnalysisScopeDto(
     int TotalImportedFights,
