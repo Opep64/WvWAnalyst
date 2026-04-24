@@ -17,11 +17,16 @@
             <div class="hero-actions">
                 <span class="pill" id="mode-pill">Loading mode...</span>
                 <span class="pill pill-muted">Dark theme prototype</span>
+                <nav class="app-tabs" role="tablist" aria-label="Primary sections">
+                    <button class="app-tab is-active" id="app-tab-manage" type="button" data-app-tab="manage" role="tab" aria-selected="true">Manage</button>
+                    <button class="app-tab" id="app-tab-fight-browser" type="button" data-app-tab="fight-browser" role="tab" aria-selected="false">Fight Browser</button>
+                    <button class="app-tab" id="app-tab-analysis" type="button" data-app-tab="analysis" role="tab" aria-selected="false">Analysis</button>
+                </nav>
             </div>
         </header>
 
         <main class="grid">
-            <section class="panel panel-wide">
+            <section class="panel panel-wide" data-app-panel="manage">
                 <div class="section-heading">
                     <div>
                         <h2>Batch Processing</h2>
@@ -79,13 +84,13 @@
                 </div>
             </section>
 
-            <section class="panel panel-wide dossier-panel" id="fight-dossier-panel" hidden>
+            <section class="panel panel-wide dossier-panel" id="fight-dossier-panel" data-app-panel="fight-browser" hidden>
                 <div class="section-heading">
                     <div>
                         <h2 id="dossier-title">Fight dossier</h2>
                         <p id="dossier-subtitle"></p>
                     </div>
-                    <a class="action-link" id="dossier-back-link" href="/">Back to dashboard</a>
+                    <a class="action-link" id="dossier-back-link" href="/?tab=fight-browser">Back to dashboard</a>
                 </div>
                 <div class="tag-block">
                     <div>
@@ -180,7 +185,7 @@
                 </div>
             </section>
 
-            <section class="panel panel-wide">
+            <section class="panel panel-wide" data-app-panel="manage">
                 <div class="section-heading">
                     <div>
                         <h2>Recent Parses</h2>
@@ -207,7 +212,7 @@
                 </div>
             </section>
 
-            <section class="panel panel-wide">
+            <section class="panel panel-wide" data-app-panel="fight-browser">
                 <div class="section-heading">
                     <div>
                         <h2>Fight Browser</h2>
@@ -350,7 +355,7 @@
                 </div>
             </section>
 
-            <section class="panel panel-wide">
+            <section class="panel panel-wide" data-app-panel="analysis">
                 <div class="section-heading">
                     <div>
                         <h2>Analysis</h2>
@@ -633,7 +638,7 @@
                 </div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-app-panel="analysis">
                 <div class="section-heading">
                     <h2>Workspace</h2>
                     <p>Neighbor repos and local storage roots detected by the prototype.</p>
@@ -641,7 +646,7 @@
                 <div class="stats-grid" id="workspace-cards"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-app-panel="analysis">
                 <div class="section-heading">
                     <h2>Workstreams</h2>
                     <p>Current prototype lanes.</p>
@@ -649,7 +654,7 @@
                 <div class="workstreams" id="workstreams-list"></div>
             </section>
 
-            <section class="panel panel-wide">
+            <section class="panel panel-wide" data-app-panel="analysis">
                 <div class="section-heading">
                     <h2>Fight Execution Score v1</h2>
                     <p id="scorecard-summary"></p>
@@ -667,7 +672,7 @@
                 <div class="pillar-grid" id="pillar-grid"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" data-app-panel="analysis">
                 <div class="section-heading">
                     <h2>Retention posture</h2>
                     <p>Keep compact catalog data and treat parser payloads as temporary ingest artifacts.</p>

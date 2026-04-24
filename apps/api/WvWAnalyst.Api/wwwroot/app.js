@@ -2,6 +2,7 @@ const DIRECTORY_PATH_KEY = "wvw-analyst.last-directory";
 const DIRECTORY_MODE_KEY = "wvw-analyst.last-mode";
 const DIRECTORY_MAX_PARALLELISM_KEY = "wvw-analyst.last-max-parallelism";
 const ACTIVE_BATCH_JOB_KEY = "wvw-analyst.active-batch-job";
+const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
 
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
@@ -9,6 +10,7 @@ let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
 let showFightBrowserTopBursts = false;
+let activeAppTab = "manage";
 let activeAnalysisTab = "players";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "impact", direction: "desc" };
@@ -523,6 +525,70 @@ function buildPlayerTableRow(player) {
 
 function getSelectedFightId() {
     return new URL(window.location.href).searchParams.get("fightId");
+}
+
+function normalizeAppTab(value) {
+    switch (String(value ?? "").trim().toLowerCase()) {
+        case "fight-browser":
+            return "fight-browser";
+        case "analysis":
+            return "analysis";
+        default:
+            return "manage";
+    }
+}
+
+function getRequestedAppTab() {
+    const requested = new URL(window.location.href).searchParams.get("tab");
+    return requested ? normalizeAppTab(requested) : null;
+}
+
+function getDashboardUrl(tabKey = null) {
+    const normalizedTab = normalizeAppTab(tabKey);
+    if (normalizedTab === "manage") {
+        return "/";
+    }
+
+    const params = new URLSearchParams();
+    params.set("tab", normalizedTab);
+    return `/?${params.toString()}`;
+}
+
+function buildFightDossierUrl(fightId) {
+    const params = new URLSearchParams();
+    params.set("tab", "fight-browser");
+    params.set("fightId", fightId);
+    return `/?${params.toString()}`;
+}
+
+function resolveInitialAppTab() {
+    if (getSelectedFightId()) {
+        return "fight-browser";
+    }
+
+    return getRequestedAppTab()
+        ?? normalizeAppTab(localStorage.getItem(ACTIVE_APP_TAB_KEY))
+        ?? "manage";
+}
+
+function setActiveAppTab(tabKey, options = {}) {
+    const { persist = true } = options;
+    const normalizedTab = normalizeAppTab(tabKey);
+    activeAppTab = normalizedTab;
+
+    document.querySelectorAll("[data-app-tab]").forEach(button => {
+        const isActive = button.dataset.appTab === normalizedTab;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    document.querySelectorAll("[data-app-panel]").forEach(panel => {
+        panel.classList.toggle("is-app-hidden", panel.dataset.appPanel !== normalizedTab);
+    });
+
+    if (persist) {
+        localStorage.setItem(ACTIVE_APP_TAB_KEY, normalizedTab);
+    }
 }
 
 async function loadDashboard() {
@@ -3852,7 +3918,7 @@ function buildRecentParseRow(fight, selectedFightId) {
             <td><span class="${buildStatusClass(fight.status)}">${escapeHtml(fight.status)}</span></td>
             <td>
                 <div class="table-actions">
-                    <a href="/?fightId=${encodeURIComponent(fight.fightId)}">Dossier</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Dossier</a>
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
             </td>
@@ -3924,7 +3990,7 @@ function buildFightBrowserRow(fight, selectedFightId) {
             <td>${escapeHtml(String(enemyCount))}</td>
             <td>
                 <div class="table-actions">
-                    <a href="/?fightId=${encodeURIComponent(fight.fightId)}">Dossier</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Dossier</a>
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
             </td>
@@ -4031,6 +4097,7 @@ function toggleFightBrowserTopBursts() {
 function renderFightDossier(detail) {
     const panel = document.querySelector("#fight-dossier-panel");
     panel.hidden = false;
+    setActiveAppTab("fight-browser");
 
     const fightIndex = detail.fightIndex;
     const outcome = fightIndex?.outcome;
@@ -4043,7 +4110,7 @@ function renderFightDossier(detail) {
     const players = fightIndex?.players ?? [];
 
     document.querySelector("#dossier-title").textContent = fightIndex?.fightName ?? detail.sourceFileName;
-    document.querySelector("#dossier-back-link").setAttribute("href", "/");
+    document.querySelector("#dossier-back-link").setAttribute("href", getDashboardUrl("fight-browser"));
 
     const subtitleBits = [
         detail.status,
@@ -4252,9 +4319,11 @@ function clearFightDossier() {
 }
 
 function renderFightDossierError(fightId, error) {
+    setActiveAppTab("fight-browser");
     document.querySelector("#fight-dossier-panel").hidden = false;
     document.querySelector("#dossier-title").textContent = "Fight dossier";
     document.querySelector("#dossier-subtitle").textContent = `Could not load ${fightId}.`;
+    document.querySelector("#dossier-back-link").setAttribute("href", getDashboardUrl("fight-browser"));
     setInnerHtml("#dossier-context-list", "");
     setInnerHtml("#dossier-participants-list", "");
     setInnerHtml("#dossier-outcome-list", "");
@@ -4370,7 +4439,7 @@ function renderBatchResults(result) {
                     <span class="table-subtitle mono">${escapeHtml(item.sourceFilePath)}</span>
                 </td>
                 <td><span class="${buildStatusClass(item.action)}">${escapeHtml(item.action)}</span></td>
-                <td>${item.fightId ? `<a href="/?fightId=${encodeURIComponent(item.fightId)}">${escapeHtml(item.fightId)}</a>` : "-"}</td>
+                <td>${item.fightId ? `<a href="${escapeHtml(buildFightDossierUrl(item.fightId))}">${escapeHtml(item.fightId)}</a>` : "-"}</td>
                 <td>${escapeHtml(item.parserStatus ?? "-")}</td>
                 <td>${escapeHtml(item.message)}</td>
             </tr>
@@ -4801,6 +4870,9 @@ document.querySelector("#analysis-lane-detail").addEventListener("click", event 
     setActiveAnalysisLaneDetailTab(button.dataset.analysisLaneDetailTab);
 });
 document.querySelector("#analysis-apply-button").addEventListener("click", refreshAnalysis);
+document.querySelectorAll("[data-app-tab]").forEach(button => {
+    button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
+});
 document.querySelectorAll("[data-fight-browser-sort]").forEach(button => {
     button.addEventListener("click", () => setFightBrowserSort(button.dataset.fightBrowserSort));
 });
@@ -4816,6 +4888,7 @@ document.querySelectorAll("[data-analysis-tab]").forEach(button => {
 
 hydrateBatchForm();
 applyCompHelperProfile("balanced");
+setActiveAppTab(resolveInitialAppTab(), { persist: false });
 main();
 
 function stringEqualsIgnoreCase(left, right) {

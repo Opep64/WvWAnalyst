@@ -59,6 +59,7 @@ body {
     height: 240px;
     border-radius: 50%;
     background: radial-gradient(circle, rgba(83, 183, 255, 0.14), transparent 70%);
+    pointer-events: none;
 }
 
 .eyebrow {
@@ -94,8 +95,44 @@ h1 {
 .hero-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 10px;
     margin-top: 18px;
+    position: relative;
+    z-index: 1;
+}
+
+.app-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.app-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: rgba(17, 25, 35, 0.92);
+    color: var(--muted);
+    padding: 10px 16px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 120ms ease, border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.app-tab:hover {
+    transform: translateY(-1px);
+    color: var(--ink);
+}
+
+.app-tab.is-active {
+    color: var(--accent);
+    border-color: rgba(83, 183, 255, 0.26);
+    background: rgba(83, 183, 255, 0.10);
 }
 
 .pill {
@@ -121,6 +158,10 @@ h1 {
     grid-template-columns: repeat(12, 1fr);
     gap: 16px;
     margin-top: 18px;
+}
+
+[data-app-panel].is-app-hidden {
+    display: none !important;
 }
 
 .panel {
@@ -1413,6 +1454,11 @@ h1 {
     .panel {
         border-radius: 18px;
         padding: 18px;
+    }
+
+    .app-tabs {
+        margin-left: 0;
+        width: 100%;
     }
 
     .dossier-fact-row {
