@@ -20,6 +20,7 @@ let selectedAnalysisLaneKey = null;
 let selectedAnalysisBoonId = null;
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
+let compHelperCandidateTierKey = "best";
 let compHelperFavoredLaneKeys = [];
 let compHelperFavoredPackageKeys = [];
 let activeAnalysisLaneDetailTab = "players";
@@ -34,6 +35,26 @@ const COMP_HELPER_SEARCH_POOL_LIMIT = 72;
 const COMP_HELPER_BEAM_WIDTH = 48;
 const COMP_HELPER_SUGGESTION_COUNT = 5;
 const COMP_HELPER_DIMINISHING_WEIGHTS = [1.0, 0.7, 0.45, 0.25, 0.1];
+const COMP_HELPER_CANDIDATE_TIER_OPTIONS = {
+    best: {
+        key: "best",
+        label: "Best",
+        targetPercentile: 100,
+        summary: "Best cards are active."
+    },
+    p75: {
+        key: "p75",
+        label: "75th percentile",
+        targetPercentile: 75,
+        summary: "Suggestions center on cards closest to the 75th-percentile fit band."
+    },
+    p50: {
+        key: "p50",
+        label: "50th percentile",
+        targetPercentile: 50,
+        summary: "Suggestions center on cards closest to the 50th-percentile fit band."
+    }
+};
 const COMP_HELPER_LANE_TARGETS = [
     { key: "pressure", label: "Pressure", floor: 85, target: 125, weight: 1.30 },
     { key: "boonsupport", label: "Boon Support", floor: 80, target: 120, weight: 1.25 },
@@ -872,6 +893,7 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
 function buildAnalysisOverviewCards(snapshot) {
     const overview = snapshot.overview ?? {};
     const savesSummary = overview.savesSummary ?? null;
+    const obliterateSummary = overview.obliterateSummary ?? null;
     const cards = [
         {
             title: "Average overall",
@@ -929,6 +951,26 @@ function buildAnalysisOverviewCards(snapshot) {
                 `${formatNumber(savesSummary.totalSaves)} saves across ${formatNumber(savesSummary.totalSquadDowns)} squad downs`,
                 `${formatNumber(savesSummary.totalBarrierSaves)} barrier | ${formatNumber(savesSummary.totalDamageReductionSaves)} reduction | ${formatNumber(savesSummary.totalBothSaves)} both`,
                 `${formatNumber(savesSummary.totalBarrierAbsorbed, 0)} barrier absorbed | ${formatNumber(savesSummary.totalEstimatedDamageReduction, 0)} estimated damage reduction`
+            ]
+        });
+    }
+
+    if (obliterateSummary) {
+        const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
+        const availabilityDetail = obliterateSummary.availableFightCount === filteredFightCount
+            ? "Aggregated across all filtered fights."
+            : `Available in ${formatNumber(obliterateSummary.availableFightCount)} of ${formatNumber(filteredFightCount)} filtered fights.`;
+
+        cards.push({
+            title: "Obliterate",
+            value: formatPercent(obliterateSummary.fightsWithObliteratePercent),
+            detail: availabilityDetail,
+            lines: [
+                `${formatNumber(obliterateSummary.fightsWithObliterateCount)} of ${formatNumber(obliterateSummary.availableFightCount)} fights with at least one Obliterate hit`,
+                `${formatNumber(obliterateSummary.totalHitCount)} total hits | ${formatNumber(obliterateSummary.totalBarrierRemovedHitCount)} removed barrier`,
+                obliterateSummary.barrierRemovedRatePercent != null
+                    ? `${formatPercent(obliterateSummary.barrierRemovedRatePercent)} of Obliterate hits removed barrier`
+                    : "No Obliterate hits in the filtered fights."
             ]
         });
     }
@@ -1453,6 +1495,18 @@ function getCompHelperProfileFavorites(profileKey) {
     return COMP_HELPER_PROFILE_FAVORITES[profileKey] ?? COMP_HELPER_PROFILE_FAVORITES.balanced;
 }
 
+function getCompHelperCandidateTier() {
+    return COMP_HELPER_CANDIDATE_TIER_OPTIONS[compHelperCandidateTierKey]
+        ?? COMP_HELPER_CANDIDATE_TIER_OPTIONS.best;
+}
+
+function syncCompHelperCandidateTierControl() {
+    const select = document.querySelector("#analysis-comp-helper-candidate-tier");
+    if (select) {
+        select.value = getCompHelperCandidateTier().key;
+    }
+}
+
 function syncCompHelperProfileControl() {
     const select = document.querySelector("#analysis-comp-helper-profile");
     if (select) {
@@ -1680,10 +1734,19 @@ function buildCompHelperCandidates(snapshot) {
         candidate.priorityScore = Math.round((Number(candidate.priorityScore ?? 0) * 0.65 + packagePriority * 0.35) * 10) / 10;
     }
 
-    return candidates.sort((left, right) => Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+    const orderedCandidates = candidates.sort((left, right) => Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
         || Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
         || Number(right.totalFightCountAll ?? 0) - Number(left.totalFightCountAll ?? 0)
         || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase()));
+
+    const maxIndex = Math.max(1, orderedCandidates.length - 1);
+    orderedCandidates.forEach((candidate, index) => {
+        candidate.priorityPercentile = orderedCandidates.length <= 1
+            ? 100
+            : Math.round((((maxIndex - index) / maxIndex) * 100) * 10) / 10;
+    });
+
+    return orderedCandidates;
 }
 
 function getCompHelperCandidates(snapshot) {
@@ -1698,6 +1761,37 @@ function getLockedCompHelperCandidates(candidates) {
     return lockedCompHelperCandidateIds
         .map(id => lookup.get(id) ?? null)
         .filter(Boolean);
+}
+
+function compareCompHelperCandidatesForTier(left, right, targetPercentile) {
+    if (targetPercentile >= 100) {
+        return Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+            || Number(right.priorityPercentile ?? 0) - Number(left.priorityPercentile ?? 0)
+            || Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
+            || Number(right.totalFightCountAll ?? 0) - Number(left.totalFightCountAll ?? 0)
+            || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase());
+    }
+
+    const leftDistance = Math.abs(Number(left.priorityPercentile ?? 0) - targetPercentile);
+    const rightDistance = Math.abs(Number(right.priorityPercentile ?? 0) - targetPercentile);
+    return leftDistance - rightDistance
+        || Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+        || Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
+        || Number(right.totalFightCountAll ?? 0) - Number(left.totalFightCountAll ?? 0)
+        || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase());
+}
+
+function getCompHelperTierOrderedCandidates(candidates) {
+    const tier = getCompHelperCandidateTier();
+    return [...candidates].sort((left, right) =>
+        compareCompHelperCandidatesForTier(left, right, Number(tier.targetPercentile ?? 100)));
+}
+
+function getCompHelperSearchPoolCandidates(candidates, lockedCandidates) {
+    const lockedAccounts = new Set(lockedCandidates.map(candidate => candidate.account));
+    const unlockedCandidates = getCompHelperTierOrderedCandidates(candidates)
+        .filter(candidate => !lockedAccounts.has(candidate.account));
+    return unlockedCandidates.slice(0, COMP_HELPER_SEARCH_POOL_LIMIT);
 }
 
 function evaluateCompHelperTeam(members) {
@@ -1891,9 +1985,7 @@ function buildCompHelperTeamKey(members) {
 }
 
 function buildCompHelperSearchPool(candidates, lockedCandidates) {
-    const lockedAccounts = new Set(lockedCandidates.map(candidate => candidate.account));
-    const unlockedCandidates = candidates.filter(candidate => !lockedAccounts.has(candidate.account));
-    const pool = unlockedCandidates.slice(0, COMP_HELPER_SEARCH_POOL_LIMIT);
+    const pool = getCompHelperSearchPoolCandidates(candidates, lockedCandidates);
     return [...lockedCandidates, ...pool];
 }
 
@@ -2071,12 +2163,13 @@ function searchCompHelperSuggestions(snapshot, candidates) {
 }
 
 function getCompHelperFilteredCandidates(candidates) {
+    const orderedCandidates = getCompHelperTierOrderedCandidates(candidates);
     const searchValue = document.querySelector("#analysis-comp-helper-search")?.value.trim().toLowerCase() ?? "";
     if (!searchValue) {
-        return candidates;
+        return orderedCandidates;
     }
 
-    return candidates.filter(candidate => getCompHelperCandidateSearchText(candidate).includes(searchValue));
+    return orderedCandidates.filter(candidate => getCompHelperCandidateSearchText(candidate).includes(searchValue));
 }
 
 function buildCompHelperLockPill(candidate) {
@@ -2279,6 +2372,7 @@ function renderAnalysisCompHelper(snapshot) {
     const filteredCandidates = getCompHelperFilteredCandidates(candidates);
     const searchResult = searchCompHelperSuggestions(snapshot, candidates);
     syncCompHelperProfileControl();
+    syncCompHelperCandidateTierControl();
     favoredLanesContainer.innerHTML = COMP_HELPER_LANE_TARGETS
         .map(target => buildCompHelperFavoriteToggle(target, "lanes", compHelperFavoredLaneKeys.includes(target.key)))
         .join("");
@@ -2294,6 +2388,11 @@ function renderAnalysisCompHelper(snapshot) {
     const profileCopy = compHelperProfileKey === "custom"
         ? "Custom priorities are active."
         : `${compHelperProfileKey.charAt(0).toUpperCase()}${compHelperProfileKey.slice(1)} profile is active.`;
+    const candidateTier = getCompHelperCandidateTier();
+    const tierPoolCount = getCompHelperSearchPoolCandidates(candidates, lockedCandidates).length;
+    const tierCopy = candidateTier.key === "best"
+        ? candidateTier.summary
+        : `${candidateTier.summary} The solver checks up to ${tierPoolCount} cards nearest that tier.`;
     const favoredLaneCopy = compHelperFavoredLaneKeys.length > 0
         ? `Favored lanes: ${COMP_HELPER_LANE_TARGETS.filter(target => compHelperFavoredLaneKeys.includes(target.key)).map(target => target.label).join(", ")}.`
         : "No extra lanes are favored.";
@@ -2301,7 +2400,7 @@ function renderAnalysisCompHelper(snapshot) {
         ? `Favored packages: ${COMP_HELPER_PACKAGE_TARGETS.filter(target => compHelperFavoredPackageKeys.includes(target.key)).map(target => target.label).join(", ")}.`
         : "No extra packages are favored.";
 
-    summary.textContent = `${filteredCandidates.length} candidate cards available. ${profileCopy} ${lockedCopy} Mandatory packages: Stability, Healing, Cleanse, Protection, and Pressure. Secondary packages include Barrier, Might, Strip, Fury, Quickness, Resistance, and combined CC. ${favoredLaneCopy} ${favoredPackageCopy}${shortageCopy ? ` ${shortageCopy}` : ""}`;
+    summary.textContent = `${filteredCandidates.length} candidate cards available. ${profileCopy} ${tierCopy} ${lockedCopy} Mandatory packages: Stability, Healing, Cleanse, Protection, and Pressure. Secondary packages include Barrier, Might, Strip, Fury, Quickness, Resistance, and combined CC. ${favoredLaneCopy} ${favoredPackageCopy}${shortageCopy ? ` ${shortageCopy}` : ""}`;
 
     locksContainer.innerHTML = lockedCandidates.length > 0
         ? lockedCandidates.map(buildCompHelperLockPill).join("")
@@ -3985,6 +4084,15 @@ document.querySelector("#analysis-comp-helper-search").addEventListener("input",
 });
 document.querySelector("#analysis-comp-helper-profile").addEventListener("change", event => {
     applyCompHelperProfile(event.target.value);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-candidate-tier").addEventListener("change", event => {
+    const nextValue = String(event.target.value ?? "").toLowerCase();
+    compHelperCandidateTierKey = COMP_HELPER_CANDIDATE_TIER_OPTIONS[nextValue]
+        ? nextValue
+        : "best";
     if (currentAnalysisSnapshot) {
         renderAnalysisCompHelper(currentAnalysisSnapshot);
     }

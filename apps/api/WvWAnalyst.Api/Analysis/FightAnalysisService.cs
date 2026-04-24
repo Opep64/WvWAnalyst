@@ -128,6 +128,7 @@ public sealed class FightAnalysisService
             ? 0.0
             : Math.Round(fights.Average(fight => (fight.FightIndex?.DurationMilliseconds ?? 0) / 1000.0), 1);
         var savesSummary = BuildSavesSummary(fights);
+        var obliterateSummary = BuildObliterateSummary(fights);
 
         return new FightAnalysisOverviewDto(
             AverageOverallScore: executionScores.Length == 0 ? null : Math.Round(executionScores.Average(), 1),
@@ -139,7 +140,8 @@ public sealed class FightAnalysisService
             AverageSquadSize: averageSquadSize,
             AverageEnemySize: averageEnemySize,
             AverageDurationSeconds: averageDurationSeconds,
-            SavesSummary: savesSummary);
+            SavesSummary: savesSummary,
+            ObliterateSummary: obliterateSummary);
     }
 
     private static FightAnalysisSaveSummaryDto? BuildSavesSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -182,6 +184,36 @@ public sealed class FightAnalysisService
             DamageReductionSavesPerDown: damageReductionSavesPerDown,
             TotalBarrierAbsorbed: totalBarrierAbsorbed,
             TotalEstimatedDamageReduction: totalEstimatedDamageReduction);
+    }
+
+    private static FightAnalysisObliterateSummaryDto? BuildObliterateSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var obliterateSamples = fights
+            .Select(fight => fight.FightIndex?.Obliterate)
+            .Where(summary => summary is not null)
+            .Cast<FightObliterateIndexDto>()
+            .ToArray();
+
+        if (obliterateSamples.Length == 0)
+        {
+            return null;
+        }
+
+        int fightsWithObliterateCount = obliterateSamples.Count(summary => summary.HitCount > 0);
+        int totalHitCount = obliterateSamples.Sum(summary => Math.Max(0, summary.HitCount));
+        int totalBarrierRemovedHitCount = obliterateSamples.Sum(summary => Math.Max(0, summary.BarrierRemovedHitCount));
+        double fightsWithObliteratePercent = Math.Round(fightsWithObliterateCount * 100.0 / obliterateSamples.Length, 1);
+        double? barrierRemovedRatePercent = totalHitCount > 0
+            ? Math.Round(totalBarrierRemovedHitCount * 100.0 / totalHitCount, 1)
+            : null;
+
+        return new FightAnalysisObliterateSummaryDto(
+            AvailableFightCount: obliterateSamples.Length,
+            FightsWithObliterateCount: fightsWithObliterateCount,
+            FightsWithObliteratePercent: fightsWithObliteratePercent,
+            TotalHitCount: totalHitCount,
+            TotalBarrierRemovedHitCount: totalBarrierRemovedHitCount,
+            BarrierRemovedRatePercent: barrierRemovedRatePercent);
     }
 
     private static IReadOnlyList<FightAnalysisTrendPointDto> BuildTrends(IReadOnlyList<FightArtifactSummaryDto> fights)

@@ -20,6 +20,8 @@ public sealed class WvWAnalystFightPayloadDto
 
     public WvWAnalystDefenseSaveSummaryDto? DefenseSaves { get; set; }
 
+    public WvWAnalystObliterateSummaryDto? Obliterate { get; set; }
+
     public IReadOnlyList<WvWAnalystThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystThreatBoonSummaryDto>();
 
     public IReadOnlyList<WvWAnalystTopBurstDto> TopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
@@ -355,6 +357,13 @@ public sealed class WvWAnalystDefenseSaveSummaryDto
     public double TotalIncomingDamage { get; set; }
 
     public double TotalIncomingHealing { get; set; }
+}
+
+public sealed class WvWAnalystObliterateSummaryDto
+{
+    public int HitCount { get; set; }
+
+    public int BarrierRemovedHitCount { get; set; }
 }
 
 public sealed class WvWAnalystPlayerSummaryDto

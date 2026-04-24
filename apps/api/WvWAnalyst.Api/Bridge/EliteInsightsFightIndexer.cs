@@ -69,6 +69,7 @@ public sealed class EliteInsightsFightIndexer
                 EnemySide: BuildSideFromAnalystPayload(enemy),
                 CommanderSummary: BuildCommanderSummaryFromAnalystPayload(payload.CommanderSummary),
                 DefenseSaves: BuildDefenseSavesFromAnalystPayload(payload.DefenseSaves),
+                Obliterate: BuildObliterateFromAnalystPayload(payload.Obliterate),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
                 TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
                 Players: BuildPlayersFromAnalystPayload(payload.Players),
@@ -213,6 +214,7 @@ public sealed class EliteInsightsFightIndexer
             EnemySide: null,
             CommanderSummary: null,
             DefenseSaves: null,
+            Obliterate: null,
             ThreatBoons: Array.Empty<FightThreatBoonIndexDto>(),
             TopBursts: Array.Empty<FightTopBurstIndexDto>(),
             Players: Array.Empty<FightPlayerIndexDto>(),
@@ -375,6 +377,18 @@ public sealed class EliteInsightsFightIndexer
             LowestLowestHealthPercent: summary.LowestLowestHealthPercent,
             TotalIncomingDamage: summary.TotalIncomingDamage,
             TotalIncomingHealing: summary.TotalIncomingHealing);
+    }
+
+    private static FightObliterateIndexDto? BuildObliterateFromAnalystPayload(WvWAnalystObliterateSummaryDto? summary)
+    {
+        if (summary is null)
+        {
+            return null;
+        }
+
+        return new FightObliterateIndexDto(
+            HitCount: summary.HitCount,
+            BarrierRemovedHitCount: summary.BarrierRemovedHitCount);
     }
 
     private static IReadOnlyList<FightPlayerIndexDto> BuildPlayersFromAnalystPayload(IReadOnlyList<WvWAnalystPlayerSummaryDto>? players)

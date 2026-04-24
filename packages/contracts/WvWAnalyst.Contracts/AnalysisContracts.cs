@@ -40,7 +40,8 @@ public sealed record FightAnalysisOverviewDto(
     double AverageSquadSize,
     double AverageEnemySize,
     double AverageDurationSeconds,
-    FightAnalysisSaveSummaryDto? SavesSummary);
+    FightAnalysisSaveSummaryDto? SavesSummary,
+    FightAnalysisObliterateSummaryDto? ObliterateSummary);
 
 public sealed record FightAnalysisSaveSummaryDto(
     int AvailableFightCount,
@@ -54,6 +55,14 @@ public sealed record FightAnalysisSaveSummaryDto(
     double? DamageReductionSavesPerDown,
     double TotalBarrierAbsorbed,
     double TotalEstimatedDamageReduction);
+
+public sealed record FightAnalysisObliterateSummaryDto(
+    int AvailableFightCount,
+    int FightsWithObliterateCount,
+    double FightsWithObliteratePercent,
+    int TotalHitCount,
+    int TotalBarrierRemovedHitCount,
+    double? BarrierRemovedRatePercent);
 
 public sealed record FightAnalysisTrendPointDto(
     string FightId,

@@ -159,6 +159,7 @@ public sealed record FightIndexDto(
     FightSideIndexDto? EnemySide,
     FightCommanderIndexDto? CommanderSummary,
     FightDefenseSaveIndexDto? DefenseSaves,
+    FightObliterateIndexDto? Obliterate,
     IReadOnlyList<FightThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightTopBurstIndexDto> TopBursts,
     IReadOnlyList<FightPlayerIndexDto> Players,
@@ -292,6 +293,10 @@ public sealed record FightDefenseSaveIndexDto(
     double LowestLowestHealthPercent,
     double TotalIncomingDamage,
     double TotalIncomingHealing);
+
+public sealed record FightObliterateIndexDto(
+    int HitCount,
+    int BarrierRemovedHitCount);
 
 public sealed record FightPlayerIndexDto(
     int ActorId,
