@@ -39,7 +39,21 @@ public sealed record FightAnalysisOverviewDto(
     double? AverageResilienceScore,
     double AverageSquadSize,
     double AverageEnemySize,
-    double AverageDurationSeconds);
+    double AverageDurationSeconds,
+    FightAnalysisSaveSummaryDto? SavesSummary);
+
+public sealed record FightAnalysisSaveSummaryDto(
+    int AvailableFightCount,
+    int TotalSaves,
+    int TotalBarrierSaves,
+    int TotalDamageReductionSaves,
+    int TotalBothSaves,
+    int TotalSquadDowns,
+    double? SavesPerDown,
+    double? BarrierSavesPerDown,
+    double? DamageReductionSavesPerDown,
+    double TotalBarrierAbsorbed,
+    double TotalEstimatedDamageReduction);
 
 public sealed record FightAnalysisTrendPointDto(
     string FightId,
@@ -108,8 +122,29 @@ public sealed record FightAnalysisPlayerCharacterDto(
     double AverageRecoveriesPerFight,
     double AverageActivePresencePercent,
     double AverageEngagedPresencePercent,
+    FightAnalysisCharacterPackageInputsDto PackageInputs,
     IReadOnlyList<string> EvidenceLines,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions);
+
+public sealed record FightAnalysisCharacterPackageInputsDto(
+    double PressureStrength,
+    double HealingPerFight,
+    double CleansePerFight,
+    double ProtectionGenerationPerFight,
+    double ProtectionPresencePerFight,
+    double StabilityGenerationPerFight,
+    double StabilityPresencePerFight,
+    double BarrierPerFight,
+    double MightGenerationPerFight,
+    double FuryGenerationPerFight,
+    double FuryPresencePerFight,
+    double QuicknessGenerationPerFight,
+    double QuicknessPresencePerFight,
+    double ResistanceGenerationPerFight,
+    double ResistancePresencePerFight,
+    double StripPerFight,
+    double ControlStrength,
+    double EffectiveCrowdControlPerFight);
 
 public sealed record FightAnalysisCharacterLaneContributionDto(
     string LaneKey,

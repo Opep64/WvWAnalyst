@@ -68,7 +68,9 @@ public sealed class EliteInsightsFightIndexer
                 SquadSide: BuildSideFromAnalystPayload(squad),
                 EnemySide: BuildSideFromAnalystPayload(enemy),
                 CommanderSummary: BuildCommanderSummaryFromAnalystPayload(payload.CommanderSummary),
+                DefenseSaves: BuildDefenseSavesFromAnalystPayload(payload.DefenseSaves),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
+                TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
                 Players: BuildPlayersFromAnalystPayload(payload.Players),
                 Execution: execution,
                 Duration: BuildDurationLabel(payload.Fight.DurationMs),
@@ -210,7 +212,9 @@ public sealed class EliteInsightsFightIndexer
             SquadSide: null,
             EnemySide: null,
             CommanderSummary: null,
+            DefenseSaves: null,
             ThreatBoons: Array.Empty<FightThreatBoonIndexDto>(),
+            TopBursts: Array.Empty<FightTopBurstIndexDto>(),
             Players: Array.Empty<FightPlayerIndexDto>(),
             Execution: null,
             Duration: GetString(root, "duration") ?? "Unknown",
@@ -353,6 +357,26 @@ public sealed class EliteInsightsFightIndexer
                 ?? Array.Empty<string>());
     }
 
+    private static FightDefenseSaveIndexDto? BuildDefenseSavesFromAnalystPayload(WvWAnalystDefenseSaveSummaryDto? summary)
+    {
+        if (summary is null)
+        {
+            return null;
+        }
+
+        return new FightDefenseSaveIndexDto(
+            SavedCases: summary.SavedCases,
+            BarrierSavedCases: summary.BarrierSavedCases,
+            DamageReductionSavedCases: summary.DamageReductionSavedCases,
+            BothSavedCases: summary.BothSavedCases,
+            TotalBarrierAbsorbed: summary.TotalBarrierAbsorbed,
+            TotalEstimatedDamageReduction: summary.TotalEstimatedDamageReduction,
+            AverageLowestHealthPercent: summary.AverageLowestHealthPercent,
+            LowestLowestHealthPercent: summary.LowestLowestHealthPercent,
+            TotalIncomingDamage: summary.TotalIncomingDamage,
+            TotalIncomingHealing: summary.TotalIncomingHealing);
+    }
+
     private static IReadOnlyList<FightPlayerIndexDto> BuildPlayersFromAnalystPayload(IReadOnlyList<WvWAnalystPlayerSummaryDto>? players)
     {
         if (players is null || players.Count == 0)
@@ -491,6 +515,52 @@ public sealed class EliteInsightsFightIndexer
                 AverageStacks: boon.AverageStacks,
                 Overapplication: boon.Overapplication))
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightTopBurstIndexDto> BuildTopBurstsFromAnalystPayload(IReadOnlyList<WvWAnalystTopBurstDto>? bursts)
+    {
+        if (bursts is null || bursts.Count == 0)
+        {
+            return Array.Empty<FightTopBurstIndexDto>();
+        }
+
+        return bursts
+            .Where(burst => burst.Damage > 0 || burst.Strips > 0 || burst.Downs > 0 || burst.Kills > 0)
+            .Select(burst => new FightTopBurstIndexDto(
+                Time: burst.Time,
+                TimeLabel: NullIfWhiteSpace(burst.TimeLabel),
+                Damage: burst.Damage,
+                Strips: burst.Strips,
+                Downs: burst.Downs,
+                Kills: burst.Kills,
+                TopPressure: BuildTopBurstActorFromAnalystPayload(burst.TopPressure),
+                TopStrips: BuildTopBurstActorFromAnalystPayload(burst.TopStrips)))
+            .ToArray();
+    }
+
+    private static FightTopBurstActorIndexDto? BuildTopBurstActorFromAnalystPayload(WvWAnalystTopBurstActorDto? actor)
+    {
+        if (actor is null)
+        {
+            return null;
+        }
+
+        if (actor.ActorId == 0 &&
+            string.IsNullOrWhiteSpace(actor.Character) &&
+            string.IsNullOrWhiteSpace(actor.Account) &&
+            actor.Amount <= 0)
+        {
+            return null;
+        }
+
+        return new FightTopBurstActorIndexDto(
+            ActorId: actor.ActorId,
+            Account: NullIfWhiteSpace(actor.Account),
+            Character: NullIfWhiteSpace(actor.Character),
+            Profession: NullIfWhiteSpace(actor.Profession),
+            EliteSpec: NullIfWhiteSpace(actor.EliteSpec),
+            Icon: NullIfWhiteSpace(actor.Icon),
+            Amount: actor.Amount);
     }
 
     private static FightOutcomeDto BuildUnavailableOutcome(string detail)

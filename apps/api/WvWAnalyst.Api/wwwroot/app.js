@@ -8,6 +8,7 @@ let currentAnalysisSnapshot = null;
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
+let showFightBrowserTopBursts = false;
 let activeAnalysisTab = "players";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "impact", direction: "desc" };
@@ -17,9 +18,63 @@ let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKey = null;
 let selectedAnalysisBoonId = null;
+let lockedCompHelperCandidateIds = [];
+let compHelperProfileKey = "balanced";
+let compHelperFavoredLaneKeys = [];
+let compHelperFavoredPackageKeys = [];
 let activeAnalysisLaneDetailTab = "players";
 const MINIMUM_LANE_FILTER_APPEARANCES = 20;
 const MINIMUM_PLAYER_TABLE_FIGHTS = 40;
+const ANALYSIS_TREND_ROLLING_WINDOW = 5;
+const COMP_HELPER_TEAM_SIZE = 5;
+const COMP_HELPER_MAX_LOCKED_CARDS = 5;
+const COMP_HELPER_MIN_TOTAL_FIGHTS = 20;
+const COMP_HELPER_MIN_FILTERED_FIGHTS = 5;
+const COMP_HELPER_SEARCH_POOL_LIMIT = 72;
+const COMP_HELPER_BEAM_WIDTH = 48;
+const COMP_HELPER_SUGGESTION_COUNT = 5;
+const COMP_HELPER_DIMINISHING_WEIGHTS = [1.0, 0.7, 0.45, 0.25, 0.1];
+const COMP_HELPER_LANE_TARGETS = [
+    { key: "pressure", label: "Pressure", floor: 85, target: 125, weight: 1.30 },
+    { key: "boonsupport", label: "Boon Support", floor: 80, target: 120, weight: 1.25 },
+    { key: "recovery", label: "Recovery", floor: 70, target: 105, weight: 1.15 },
+    { key: "conversion", label: "Conversion", floor: 60, target: 95, weight: 1.00 },
+    { key: "strip", label: "Strip", floor: 55, target: 85, weight: 0.95 },
+    { key: "control", label: "Control", floor: 50, target: 80, weight: 0.90 },
+    { key: "rez", label: "Rez", floor: 25, target: 50, weight: 0.55 }
+];
+const COMP_HELPER_PACKAGE_TARGETS = [
+    { key: "stability", label: "Stability", floor: 60, target: 95, weight: 1.50, mandatory: true, allowOvercap: false },
+    { key: "healing", label: "Healing", floor: 60, target: 95, weight: 1.45, mandatory: true },
+    { key: "cleanse", label: "Cleanse", floor: 55, target: 90, weight: 1.40, mandatory: true },
+    { key: "protection", label: "Protection", floor: 50, target: 85, weight: 1.20, mandatory: true },
+    { key: "pressure-package", label: "Pressure", floor: 75, target: 115, weight: 1.35, mandatory: true },
+    { key: "barrier", label: "Barrier", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: false },
+    { key: "might", label: "Might", floor: 0, target: 85, weight: 0.70, mandatory: false },
+    { key: "strip-package", label: "Strip", floor: 40, target: 75, weight: 0.90, mandatory: false },
+    { key: "fury", label: "Fury", floor: 0, target: 65, weight: 0.55, mandatory: false },
+    { key: "quickness", label: "Quickness", floor: 0, target: 65, weight: 0.55, mandatory: false },
+    { key: "resistance", label: "Resistance", floor: 0, target: 45, weight: 0.35, mandatory: false },
+    { key: "cc", label: "CC (combined)", floor: 35, target: 65, weight: 0.70, mandatory: false }
+];
+const COMP_HELPER_PROFILE_FAVORITES = {
+    balanced: {
+        lanes: [],
+        packages: []
+    },
+    offense: {
+        lanes: ["pressure", "conversion", "strip", "control"],
+        packages: ["pressure-package", "might", "strip-package", "fury", "quickness", "cc"]
+    },
+    defense: {
+        lanes: ["boonsupport", "recovery", "rez"],
+        packages: ["stability", "healing", "cleanse", "protection", "barrier", "resistance"]
+    },
+    custom: {
+        lanes: [],
+        packages: []
+    }
+};
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -180,41 +235,96 @@ function buildPillarCard(pillar) {
 function buildAnalysisLinePath(values, minValue = 0, maxValue = 100) {
     const width = 320;
     const height = 118;
-    const numericValues = values
-        .map(value => value == null ? null : Number(value))
-        .filter(value => value != null && !Number.isNaN(value));
+    const normalizedValues = values.map(value => {
+        if (value == null) {
+            return null;
+        }
 
-    if (numericValues.length === 0) {
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? null : numeric;
+    });
+
+    if (!normalizedValues.some(value => value != null)) {
         return "";
     }
 
-    const xStep = numericValues.length <= 1 ? width / 2 : width / (numericValues.length - 1);
+    const xStep = normalizedValues.length <= 1 ? width / 2 : width / (normalizedValues.length - 1);
     const range = Math.max(1, maxValue - minValue);
+    let started = false;
 
-    return numericValues
+    return normalizedValues
         .map((value, index) => {
+            if (value == null) {
+                started = false;
+                return "";
+            }
+
             const x = Math.round(index * xStep * 100) / 100;
-            const clampedValue = Math.max(minValue, Math.min(maxValue, Number(value)));
+            const clampedValue = Math.max(minValue, Math.min(maxValue, value));
             const y = Math.round((height - ((clampedValue - minValue) / range) * height) * 100) / 100;
-            return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+            const command = started ? "L" : "M";
+            started = true;
+            return `${command} ${x} ${y}`;
         })
+        .filter(Boolean)
         .join(" ");
 }
 
+function buildRollingAverage(values, windowSize = ANALYSIS_TREND_ROLLING_WINDOW) {
+    const normalizedValues = values.map(value => {
+        if (value == null) {
+            return null;
+        }
+
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? null : numeric;
+    });
+    const effectiveWindow = Math.max(1, Math.min(windowSize, normalizedValues.filter(value => value != null).length));
+
+    return normalizedValues.map((value, index) => {
+        if (value == null) {
+            return null;
+        }
+
+        let total = 0;
+        let count = 0;
+        for (let cursor = Math.max(0, index - effectiveWindow + 1); cursor <= index; cursor += 1) {
+            const candidate = normalizedValues[cursor];
+            if (candidate == null) {
+                continue;
+            }
+
+            total += candidate;
+            count += 1;
+        }
+
+        return count > 0 ? total / count : null;
+    });
+}
+
 function buildAnalysisChartCard(title, valueLabel, values, detail) {
-    const path = buildAnalysisLinePath(values);
-    const empty = !path;
+    const rawPath = buildAnalysisLinePath(values);
+    const smoothedValues = buildRollingAverage(values);
+    const smoothPath = buildAnalysisLinePath(smoothedValues);
+    const empty = !rawPath && !smoothPath;
+    const numericCount = values.filter(value => value != null && !Number.isNaN(Number(value))).length;
+    const effectiveWindow = Math.max(1, Math.min(ANALYSIS_TREND_ROLLING_WINDOW, numericCount));
+    const smoothingDetail = effectiveWindow >= 2
+        ? `${effectiveWindow}-fight trailing average`
+        : null;
 
     return `
         <article class="analysis-card">
             <strong>${escapeHtml(title)}</strong>
             <div class="analysis-card-value">${escapeHtml(valueLabel)}</div>
             ${detail ? `<div class="table-inline-note">${escapeHtml(detail)}</div>` : ""}
+            ${smoothingDetail ? `<div class="table-inline-note">${escapeHtml(smoothingDetail)}</div>` : ""}
             <svg class="analysis-chart" viewBox="0 0 320 118" preserveAspectRatio="none" aria-hidden="true">
                 <line class="grid-line" x1="0" y1="29.5" x2="320" y2="29.5"></line>
                 <line class="grid-line" x1="0" y1="59" x2="320" y2="59"></line>
                 <line class="grid-line" x1="0" y1="88.5" x2="320" y2="88.5"></line>
-                ${empty ? "" : `<path d="${escapeHtml(path)}"></path>`}
+                ${rawPath ? `<path class="raw-line" d="${escapeHtml(rawPath)}"></path>` : ""}
+                ${smoothPath ? `<path class="trend-line" d="${escapeHtml(smoothPath)}"></path>` : ""}
             </svg>
             ${empty ? `<div class="table-inline-note">No score points available for this selection.</div>` : ""}
         </article>
@@ -419,6 +529,58 @@ function getOutcomeCode(fight) {
 
 function getOutcomeDisplayLabel(fight) {
     return fight.fightIndex?.outcome?.displayLabel ?? "Unavailable";
+}
+
+function getTopBurstActorName(actor) {
+    if (!actor) {
+        return "-";
+    }
+
+    return actor.character
+        || actor.account
+        || (actor.actorId ? `Actor ${actor.actorId}` : "-");
+}
+
+function buildFightBrowserTopBurstActorCell(actor, unitLabel) {
+    if (!actor) {
+        return "-";
+    }
+
+    const lines = [
+        `<strong>${escapeHtml(getTopBurstActorName(actor))}</strong>`
+    ];
+    if (actor.amount > 0) {
+        lines.push(`<span class="table-inline-note">${escapeHtml(`${formatNumber(actor.amount)} ${unitLabel}`)}</span>`);
+    }
+
+    const specLabel = [actor.eliteSpec, actor.profession]
+        .filter(Boolean)
+        .join(" / ");
+    if (specLabel) {
+        lines.push(`<span class="table-inline-note">${escapeHtml(specLabel)}</span>`);
+    }
+
+    return `<div class="table-stack">${lines.join("")}</div>`;
+}
+
+function buildFightBrowserTopBurstEntries(filteredFights) {
+    const allEntries = filteredFights
+        .flatMap(fight => (fight.fightIndex?.topBursts ?? []).map(burst => ({ fight, burst })));
+
+    allEntries.sort((left, right) =>
+        Number(right.burst?.damage ?? 0) - Number(left.burst?.damage ?? 0)
+        || Number(right.burst?.strips ?? 0) - Number(left.burst?.strips ?? 0)
+        || Number(right.burst?.downs ?? 0) - Number(left.burst?.downs ?? 0)
+        || Number(right.burst?.kills ?? 0) - Number(left.burst?.kills ?? 0)
+        || getFightStartValue(right.fight) - getFightStartValue(left.fight)
+        || Number(right.burst?.time ?? 0) - Number(left.burst?.time ?? 0));
+
+    const retainedEntries = allEntries.slice(0, 500);
+    return {
+        allCount: allEntries.length,
+        retainedEntries,
+        displayedEntries: retainedEntries.slice(0, 25)
+    };
 }
 
 function getExecutionScoreLabel(fight) {
@@ -709,6 +871,7 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
 
 function buildAnalysisOverviewCards(snapshot) {
     const overview = snapshot.overview ?? {};
+    const savesSummary = overview.savesSummary ?? null;
     const cards = [
         {
             title: "Average overall",
@@ -749,11 +912,35 @@ function buildAnalysisOverviewCards(snapshot) {
         }
     ];
 
+    if (savesSummary) {
+        const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
+        const availabilityDetail = savesSummary.availableFightCount === filteredFightCount
+            ? "Aggregated across all filtered fights."
+            : `Available in ${formatNumber(savesSummary.availableFightCount)} of ${formatNumber(filteredFightCount)} filtered fights.`;
+        const perDownLabel = savesSummary.savesPerDown != null
+            ? `${formatNumber(savesSummary.savesPerDown, 2)} / down`
+            : `${formatNumber(savesSummary.totalSaves)} saves`;
+
+        cards.push({
+            title: "Saves",
+            value: perDownLabel,
+            detail: availabilityDetail,
+            lines: [
+                `${formatNumber(savesSummary.totalSaves)} saves across ${formatNumber(savesSummary.totalSquadDowns)} squad downs`,
+                `${formatNumber(savesSummary.totalBarrierSaves)} barrier | ${formatNumber(savesSummary.totalDamageReductionSaves)} reduction | ${formatNumber(savesSummary.totalBothSaves)} both`,
+                `${formatNumber(savesSummary.totalBarrierAbsorbed, 0)} barrier absorbed | ${formatNumber(savesSummary.totalEstimatedDamageReduction, 0)} estimated damage reduction`
+            ]
+        });
+    }
+
     return cards.map(card => `
         <article class="analysis-card">
             <strong>${escapeHtml(card.title)}</strong>
             <div class="analysis-card-value">${escapeHtml(card.value)}</div>
             <div class="table-inline-note">${escapeHtml(card.detail)}</div>
+            ${card.lines?.length
+                ? `<div class="table-stack">${card.lines.map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}</div>`
+                : ""}
         </article>
     `).join("");
 }
@@ -1147,6 +1334,1023 @@ function getFilteredAnalysisPlayers(snapshot) {
     });
 
     return sorted;
+}
+
+function normalizeCompLaneKey(value) {
+    return String(value ?? "")
+        .replaceAll(/[^a-z0-9]+/gi, "")
+        .toLowerCase();
+}
+
+function clampNumeric(value, minValue, maxValue) {
+    return Math.max(minValue, Math.min(maxValue, value));
+}
+
+function getCompHelperTotalReliability(totalFightCount) {
+    if (totalFightCount >= 80) {
+        return 1.0;
+    }
+    if (totalFightCount >= 40) {
+        return 0.93;
+    }
+    return 0.84;
+}
+
+function getCompHelperFilteredReliability(filteredFightCount) {
+    if (filteredFightCount >= 20) {
+        return 1.0;
+    }
+    if (filteredFightCount >= 10) {
+        return 0.93;
+    }
+    if (filteredFightCount >= 5) {
+        return 0.82;
+    }
+    return 0.65;
+}
+
+function getCompHelperPercentileScale(values, percentile = 0.85) {
+    const positives = values
+        .map(value => Number(value ?? 0))
+        .filter(value => Number.isFinite(value) && value > 0)
+        .sort((left, right) => left - right);
+    if (positives.length === 0) {
+        return 1;
+    }
+
+    const index = Math.min(positives.length - 1, Math.max(0, Math.ceil(positives.length * percentile) - 1));
+    return Math.max(1, positives[index]);
+}
+
+function getCompHelperNormalizedPackageValue(value, scale) {
+    return clampNumeric((Number(value ?? 0) / Math.max(1, Number(scale ?? 1))) * 100, 0, 100);
+}
+
+function buildCompHelperPackageNormalizers(candidates) {
+    return {
+        healing: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.healingPerFight)),
+        cleanse: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.cleansePerFight)),
+        protectionGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.protectionGenerationPerFight)),
+        protectionPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.protectionPresencePerFight)),
+        stabilityGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.stabilityGenerationPerFight)),
+        stabilityPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.stabilityPresencePerFight)),
+        barrier: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.barrierPerFight)),
+        might: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.mightGenerationPerFight)),
+        furyGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.furyGenerationPerFight)),
+        furyPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.furyPresencePerFight)),
+        quicknessGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.quicknessGenerationPerFight)),
+        quicknessPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.quicknessPresencePerFight)),
+        resistanceGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.resistanceGenerationPerFight)),
+        resistancePresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.resistancePresencePerFight)),
+        strip: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.stripPerFight)),
+        effectiveCrowdControl: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.effectiveCrowdControlPerFight))
+    };
+}
+
+function buildCompHelperPackageScores(packageInputs, laneMap, normalizers) {
+    const pressurePackage = clampNumeric(Number(packageInputs?.pressureStrength ?? 0), 0, 100);
+    const controlStrength = clampNumeric(Number(packageInputs?.controlStrength ?? 0), 0, 100);
+    const stripStrength = clampNumeric(Number(laneMap?.strip?.overallStrengthPercent ?? 0), 0, 100);
+
+    const healing = getCompHelperNormalizedPackageValue(packageInputs?.healingPerFight, normalizers.healing);
+    const cleanse = getCompHelperNormalizedPackageValue(packageInputs?.cleansePerFight, normalizers.cleanse);
+    const protectionGeneration = getCompHelperNormalizedPackageValue(packageInputs?.protectionGenerationPerFight, normalizers.protectionGeneration);
+    const protectionPresence = getCompHelperNormalizedPackageValue(packageInputs?.protectionPresencePerFight, normalizers.protectionPresence);
+    const stabilityGeneration = getCompHelperNormalizedPackageValue(packageInputs?.stabilityGenerationPerFight, normalizers.stabilityGeneration);
+    const stabilityPresence = getCompHelperNormalizedPackageValue(packageInputs?.stabilityPresencePerFight, normalizers.stabilityPresence);
+    const barrier = getCompHelperNormalizedPackageValue(packageInputs?.barrierPerFight, normalizers.barrier);
+    const might = getCompHelperNormalizedPackageValue(packageInputs?.mightGenerationPerFight, normalizers.might);
+    const furyGeneration = getCompHelperNormalizedPackageValue(packageInputs?.furyGenerationPerFight, normalizers.furyGeneration);
+    const furyPresence = getCompHelperNormalizedPackageValue(packageInputs?.furyPresencePerFight, normalizers.furyPresence);
+    const quicknessGeneration = getCompHelperNormalizedPackageValue(packageInputs?.quicknessGenerationPerFight, normalizers.quicknessGeneration);
+    const quicknessPresence = getCompHelperNormalizedPackageValue(packageInputs?.quicknessPresencePerFight, normalizers.quicknessPresence);
+    const resistanceGeneration = getCompHelperNormalizedPackageValue(packageInputs?.resistanceGenerationPerFight, normalizers.resistanceGeneration);
+    const resistancePresence = getCompHelperNormalizedPackageValue(packageInputs?.resistancePresencePerFight, normalizers.resistancePresence);
+    const stripPerFight = getCompHelperNormalizedPackageValue(packageInputs?.stripPerFight, normalizers.strip);
+    const effectiveCrowdControl = getCompHelperNormalizedPackageValue(packageInputs?.effectiveCrowdControlPerFight, normalizers.effectiveCrowdControl);
+
+    return {
+        stability: Math.round((stabilityGeneration * 0.65 + stabilityPresence * 0.35) * 10) / 10,
+        healing: Math.round(healing * 10) / 10,
+        cleanse: Math.round(cleanse * 10) / 10,
+        protection: Math.round((protectionGeneration * 0.30 + protectionPresence * 0.70) * 10) / 10,
+        "pressure-package": Math.round(pressurePackage * 10) / 10,
+        barrier: Math.round(barrier * 10) / 10,
+        might: Math.round(might * 10) / 10,
+        "strip-package": Math.round((stripPerFight * 0.55 + stripStrength * 0.45) * 10) / 10,
+        fury: Math.round((furyGeneration * 0.45 + furyPresence * 0.55) * 10) / 10,
+        quickness: Math.round((quicknessGeneration * 0.55 + quicknessPresence * 0.45) * 10) / 10,
+        resistance: Math.round((resistanceGeneration * 0.25 + resistancePresence * 0.75) * 10) / 10,
+        cc: Math.round((effectiveCrowdControl * 0.55 + controlStrength * 0.45) * 10) / 10
+    };
+}
+
+function buildCompHelperCandidateId(account, characterName, classLabel) {
+    return `${account}::${characterName}::${classLabel}`;
+}
+
+function getCompHelperProfileFavorites(profileKey) {
+    return COMP_HELPER_PROFILE_FAVORITES[profileKey] ?? COMP_HELPER_PROFILE_FAVORITES.balanced;
+}
+
+function syncCompHelperProfileControl() {
+    const select = document.querySelector("#analysis-comp-helper-profile");
+    if (select) {
+        select.value = compHelperProfileKey;
+    }
+}
+
+function applyCompHelperProfile(profileKey) {
+    const resolvedProfileKey = COMP_HELPER_PROFILE_FAVORITES[profileKey] ? profileKey : "balanced";
+    const profile = getCompHelperProfileFavorites(resolvedProfileKey);
+    compHelperProfileKey = resolvedProfileKey;
+    compHelperFavoredLaneKeys = [...profile.lanes];
+    compHelperFavoredPackageKeys = [...profile.packages];
+    syncCompHelperProfileControl();
+}
+
+function syncCompHelperProfileFromFavorites() {
+    const balanced = getCompHelperProfileFavorites("balanced");
+    const offense = getCompHelperProfileFavorites("offense");
+    const defense = getCompHelperProfileFavorites("defense");
+    const lanesKey = [...compHelperFavoredLaneKeys].sort().join("|");
+    const packagesKey = [...compHelperFavoredPackageKeys].sort().join("|");
+    const matchesProfile = profile => lanesKey === [...profile.lanes].sort().join("|")
+        && packagesKey === [...profile.packages].sort().join("|");
+
+    if (matchesProfile(balanced)) {
+        compHelperProfileKey = "balanced";
+    } else if (matchesProfile(offense)) {
+        compHelperProfileKey = "offense";
+    } else if (matchesProfile(defense)) {
+        compHelperProfileKey = "defense";
+    } else {
+        compHelperProfileKey = "custom";
+    }
+
+    syncCompHelperProfileControl();
+}
+
+function toggleCompHelperFavorite(listKey, valueKey) {
+    const source = listKey === "lanes" ? compHelperFavoredLaneKeys : compHelperFavoredPackageKeys;
+    const next = source.includes(valueKey)
+        ? source.filter(key => key !== valueKey)
+        : [...source, valueKey];
+
+    if (listKey === "lanes") {
+        compHelperFavoredLaneKeys = next;
+    } else {
+        compHelperFavoredPackageKeys = next;
+    }
+
+    syncCompHelperProfileFromFavorites();
+}
+
+function buildCompHelperLaneTargets() {
+    const favoredLaneKeySet = new Set(compHelperFavoredLaneKeys);
+    return COMP_HELPER_LANE_TARGETS.map(target => {
+        if (!favoredLaneKeySet.has(target.key)) {
+            return target;
+        }
+
+        return {
+            ...target,
+            floor: target.target,
+            weight: Math.round(target.weight * 1.65 * 100) / 100,
+            favored: true
+        };
+    });
+}
+
+function buildCompHelperPackageTargets() {
+    const favoredPackageKeySet = new Set(compHelperFavoredPackageKeys);
+    return COMP_HELPER_PACKAGE_TARGETS.map(target => {
+        if (!favoredPackageKeySet.has(target.key)) {
+            return target;
+        }
+
+        return {
+            ...target,
+            floor: Math.max(target.floor, target.target),
+            weight: Math.round(target.weight * 1.65 * 100) / 100,
+            favored: true
+        };
+    });
+}
+
+function buildCompHelperFavoriteToggle(target, groupKey, isActive) {
+    const inputId = `comp-helper-favorite-${groupKey}-${target.key}`;
+    return `
+        <label class="comp-helper-favorite ${isActive ? "is-active" : ""}" for="${escapeHtml(inputId)}">
+            <input
+                id="${escapeHtml(inputId)}"
+                type="checkbox"
+                data-comp-helper-favorite-group="${escapeHtml(groupKey)}"
+                data-comp-helper-favorite-key="${escapeHtml(target.key)}"
+                ${isActive ? "checked" : ""}>
+            <span>${escapeHtml(target.label)}</span>
+        </label>
+    `;
+}
+
+function getCompHelperCandidateSearchText(candidate) {
+    return [
+        candidate.account,
+        candidate.displayName,
+        candidate.characterName,
+        candidate.classLabel,
+        ...(candidate.classesPlayed ?? []),
+        ...(candidate.topLaneLabels ?? [])
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+}
+
+function buildCompHelperCandidates(snapshot) {
+    const candidates = (snapshot.topPlayers ?? [])
+        .flatMap(player => (player.characters ?? [])
+            .map(character => ({ player, character })))
+        .map(({ player, character }) => {
+            const totalFightCount = Number(character.totalFightCountAll ?? character.fightCount ?? 0);
+            const filteredFightCount = Number(character.fightCount ?? 0);
+            if (totalFightCount < COMP_HELPER_MIN_TOTAL_FIGHTS || filteredFightCount < COMP_HELPER_MIN_FILTERED_FIGHTS) {
+                return null;
+            }
+
+            const totalReliability = getCompHelperTotalReliability(totalFightCount);
+            const filteredReliability = getCompHelperFilteredReliability(filteredFightCount);
+            const reliability = Math.round(totalReliability * filteredReliability * 1000) / 1000;
+
+            const laneMap = {};
+            for (const target of COMP_HELPER_LANE_TARGETS) {
+                laneMap[target.key] = {
+                    key: target.key,
+                    label: target.label,
+                    overallStrengthPercent: 0,
+                    overallSharePercent: 0,
+                    appearanceRatePercent: 0,
+                    totalSamplesAll: 0,
+                    samples: 0
+                };
+            }
+
+            for (const lane of character.laneContributions ?? []) {
+                const laneKey = normalizeCompLaneKey(lane.laneKey ?? lane.laneLabel);
+                if (!laneKey || !laneMap[laneKey]) {
+                    continue;
+                }
+
+                laneMap[laneKey] = {
+                    key: laneKey,
+                    label: lane.laneLabel ?? laneMap[laneKey].label,
+                    overallStrengthPercent: Number(lane.overallStrengthPercent ?? 0),
+                    overallSharePercent: Number(lane.overallSharePercent ?? 0),
+                    appearanceRatePercent: Number(lane.appearanceRatePercent ?? 0),
+                    totalSamplesAll: Number(lane.totalSamplesAll ?? lane.samples ?? 0),
+                    samples: Number(lane.samples ?? 0)
+                };
+            }
+
+            const effectiveLaneScores = {};
+            for (const target of COMP_HELPER_LANE_TARGETS) {
+                effectiveLaneScores[target.key] = Math.round((laneMap[target.key]?.overallStrengthPercent ?? 0) * reliability * 10) / 10;
+            }
+
+            const orderedLanes = Object.values(laneMap)
+                .sort((left, right) => Number(right.overallStrengthPercent ?? 0) - Number(left.overallStrengthPercent ?? 0)
+                    || Number(right.appearanceRatePercent ?? 0) - Number(left.appearanceRatePercent ?? 0)
+                    || compareFightBrowserValues(String(left.label ?? "").toLowerCase(), String(right.label ?? "").toLowerCase()));
+            const topLaneLabels = orderedLanes
+                .filter(lane => Number(lane.overallStrengthPercent ?? 0) > 0)
+                .slice(0, 3)
+                .map(lane => lane.label);
+            const effectiveLaneValues = Object.values(effectiveLaneScores)
+                .map(value => Number(value ?? 0))
+                .sort((left, right) => right - left);
+            const priorityScore = Math.round((
+                (effectiveLaneValues[0] ?? 0) * 1.0
+                + (effectiveLaneValues[1] ?? 0) * 0.75
+                + (effectiveLaneValues[2] ?? 0) * 0.45
+                + Number(character.impactScore ?? 0) * 0.18
+                + Number(character.winRatePercent ?? 0) * 0.04) * 10) / 10;
+
+            return {
+                id: buildCompHelperCandidateId(player.account, character.characterName, character.classLabel),
+                account: player.account,
+                displayName: player.displayName,
+                characterName: character.characterName,
+                classLabel: character.classLabel,
+                classesPlayed: character.classesPlayed ?? [],
+                filteredFightCount,
+                totalFightCountAll: totalFightCount,
+                winRatePercent: Number(character.winRatePercent ?? 0),
+                impactScore: Number(character.impactScore ?? 0),
+                averageWeightedLaneScore: Number(character.averageWeightedLaneScore ?? 0),
+                averagePrimaryLaneScore: Number(character.averagePrimaryLaneScore ?? 0),
+                primaryLaneLabel: character.primaryLaneLabel ?? topLaneLabels[0] ?? "Unclassified",
+                contributionSummary: character.contributionSummary ?? null,
+                confidenceLabel: character.confidenceLabel ?? null,
+                confidenceDetail: character.confidenceDetail ?? null,
+                packageInputs: character.packageInputs ?? null,
+                totalReliability,
+                filteredReliability,
+                reliability,
+                laneMap,
+                effectiveLaneScores,
+                topLaneLabels,
+                priorityScore
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+            || Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
+            || Number(right.totalFightCountAll ?? 0) - Number(left.totalFightCountAll ?? 0)
+            || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase()));
+
+    const packageNormalizers = buildCompHelperPackageNormalizers(candidates);
+    for (const candidate of candidates) {
+        candidate.packageScores = buildCompHelperPackageScores(candidate.packageInputs ?? {}, candidate.laneMap, packageNormalizers);
+        const topPackageValues = Object.values(candidate.packageScores ?? {})
+            .map(value => Number(value ?? 0))
+            .sort((left, right) => right - left);
+        const packagePriority = (topPackageValues[0] ?? 0) * 0.8
+            + (topPackageValues[1] ?? 0) * 0.45
+            + (topPackageValues[2] ?? 0) * 0.2;
+        candidate.priorityScore = Math.round((Number(candidate.priorityScore ?? 0) * 0.65 + packagePriority * 0.35) * 10) / 10;
+    }
+
+    return candidates.sort((left, right) => Number(right.priorityScore ?? 0) - Number(left.priorityScore ?? 0)
+        || Number(right.impactScore ?? 0) - Number(left.impactScore ?? 0)
+        || Number(right.totalFightCountAll ?? 0) - Number(left.totalFightCountAll ?? 0)
+        || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase()));
+}
+
+function getCompHelperCandidates(snapshot) {
+    const candidates = buildCompHelperCandidates(snapshot);
+    const candidateIds = new Set(candidates.map(candidate => candidate.id));
+    lockedCompHelperCandidateIds = lockedCompHelperCandidateIds.filter(id => candidateIds.has(id));
+    return candidates;
+}
+
+function getLockedCompHelperCandidates(candidates) {
+    const lookup = new Map(candidates.map(candidate => [candidate.id, candidate]));
+    return lockedCompHelperCandidateIds
+        .map(id => lookup.get(id) ?? null)
+        .filter(Boolean);
+}
+
+function evaluateCompHelperTeam(members) {
+    const laneTargets = buildCompHelperLaneTargets();
+    const packageTargets = buildCompHelperPackageTargets();
+    const maxCoverageScore = laneTargets.reduce((sum, lane) => sum + lane.weight * 100, 0);
+    const maxPackageScore = packageTargets.reduce((sum, pkg) => sum + pkg.weight * 100, 0);
+    const laneResults = laneTargets.map(target => {
+        const sortedContributors = [...members]
+            .map(member => ({
+                member,
+                effectiveScore: Number(member.effectiveLaneScores?.[target.key] ?? 0),
+                sharePercent: Number(member.laneMap?.[target.key]?.overallSharePercent ?? 0)
+            }))
+            .filter(entry => entry.effectiveScore > 0)
+            .sort((left, right) => right.effectiveScore - left.effectiveScore
+                || right.sharePercent - left.sharePercent
+                || compareFightBrowserValues(String(left.member.id ?? ""), String(right.member.id ?? "")));
+        const coverage = sortedContributors.reduce((sum, entry, index) =>
+            sum + entry.effectiveScore * (COMP_HELPER_DIMINISHING_WEIGHTS[index] ?? 0), 0);
+        const coverageOfTargetPercent = target.target > 0
+            ? clampNumeric((coverage / target.target) * 100, 0, 115)
+            : 0;
+        const coverageOfFloorPercent = target.floor > 0
+            ? clampNumeric((coverage / target.floor) * 100, 0, 140)
+            : 0;
+        const laneValue = Math.min(1.15, target.target > 0 ? coverage / target.target : 0) * 100 * target.weight;
+        const deficitPenalty = coverage >= target.floor
+            ? 0
+            : target.weight * 120 * Math.pow(1 - coverage / target.floor, 2);
+        const status = coverage >= target.target
+            ? "target"
+            : coverage >= target.floor
+                ? "floor"
+                : "deficit";
+
+        return {
+            key: target.key,
+            label: target.label,
+            floor: target.floor,
+            target: target.target,
+            weight: target.weight,
+            favored: target.favored === true,
+            coverage: Math.round(coverage * 10) / 10,
+            coverageOfTargetPercent: Math.round(coverageOfTargetPercent * 10) / 10,
+            coverageOfFloorPercent: Math.round(coverageOfFloorPercent * 10) / 10,
+            status,
+            topContributors: sortedContributors.slice(0, 2).map(entry => ({
+                account: entry.member.account,
+                characterName: entry.member.characterName,
+                classLabel: entry.member.classLabel,
+                score: Math.round(entry.effectiveScore * 10) / 10
+            })),
+            laneValue,
+            deficitPenalty
+        };
+    });
+
+    const packageResults = packageTargets.map(target => {
+        const sortedContributors = [...members]
+            .map(member => ({
+                member,
+                effectiveScore: Number(member.packageScores?.[target.key] ?? 0)
+            }))
+            .filter(entry => entry.effectiveScore > 0)
+            .sort((left, right) => right.effectiveScore - left.effectiveScore
+                || compareFightBrowserValues(String(left.member.id ?? ""), String(right.member.id ?? "")));
+        const coverage = sortedContributors.reduce((sum, entry, index) =>
+            sum + entry.effectiveScore * (COMP_HELPER_DIMINISHING_WEIGHTS[index] ?? 0), 0);
+        const maxCoverageRatio = target.allowOvercap === false ? 1.0 : 1.15;
+        const maxCoveragePercent = target.allowOvercap === false ? 100 : 115;
+        const coverageOfTargetPercent = target.target > 0
+            ? clampNumeric((coverage / target.target) * 100, 0, maxCoveragePercent)
+            : 0;
+        const coverageOfFloorPercent = target.floor > 0
+            ? clampNumeric((coverage / target.floor) * 100, 0, 140)
+            : 0;
+        const packageValue = Math.min(maxCoverageRatio, target.target > 0 ? coverage / target.target : 0) * 100 * target.weight;
+        const deficitPenalty = target.floor <= 0 || coverage >= target.floor
+            ? 0
+            : target.weight * (target.mandatory ? 160 : 90) * Math.pow(1 - coverage / target.floor, 2);
+        const status = coverage >= target.target
+            ? "target"
+            : target.floor <= 0 || coverage >= target.floor
+                ? "floor"
+                : "deficit";
+
+        return {
+            key: target.key,
+            label: target.label,
+            floor: target.floor,
+            target: target.target,
+            weight: target.weight,
+            mandatory: target.mandatory,
+            allowOvercap: target.allowOvercap !== false,
+            favored: target.favored === true,
+            coverage: Math.round(coverage * 10) / 10,
+            coverageOfTargetPercent: Math.round(coverageOfTargetPercent * 10) / 10,
+            coverageOfFloorPercent: Math.round(coverageOfFloorPercent * 10) / 10,
+            status,
+            topContributors: sortedContributors.slice(0, 2).map(entry => ({
+                account: entry.member.account,
+                characterName: entry.member.characterName,
+                classLabel: entry.member.classLabel,
+                score: Math.round(entry.effectiveScore * 10) / 10
+            })),
+            packageValue,
+            deficitPenalty
+        };
+    });
+
+    const coverageScore = laneResults.reduce((sum, lane) => sum + lane.laneValue, 0);
+    const deficitPenaltyScore = laneResults.reduce((sum, lane) => sum + lane.deficitPenalty, 0);
+    const packageCoverageScore = packageResults.reduce((sum, pkg) => sum + pkg.packageValue, 0);
+    const packagePenaltyScore = packageResults.reduce((sum, pkg) => sum + pkg.deficitPenalty, 0);
+    const riskPenalty = members.reduce((sum, member) => sum + ((1 - Number(member.reliability ?? 0.7)) * 5.0), 0);
+    const laneNormalizedScore = clampNumeric(
+        (coverageScore / Math.max(1, maxCoverageScore)) * 100
+        - (deficitPenaltyScore / Math.max(1, maxCoverageScore)) * 100,
+        0,
+        100);
+    const packageNormalizedScore = clampNumeric(
+        (packageCoverageScore / Math.max(1, maxPackageScore)) * 100
+        - (packagePenaltyScore / Math.max(1, maxPackageScore)) * 100,
+        0,
+        100);
+    const mandatoryPackageDeficitCount = packageResults.filter(pkg => pkg.mandatory && pkg.status === "deficit").length;
+    const normalizedScore = clampNumeric(
+        laneNormalizedScore * 0.58
+        + packageNormalizedScore * 0.42
+        - mandatoryPackageDeficitCount * 6
+        - riskPenalty,
+        0,
+        100);
+    const strongestLane = [...laneResults]
+        .sort((left, right) => right.coverageOfTargetPercent - left.coverageOfTargetPercent
+            || right.coverage - left.coverage)[0] ?? null;
+    const weakestLane = [...laneResults]
+        .sort((left, right) => left.coverageOfFloorPercent - right.coverageOfFloorPercent
+            || left.coverage - right.coverage)[0] ?? null;
+    const strongestPackage = [...packageResults]
+        .sort((left, right) => right.coverageOfTargetPercent - left.coverageOfTargetPercent
+            || right.coverage - left.coverage)[0] ?? null;
+    const weakestPackage = [...packageResults]
+        .sort((left, right) => left.coverageOfFloorPercent - right.coverageOfFloorPercent
+            || left.coverage - right.coverage)[0] ?? null;
+
+    return {
+        score: Math.round(normalizedScore * 10) / 10,
+        laneNormalizedScore: Math.round(laneNormalizedScore * 10) / 10,
+        packageNormalizedScore: Math.round(packageNormalizedScore * 10) / 10,
+        laneResults,
+        packageResults,
+        deficitLabels: laneResults.filter(lane => lane.status === "deficit").map(lane => lane.label),
+        packageDeficitLabels: packageResults.filter(pkg => pkg.status === "deficit").map(pkg => pkg.label),
+        mandatoryPackageDeficitCount,
+        strongestLane,
+        weakestLane,
+        strongestPackage,
+        weakestPackage
+    };
+}
+
+function scoreCompHelperBeamState(members) {
+    const evaluation = evaluateCompHelperTeam(members);
+    const laneTargets = buildCompHelperLaneTargets();
+    const packageTargets = buildCompHelperPackageTargets();
+    const totalWeight = laneTargets.reduce((sum, lane) => sum + lane.weight, 0);
+    const totalPackageWeight = packageTargets.reduce((sum, pkg) => sum + pkg.weight, 0);
+    const floorProgress = evaluation.laneResults.reduce((sum, lane) =>
+        sum + Math.min(1, lane.coverage / lane.floor) * lane.weight, 0) / Math.max(1, totalWeight);
+    const packageFloorProgress = evaluation.packageResults.reduce((sum, pkg) =>
+        sum + Math.min(1, pkg.coverage / Math.max(1, pkg.floor || pkg.target)) * pkg.weight, 0) / Math.max(1, totalPackageWeight);
+    const distinctLaneCount = evaluation.laneResults.filter(lane => lane.coverage >= Math.max(10, lane.floor * 0.35)).length;
+    const favoredLaneHits = evaluation.laneResults.filter(lane => lane.favored && lane.coverage >= lane.target).length;
+    const favoredPackageHits = evaluation.packageResults.filter(pkg => pkg.favored && pkg.coverage >= pkg.target).length;
+    return evaluation.score
+        + floorProgress * 32
+        + packageFloorProgress * 22
+        + distinctLaneCount * 1.8
+        + favoredLaneHits * 8
+        + favoredPackageHits * 8
+        + members.length * 1.5;
+}
+
+function buildCompHelperTeamKey(members) {
+    return [...members]
+        .map(member => member.id)
+        .sort((left, right) => compareFightBrowserValues(left, right))
+        .join("|");
+}
+
+function buildCompHelperSearchPool(candidates, lockedCandidates) {
+    const lockedAccounts = new Set(lockedCandidates.map(candidate => candidate.account));
+    const unlockedCandidates = candidates.filter(candidate => !lockedAccounts.has(candidate.account));
+    const pool = unlockedCandidates.slice(0, COMP_HELPER_SEARCH_POOL_LIMIT);
+    return [...lockedCandidates, ...pool];
+}
+
+function selectDiverseCompHelperSuggestions(suggestions) {
+    const accepted = [];
+    const remaining = suggestions.map(suggestion => ({ ...suggestion, adjustedScore: suggestion.score }));
+
+    while (accepted.length < COMP_HELPER_SUGGESTION_COUNT && remaining.length > 0) {
+        remaining.sort((left, right) => Number(right.adjustedScore ?? 0) - Number(left.adjustedScore ?? 0));
+        const next = remaining.shift();
+        if (!next) {
+            break;
+        }
+
+        accepted.push(next);
+        const nextIds = new Set(next.members.map(member => member.id));
+        for (const suggestion of remaining) {
+            const overlap = suggestion.members.filter(member => nextIds.has(member.id)).length;
+            suggestion.adjustedScore = suggestion.score - Math.max(0, overlap - 2) * 4;
+        }
+    }
+
+    return accepted;
+}
+
+function buildCompHelperSuggestionSummary(suggestion, lockedCandidates) {
+    const evaluation = suggestion.evaluation;
+    const packageDeficits = evaluation.packageDeficitLabels ?? [];
+    if (lockedCandidates.length === 0) {
+        const strongest = evaluation.strongestLane?.label ?? "its strongest lanes";
+        if (evaluation.deficitLabels.length === 0 && packageDeficits.length === 0) {
+            return `Built from scratch to cover all lane floors and mandatory packages, with ${strongest} leading the profile.`;
+        }
+
+        const missingBits = [...evaluation.deficitLabels, ...packageDeficits].slice(0, 3).join(", ");
+        return `Built from scratch around ${strongest}. Still light on ${missingBits}.`;
+    }
+
+    if (suggestion.addedMembers.length === 0) {
+        return evaluation.deficitLabels.length === 0 && packageDeficits.length === 0
+            ? "Fully locked 5-player group. Lane floors and mandatory packages are currently met."
+            : `Fully locked 5-player group. Still light on ${[...evaluation.deficitLabels, ...packageDeficits].slice(0, 3).join(", ")}.`;
+    }
+
+    const improvementLabels = suggestion.improvements
+        .filter(item => item.delta > 0.1)
+        .slice(0, 2)
+        .map(item => item.label);
+    if (improvementLabels.length === 0) {
+        return `Filled around the locked core with ${suggestion.addedMembers.map(member => member.classLabel).join(", ")} while covering package gaps.`;
+    }
+
+    return `Filled around the locked core by lifting ${improvementLabels.join(" and ")}.`;
+}
+
+function searchCompHelperSuggestions(snapshot, candidates) {
+    const lockedCandidates = getLockedCompHelperCandidates(candidates);
+    if (lockedCandidates.length > COMP_HELPER_TEAM_SIZE) {
+        return { lockedCandidates, suggestions: [], shortage: 0 };
+    }
+
+    const searchPool = buildCompHelperSearchPool(candidates, lockedCandidates)
+        .filter(candidate => !lockedCandidates.some(locked => locked.id === candidate.id));
+    const remainingSlots = COMP_HELPER_TEAM_SIZE - lockedCandidates.length;
+    if (remainingSlots <= 0) {
+        const evaluation = evaluateCompHelperTeam(lockedCandidates);
+        return {
+            lockedCandidates,
+            suggestions: [{
+                title: "Locked group",
+                score: evaluation.score,
+                members: lockedCandidates,
+                addedMembers: [],
+                evaluation,
+                improvements: evaluation.laneResults.map(lane => ({ key: lane.key, label: lane.label, delta: lane.coverage }))
+            }],
+            shortage: 0
+        };
+    }
+
+    const uniqueAccounts = new Set(searchPool.map(candidate => candidate.account));
+    if (uniqueAccounts.size < remainingSlots) {
+        return { lockedCandidates, suggestions: [], shortage: remainingSlots - uniqueAccounts.size };
+    }
+
+    let beam = [{
+        members: [...lockedCandidates],
+        usedAccounts: new Set(lockedCandidates.map(candidate => candidate.account)),
+        beamScore: scoreCompHelperBeamState(lockedCandidates)
+    }];
+
+    for (let step = 0; step < remainingSlots; step += 1) {
+        const nextBeam = [];
+        const seenKeys = new Set();
+
+        for (const state of beam) {
+            for (const candidate of searchPool) {
+                if (state.usedAccounts.has(candidate.account)) {
+                    continue;
+                }
+
+                const members = [...state.members, candidate];
+                const key = buildCompHelperTeamKey(members);
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+
+                seenKeys.add(key);
+                nextBeam.push({
+                    members,
+                    usedAccounts: new Set([...state.usedAccounts, candidate.account]),
+                    beamScore: scoreCompHelperBeamState(members)
+                });
+            }
+        }
+
+        nextBeam.sort((left, right) => Number(right.beamScore ?? 0) - Number(left.beamScore ?? 0));
+        beam = nextBeam.slice(0, COMP_HELPER_BEAM_WIDTH);
+        if (beam.length === 0) {
+            break;
+        }
+    }
+
+    const lockedEvaluation = evaluateCompHelperTeam(lockedCandidates);
+    const suggestions = beam
+        .filter(state => state.members.length === COMP_HELPER_TEAM_SIZE)
+        .map((state, index) => {
+            const evaluation = evaluateCompHelperTeam(state.members);
+            const addedMembers = state.members.filter(member => !lockedCandidates.some(locked => locked.id === member.id));
+            const improvements = [
+                ...evaluation.laneResults
+                    .map(lane => {
+                        const baseLane = lockedEvaluation.laneResults.find(item => item.key === lane.key);
+                        return {
+                            key: lane.key,
+                            label: lane.label,
+                            delta: Math.round((lane.coverage - Number(baseLane?.coverage ?? 0)) * 10) / 10
+                        };
+                    }),
+                ...evaluation.packageResults
+                    .map(pkg => {
+                        const basePackage = lockedEvaluation.packageResults.find(item => item.key === pkg.key);
+                        return {
+                            key: `pkg:${pkg.key}`,
+                            label: pkg.label,
+                            delta: Math.round((pkg.coverage - Number(basePackage?.coverage ?? 0)) * 10) / 10
+                        };
+                    })
+            ]
+                .map(item => {
+                    return {
+                        key: item.key,
+                        label: item.label,
+                        delta: item.delta
+                    };
+                })
+                .sort((left, right) => right.delta - left.delta);
+
+            return {
+                title: lockedCandidates.length === 0 ? `Balanced comp ${index + 1}` : `Locked-core fit ${index + 1}`,
+                score: evaluation.score,
+                members: state.members,
+                addedMembers,
+                evaluation,
+                improvements
+            };
+        })
+        .sort((left, right) => Number(right.score ?? 0) - Number(left.score ?? 0));
+
+    return {
+        lockedCandidates,
+        suggestions: selectDiverseCompHelperSuggestions(suggestions),
+        shortage: 0
+    };
+}
+
+function getCompHelperFilteredCandidates(candidates) {
+    const searchValue = document.querySelector("#analysis-comp-helper-search")?.value.trim().toLowerCase() ?? "";
+    if (!searchValue) {
+        return candidates;
+    }
+
+    return candidates.filter(candidate => getCompHelperCandidateSearchText(candidate).includes(searchValue));
+}
+
+function buildCompHelperLockPill(candidate) {
+    return `
+        <div class="comp-helper-lock">
+            <div class="comp-helper-lock-copy">
+                <strong class="mono">${escapeHtml(candidate.account)}</strong>
+                <span class="table-inline-note">${escapeHtml(`${candidate.characterName} / ${candidate.classLabel}`)}</span>
+            </div>
+            <button type="button" data-comp-helper-unlock="${escapeHtml(candidate.id)}">Remove</button>
+        </div>
+    `;
+}
+
+function buildCompHelperCandidateActionLabel(candidate, lockedCandidates, isLocked) {
+    if (isLocked) {
+        return "Locked";
+    }
+
+    const lockedByAccount = lockedCandidates.find(locked => stringEqualsIgnoreCase(locked.account, candidate.account));
+    if (lockedByAccount) {
+        return "Replace";
+    }
+
+    return "Lock";
+}
+
+function buildCompHelperCandidateRow(candidate, lockedCandidates) {
+    const isLocked = lockedCandidates.some(locked => locked.id === candidate.id);
+    const lockedByOtherAccountCard = lockedCandidates.find(locked => stringEqualsIgnoreCase(locked.account, candidate.account) && locked.id !== candidate.id);
+    const disableLock = !isLocked && lockedCandidates.length >= COMP_HELPER_MAX_LOCKED_CARDS && !lockedByOtherAccountCard;
+    const actionLabel = buildCompHelperCandidateActionLabel(candidate, lockedCandidates, isLocked);
+    const topLaneCopy = candidate.topLaneLabels?.length
+        ? candidate.topLaneLabels.join(", ")
+        : "Unclassified";
+
+    return `
+        <tr>
+            <td>
+                <button
+                    class="comp-helper-candidate-action"
+                    type="button"
+                    data-comp-helper-toggle="${escapeHtml(candidate.id)}"
+                    ${disableLock ? "disabled" : ""}>${escapeHtml(actionLabel)}</button>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong class="mono">${escapeHtml(candidate.account)}</strong>
+                    ${candidate.displayName && !stringEqualsIgnoreCase(candidate.displayName, candidate.account)
+                        ? `<span class="table-inline-note">${escapeHtml(`Most-played character: ${candidate.displayName}`)}</span>`
+                        : ""}
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(`${candidate.characterName} / ${candidate.classLabel}`)}</strong>
+                    <span class="table-inline-note">${escapeHtml(topLaneCopy)}</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(formatNumber(candidate.filteredFightCount))}</strong>
+                    <span class="table-inline-note">Current filter</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(formatNumber(candidate.totalFightCountAll))}</strong>
+                    <span class="table-inline-note">Imported total</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(candidate.primaryLaneLabel ?? "Unclassified")}</strong>
+                    <span class="table-inline-note">${escapeHtml(`${formatPercent(candidate.averagePrimaryLaneScore)} primary`)}</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(`Fit ${formatNumber(candidate.priorityScore, 1)}`)}</strong>
+                    <span class="table-inline-note">${escapeHtml(`Impact ${formatNumber(candidate.impactScore, 1)} | reliability ${formatPercent(candidate.reliability * 100, 0)}`)}</span>
+                </div>
+            </td>
+        </tr>
+    `;
+}
+
+function getCompHelperTopPackageLabel(member) {
+    const ordered = COMP_HELPER_PACKAGE_TARGETS
+        .map(pkg => ({
+            label: pkg.label,
+            score: Number(member.packageScores?.[pkg.key] ?? 0)
+        }))
+        .sort((left, right) => right.score - left.score);
+    return ordered[0]?.score > 0 ? `${ordered[0].label} ${formatNumber(ordered[0].score, 1)}` : "No package signal";
+}
+
+function buildCompHelperMemberCard(member, lockedIds) {
+    const memberClasses = ["comp-helper-member"];
+    if (lockedIds.has(member.id)) {
+        memberClasses.push("is-locked");
+    }
+
+    return `
+        <article class="${memberClasses.join(" ")}">
+            <strong>${escapeHtml(`${member.characterName} / ${member.classLabel}`)}</strong>
+            <div class="table-inline-note mono">${escapeHtml(member.account)}</div>
+            <div class="comp-helper-member-meta">
+                <span>${escapeHtml(lockedIds.has(member.id) ? "Locked" : "Added")}</span>
+                <span>${escapeHtml(`${formatNumber(member.filteredFightCount)} filtered`)}</span>
+                <span>${escapeHtml(`${formatPercent(member.winRatePercent)} wins`)}</span>
+            </div>
+            <div class="table-inline-note">${escapeHtml(`Primary lane: ${member.primaryLaneLabel ?? "Unclassified"} | top package: ${getCompHelperTopPackageLabel(member)}`)}</div>
+        </article>
+    `;
+}
+
+function buildCompHelperLaneRow(lane) {
+    const rowClass = lane.status === "target"
+        ? "is-target"
+        : lane.status === "deficit"
+            ? "is-deficit"
+            : "";
+    const contributorCopy = lane.topContributors?.length
+        ? lane.topContributors.map(contributor => `${contributor.classLabel} ${formatNumber(contributor.score, 1)}`).join(" | ")
+        : "No visible contributors";
+    const label = lane.favored ? `${lane.label} *` : lane.label;
+    const targetCopy = lane.favored ? "favored target" : "target";
+
+    return `
+        <div class="comp-helper-lane-row ${rowClass}">
+            <strong>${escapeHtml(label)}</strong>
+            <div class="comp-helper-lane-bar">
+                <span class="comp-helper-lane-fill" style="width: ${escapeHtml(`${clampNumeric(lane.coverageOfTargetPercent, 0, 115)}%`)}"></span>
+            </div>
+            <div class="table-stack">
+                <strong>${escapeHtml(`${formatPercent(lane.coverageOfTargetPercent)} of ${targetCopy}`)}</strong>
+                <span class="table-inline-note">${escapeHtml(`${formatPercent(lane.coverageOfFloorPercent)} of floor | ${contributorCopy}`)}</span>
+            </div>
+        </div>
+    `;
+}
+
+function buildCompHelperSuggestionCard(suggestion, lockedCandidates, displayIndex) {
+    const lockedIds = new Set(lockedCandidates.map(candidate => candidate.id));
+    const summary = buildCompHelperSuggestionSummary(suggestion, lockedCandidates);
+    const deficitCopy = suggestion.evaluation.deficitLabels.length === 0
+        ? "All v1 lane floors are currently met."
+        : `Below floor: ${suggestion.evaluation.deficitLabels.join(", ")}.`;
+    const packageDeficitCopy = suggestion.evaluation.packageDeficitLabels.length === 0
+        ? "Mandatory packages are currently covered."
+        : `Package gaps: ${suggestion.evaluation.packageDeficitLabels.join(", ")}.`;
+
+    return `
+        <article class="comp-helper-card">
+            <div class="comp-helper-card-header">
+                <div>
+                    <strong>${escapeHtml(suggestion.title.replace(/\d+$/, String(displayIndex + 1)))}</strong>
+                    <p class="workspace-note comp-helper-section-note">${escapeHtml(summary)}</p>
+                </div>
+                <div class="comp-helper-score">${escapeHtml(formatNumber(suggestion.score, 1))}</div>
+            </div>
+            <ul class="tag-list">
+                <li>${escapeHtml(`Strongest: ${suggestion.evaluation.strongestLane?.label ?? "n/a"}`)}</li>
+                <li>${escapeHtml(`Weakest: ${suggestion.evaluation.weakestLane?.label ?? "n/a"}`)}</li>
+                <li>${escapeHtml(deficitCopy)}</li>
+                <li>${escapeHtml(`Packages ${formatNumber(suggestion.evaluation.packageNormalizedScore, 1)}`)}</li>
+                <li>${escapeHtml(`Strongest package: ${suggestion.evaluation.strongestPackage?.label ?? "n/a"}`)}</li>
+                <li>${escapeHtml(`Weakest package: ${suggestion.evaluation.weakestPackage?.label ?? "n/a"}`)}</li>
+                <li>${escapeHtml(packageDeficitCopy)}</li>
+            </ul>
+            <div class="comp-helper-member-grid">
+                ${suggestion.members.map(member => buildCompHelperMemberCard(member, lockedIds)).join("")}
+            </div>
+            <p class="table-inline-note">Lane coverage</p>
+            <div class="comp-helper-lane-grid">
+                ${suggestion.evaluation.laneResults.map(buildCompHelperLaneRow).join("")}
+            </div>
+            <p class="table-inline-note">Package coverage</p>
+            <div class="comp-helper-lane-grid">
+                ${suggestion.evaluation.packageResults.map(buildCompHelperLaneRow).join("")}
+            </div>
+        </article>
+    `;
+}
+
+function renderAnalysisCompHelper(snapshot) {
+    const summary = document.querySelector("#analysis-comp-helper-summary");
+    const locksContainer = document.querySelector("#analysis-comp-helper-locks");
+    const candidatesBody = document.querySelector("#analysis-comp-helper-candidates-body");
+    const suggestionsContainer = document.querySelector("#analysis-comp-helper-suggestions");
+    const favoredLanesContainer = document.querySelector("#analysis-comp-helper-favored-lanes");
+    const favoredPackagesContainer = document.querySelector("#analysis-comp-helper-favored-packages");
+    if (!summary || !locksContainer || !candidatesBody || !suggestionsContainer || !favoredLanesContainer || !favoredPackagesContainer) {
+        return;
+    }
+
+    const candidates = getCompHelperCandidates(snapshot);
+    const lockedCandidates = getLockedCompHelperCandidates(candidates);
+    const filteredCandidates = getCompHelperFilteredCandidates(candidates);
+    const searchResult = searchCompHelperSuggestions(snapshot, candidates);
+    syncCompHelperProfileControl();
+    favoredLanesContainer.innerHTML = COMP_HELPER_LANE_TARGETS
+        .map(target => buildCompHelperFavoriteToggle(target, "lanes", compHelperFavoredLaneKeys.includes(target.key)))
+        .join("");
+    favoredPackagesContainer.innerHTML = COMP_HELPER_PACKAGE_TARGETS
+        .map(target => buildCompHelperFavoriteToggle(target, "packages", compHelperFavoredPackageKeys.includes(target.key)))
+        .join("");
+    const lockedCopy = lockedCandidates.length === 0
+        ? `No locked cards. V2 is searching from scratch over cards with at least ${COMP_HELPER_MIN_FILTERED_FIGHTS} filtered fights and ${COMP_HELPER_MIN_TOTAL_FIGHTS} imported total fights.`
+        : `Locked ${lockedCandidates.length} of ${COMP_HELPER_TEAM_SIZE} cards. Suggestions fill the remaining ${Math.max(0, COMP_HELPER_TEAM_SIZE - lockedCandidates.length)} slots with lane and package coverage in mind.`;
+    const shortageCopy = searchResult.shortage > 0
+        ? `Not enough unique unlocked accounts remain to fill the team. Need ${searchResult.shortage} more account${searchResult.shortage === 1 ? "" : "s"}.`
+        : null;
+    const profileCopy = compHelperProfileKey === "custom"
+        ? "Custom priorities are active."
+        : `${compHelperProfileKey.charAt(0).toUpperCase()}${compHelperProfileKey.slice(1)} profile is active.`;
+    const favoredLaneCopy = compHelperFavoredLaneKeys.length > 0
+        ? `Favored lanes: ${COMP_HELPER_LANE_TARGETS.filter(target => compHelperFavoredLaneKeys.includes(target.key)).map(target => target.label).join(", ")}.`
+        : "No extra lanes are favored.";
+    const favoredPackageCopy = compHelperFavoredPackageKeys.length > 0
+        ? `Favored packages: ${COMP_HELPER_PACKAGE_TARGETS.filter(target => compHelperFavoredPackageKeys.includes(target.key)).map(target => target.label).join(", ")}.`
+        : "No extra packages are favored.";
+
+    summary.textContent = `${filteredCandidates.length} candidate cards available. ${profileCopy} ${lockedCopy} Mandatory packages: Stability, Healing, Cleanse, Protection, and Pressure. Secondary packages include Barrier, Might, Strip, Fury, Quickness, Resistance, and combined CC. ${favoredLaneCopy} ${favoredPackageCopy}${shortageCopy ? ` ${shortageCopy}` : ""}`;
+
+    locksContainer.innerHTML = lockedCandidates.length > 0
+        ? lockedCandidates.map(buildCompHelperLockPill).join("")
+        : `<div class="table-inline-note">No cards locked yet. Lock 1 to 4 cards to fill around an existing core, leave it empty to build from scratch, or lock all 5 to score a fixed group.</div>`;
+
+    candidatesBody.innerHTML = filteredCandidates.length > 0
+        ? filteredCandidates.map(candidate => buildCompHelperCandidateRow(candidate, lockedCandidates)).join("")
+        : `<tr><td colspan="7">No candidate cards matched the current comp-helper thresholds or search.</td></tr>`;
+
+    suggestionsContainer.className = "comp-helper-suggestions";
+    suggestionsContainer.innerHTML = searchResult.suggestions.length > 0
+        ? searchResult.suggestions.map((suggestion, index) => buildCompHelperSuggestionCard(suggestion, lockedCandidates, index)).join("")
+        : `<article class="comp-helper-card"><strong>No complete comp suggestions yet.</strong><p class="workspace-note comp-helper-section-note">${escapeHtml(shortageCopy ?? "Try clearing some locks or widening the current analysis filters so more candidate cards qualify.")}</p></article>`;
+}
+
+function toggleCompHelperCandidateLock(candidateId) {
+    if (!currentAnalysisSnapshot || !candidateId) {
+        return;
+    }
+
+    const candidates = getCompHelperCandidates(currentAnalysisSnapshot);
+    const candidate = candidates.find(item => item.id === candidateId);
+    if (!candidate) {
+        return;
+    }
+
+    if (lockedCompHelperCandidateIds.includes(candidateId)) {
+        lockedCompHelperCandidateIds = lockedCompHelperCandidateIds.filter(id => id !== candidateId);
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+        return;
+    }
+
+    const existingByAccount = candidates.find(item =>
+        lockedCompHelperCandidateIds.includes(item.id)
+        && stringEqualsIgnoreCase(item.account, candidate.account));
+    if (existingByAccount) {
+        lockedCompHelperCandidateIds = lockedCompHelperCandidateIds.filter(id => id !== existingByAccount.id);
+        lockedCompHelperCandidateIds.push(candidateId);
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+        return;
+    }
+
+    if (lockedCompHelperCandidateIds.length >= COMP_HELPER_MAX_LOCKED_CARDS) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+        return;
+    }
+
+    lockedCompHelperCandidateIds = [...lockedCompHelperCandidateIds, candidateId];
+    renderAnalysisCompHelper(currentAnalysisSnapshot);
 }
 
 function buildAnalysisPlayerRow(player, isSelected) {
@@ -1977,6 +3181,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisClasses(snapshot);
     renderAnalysisLanes(snapshot);
     renderAnalysisBoons(snapshot);
+    renderAnalysisCompHelper(snapshot);
 
     setActiveAnalysisTab(activeAnalysisTab);
 }
@@ -2078,11 +3283,73 @@ function buildFightBrowserRow(fight, selectedFightId) {
     `;
 }
 
+function buildFightBrowserTopBurstRow(entry) {
+    const burst = entry.burst;
+    const fight = entry.fight;
+    const fightTime = formatDate(fight.fightIndex?.timeStartStandard ?? fight.fightIndex?.timeStart);
+    const logFile = fight.sourceFileName ?? fight.fightId;
+    const burstTime = burst.timeLabel || formatSeconds(Number(burst.time ?? 0) / 1000, 3);
+
+    return `
+        <tr>
+            <td>${escapeHtml(fightTime || "-")}</td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(logFile)}</strong>
+                    <span class="table-inline-note">${escapeHtml(fight.fightId)}</span>
+                </div>
+            </td>
+            <td>${escapeHtml(burstTime)}</td>
+            <td>${buildFightBrowserTopBurstActorCell(burst.topPressure, "damage")}</td>
+            <td>${escapeHtml(formatNumber(burst.damage))}</td>
+            <td>${buildFightBrowserTopBurstActorCell(burst.topStrips, "strips")}</td>
+            <td>${escapeHtml(formatNumber(burst.strips))}</td>
+            <td>${escapeHtml(formatNumber(burst.downs))}</td>
+            <td>${escapeHtml(formatNumber(burst.kills))}</td>
+        </tr>
+    `;
+}
+
+function renderFightBrowserTopBursts(filteredFights) {
+    const panel = document.querySelector("#fight-browser-top-bursts-panel");
+    const summary = document.querySelector("#fight-browser-top-bursts-summary");
+    const body = document.querySelector("#fight-browser-top-bursts-body");
+    const toggle = document.querySelector("#fight-browser-top-bursts-toggle");
+
+    toggle.textContent = showFightBrowserTopBursts ? "Hide Top Bursts" : "Top Bursts";
+    panel.hidden = !showFightBrowserTopBursts;
+
+    const burstState = buildFightBrowserTopBurstEntries(filteredFights);
+
+    if (burstState.displayedEntries.length === 0) {
+        summary.textContent = filteredFights.length === 0
+            ? "No fights matched the current Fight Browser filters."
+            : "No retained top-burst snapshots matched the current Fight Browser filters.";
+        body.innerHTML = `
+            <tr>
+                <td colspan="9">${escapeHtml(filteredFights.length === 0
+                    ? "No fights matched the current filters."
+                    : "No retained top-burst snapshots are available for the current filter set. Rebuild the catalog after reparsing with the current parser if these fights predate burst export.")}</td>
+            </tr>
+        `;
+        return;
+    }
+
+    summary.textContent = burstState.allCount > 500
+        ? `Showing top ${burstState.displayedEntries.length} of 500 retained bursts from ${filteredFights.length} filtered fights.`
+        : `Showing top ${burstState.displayedEntries.length} of ${burstState.retainedEntries.length} retained bursts from ${filteredFights.length} filtered fights.`;
+
+    body.innerHTML = burstState.displayedEntries
+        .map(buildFightBrowserTopBurstRow)
+        .join("");
+}
+
 function renderFightBrowser(snapshot, selectedFightId) {
     const summary = document.querySelector("#fight-browser-summary");
     const body = document.querySelector("#fight-browser-body");
     const filteredFights = applyFightBrowserFilters(snapshot);
     updateFightBrowserSortHeaders();
+    renderFightBrowserTopBursts(filteredFights);
 
     summary.textContent = snapshot.fightBrowser.failedCount > 0
         ? `Showing ${filteredFights.length} of ${snapshot.fightBrowser.totalCount} imported fights. ${snapshot.fightBrowser.failedCount} parser-failed rows are kept out of the fight browser.`
@@ -2100,6 +3367,13 @@ function renderFightBrowser(snapshot, selectedFightId) {
     body.innerHTML = filteredFights
         .map(fight => buildFightBrowserRow(fight, selectedFightId))
         .join("");
+}
+
+function toggleFightBrowserTopBursts() {
+    showFightBrowserTopBursts = !showFightBrowserTopBursts;
+    if (currentDashboardSnapshot) {
+        renderFightBrowser(currentDashboardSnapshot, getSelectedFightId());
+    }
 }
 
 function renderFightDossier(detail) {
@@ -2552,6 +3826,10 @@ async function refreshAnalysis() {
         setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">Analysis data could not be loaded.</td></tr>`);
         setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">Analysis data could not be loaded.</td></tr>`);
         setInnerHtml("#analysis-boon-detail", "");
+        document.querySelector("#analysis-comp-helper-summary").textContent = "Analysis data could not be loaded.";
+        setInnerHtml("#analysis-comp-helper-locks", "");
+        setInnerHtml("#analysis-comp-helper-candidates-body", `<tr><td colspan="7">Analysis data could not be loaded.</td></tr>`);
+        setInnerHtml("#analysis-comp-helper-suggestions", "");
     } finally {
         button.disabled = false;
     }
@@ -2689,6 +3967,7 @@ document.querySelector("#batch-results-show-all").addEventListener("change", () 
 document.querySelector("#batch-results-show-excluded").addEventListener("change", () => renderBatchResults(lastBatchResult));
 document.querySelector("#fight-browser-search").addEventListener("input", handleFightBrowserChange);
 document.querySelector("#fight-browser-outcome").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-top-bursts-toggle").addEventListener("click", toggleFightBrowserTopBursts);
 document.querySelector("#analysis-player-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
@@ -2697,6 +3976,61 @@ document.querySelector("#analysis-player-search").addEventListener("input", () =
 document.querySelector("#analysis-player-lane-filter").addEventListener("change", () => {
     if (currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-search").addEventListener("input", () => {
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-profile").addEventListener("change", event => {
+    applyCompHelperProfile(event.target.value);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-clear-locks").addEventListener("click", () => {
+    lockedCompHelperCandidateIds = [];
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-locks").addEventListener("click", event => {
+    const button = event.target.closest("[data-comp-helper-unlock]");
+    if (!button) {
+        return;
+    }
+
+    toggleCompHelperCandidateLock(button.dataset.compHelperUnlock);
+});
+document.querySelector("#analysis-comp-helper-candidates-body").addEventListener("click", event => {
+    const button = event.target.closest("[data-comp-helper-toggle]");
+    if (!button || button.disabled) {
+        return;
+    }
+
+    toggleCompHelperCandidateLock(button.dataset.compHelperToggle);
+});
+document.querySelector("#analysis-comp-helper-favored-lanes").addEventListener("change", event => {
+    const input = event.target.closest("[data-comp-helper-favorite-group]");
+    if (!input) {
+        return;
+    }
+
+    toggleCompHelperFavorite(input.dataset.compHelperFavoriteGroup, input.dataset.compHelperFavoriteKey);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-comp-helper-favored-packages").addEventListener("change", event => {
+    const input = event.target.closest("[data-comp-helper-favorite-group]");
+    if (!input) {
+        return;
+    }
+
+    toggleCompHelperFavorite(input.dataset.compHelperFavoriteGroup, input.dataset.compHelperFavoriteKey);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
     }
 });
 document.querySelector("#analysis-players-body").addEventListener("click", event => {
@@ -2774,6 +4108,7 @@ document.querySelectorAll("[data-analysis-tab]").forEach(button => {
 });
 
 hydrateBatchForm();
+applyCompHelperProfile("balanced");
 main();
 
 function stringEqualsIgnoreCase(left, right) {

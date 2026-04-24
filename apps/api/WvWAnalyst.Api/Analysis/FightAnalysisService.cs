@@ -127,6 +127,7 @@ public sealed class FightAnalysisService
         double averageDurationSeconds = fights.Count == 0
             ? 0.0
             : Math.Round(fights.Average(fight => (fight.FightIndex?.DurationMilliseconds ?? 0) / 1000.0), 1);
+        var savesSummary = BuildSavesSummary(fights);
 
         return new FightAnalysisOverviewDto(
             AverageOverallScore: executionScores.Length == 0 ? null : Math.Round(executionScores.Average(), 1),
@@ -137,7 +138,50 @@ public sealed class FightAnalysisService
             AverageResilienceScore: GetPillarAverage(pillarLookup, "resilience-stabilization"),
             AverageSquadSize: averageSquadSize,
             AverageEnemySize: averageEnemySize,
-            AverageDurationSeconds: averageDurationSeconds);
+            AverageDurationSeconds: averageDurationSeconds,
+            SavesSummary: savesSummary);
+    }
+
+    private static FightAnalysisSaveSummaryDto? BuildSavesSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var saveSamples = fights
+            .Select(fight => new
+            {
+                DefenseSaves = fight.FightIndex?.DefenseSaves,
+                SquadDowns = fight.FightIndex?.Execution?.Outcome?.SquadDowns
+            })
+            .Where(sample => sample.DefenseSaves is not null)
+            .ToArray();
+
+        if (saveSamples.Length == 0)
+        {
+            return null;
+        }
+
+        int totalSaves = saveSamples.Sum(sample => sample.DefenseSaves!.SavedCases);
+        int totalBarrierSaves = saveSamples.Sum(sample => sample.DefenseSaves!.BarrierSavedCases);
+        int totalDamageReductionSaves = saveSamples.Sum(sample => sample.DefenseSaves!.DamageReductionSavedCases);
+        int totalBothSaves = saveSamples.Sum(sample => sample.DefenseSaves!.BothSavedCases);
+        int totalSquadDowns = saveSamples.Sum(sample => Math.Max(0, sample.SquadDowns ?? 0));
+        double totalBarrierAbsorbed = Math.Round(saveSamples.Sum(sample => sample.DefenseSaves!.TotalBarrierAbsorbed), 1);
+        double totalEstimatedDamageReduction = Math.Round(saveSamples.Sum(sample => sample.DefenseSaves!.TotalEstimatedDamageReduction), 0);
+
+        double? savesPerDown = totalSquadDowns > 0 ? Math.Round(totalSaves / (double)totalSquadDowns, 2) : null;
+        double? barrierSavesPerDown = totalSquadDowns > 0 ? Math.Round(totalBarrierSaves / (double)totalSquadDowns, 2) : null;
+        double? damageReductionSavesPerDown = totalSquadDowns > 0 ? Math.Round(totalDamageReductionSaves / (double)totalSquadDowns, 2) : null;
+
+        return new FightAnalysisSaveSummaryDto(
+            AvailableFightCount: saveSamples.Length,
+            TotalSaves: totalSaves,
+            TotalBarrierSaves: totalBarrierSaves,
+            TotalDamageReductionSaves: totalDamageReductionSaves,
+            TotalBothSaves: totalBothSaves,
+            TotalSquadDowns: totalSquadDowns,
+            SavesPerDown: savesPerDown,
+            BarrierSavesPerDown: barrierSavesPerDown,
+            DamageReductionSavesPerDown: damageReductionSavesPerDown,
+            TotalBarrierAbsorbed: totalBarrierAbsorbed,
+            TotalEstimatedDamageReduction: totalEstimatedDamageReduction);
     }
 
     private static IReadOnlyList<FightAnalysisTrendPointDto> BuildTrends(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -571,6 +615,7 @@ public sealed class FightAnalysisService
                     ? totalFightCount
                     : sampleCount;
                 var classLabels = new[] { cardClassLabel };
+                var aggregatedProvidedBoons = AggregateProvidedBoonsByFight(characterEntries, sampleCount);
 
                 var laneContributions = mergedFightEntries
                     .SelectMany(entry => entry.Lanes)
@@ -668,6 +713,14 @@ public sealed class FightAnalysisService
                 var confidenceLabel = PickMostCommonNonEmpty(mergedFightEntries.Select(entry => entry.EvaluationConfidenceLabel))
                     ?? DeriveCharacterConfidenceLabel(sampleCount);
                 var confidenceDetail = PickMostCommonNonEmpty(mergedFightEntries.Select(entry => entry.EvaluationConfidenceDetail));
+                var packageInputs = BuildCharacterPackageInputs(
+                    laneContributions,
+                    aggregatedProvidedBoons,
+                    sampleCount,
+                    averageHealing,
+                    averageCleanses,
+                    averageBarrier,
+                    averageStrips);
                 var evidenceLines = mergedFightEntries
                     .SelectMany(entry => entry.EvidenceSnapshot)
                     .Where(line => !string.IsNullOrWhiteSpace(line))
@@ -703,6 +756,7 @@ public sealed class FightAnalysisService
                     AverageRecoveriesPerFight: averageRecoveries,
                     AverageActivePresencePercent: Math.Round(ComputeAveragePresencePercent(mergedFightEntries, entry => entry.ActiveSeconds), 1),
                     AverageEngagedPresencePercent: Math.Round(ComputeAveragePresencePercent(mergedFightEntries, entry => entry.CombatSeconds), 1),
+                    PackageInputs: packageInputs,
                     EvidenceLines: evidenceLines,
                     LaneContributions: laneContributions);
             })
@@ -969,6 +1023,134 @@ public sealed class FightAnalysisService
     private static string BuildClassPlayerAggregateKey(string classLabel, string playerIdentity)
     {
         return $"{classLabel}\u001F{playerIdentity}";
+    }
+
+    private static FightAnalysisCharacterPackageInputsDto BuildCharacterPackageInputs(
+        IReadOnlyList<FightAnalysisCharacterLaneContributionDto> laneContributions,
+        IReadOnlyDictionary<string, AggregatedProvidedBoonSample> aggregatedProvidedBoons,
+        int sampleCount,
+        double averageHealing,
+        double averageCleanses,
+        double averageBarrier,
+        double averageStrips)
+    {
+        var pressureLane = GetLaneContribution(laneContributions, "pressure");
+        var controlLane = GetLaneContribution(laneContributions, "control");
+        var effectiveCrowdControlPerFight = GetLaneMetricPerFight(laneContributions, "control", "effectiveCrowdControlCount", sampleCount);
+
+        var stability = GetProvidedBoon(aggregatedProvidedBoons, "stability");
+        var protection = GetProvidedBoon(aggregatedProvidedBoons, "protection");
+        var might = GetProvidedBoon(aggregatedProvidedBoons, "might");
+        var fury = GetProvidedBoon(aggregatedProvidedBoons, "fury");
+        var quickness = GetProvidedBoon(aggregatedProvidedBoons, "quickness");
+        var resistance = GetProvidedBoon(aggregatedProvidedBoons, "resistance");
+
+        return new FightAnalysisCharacterPackageInputsDto(
+            PressureStrength: Math.Round(pressureLane?.OverallStrengthPercent ?? 0.0, 1),
+            HealingPerFight: Math.Round(averageHealing, 1),
+            CleansePerFight: Math.Round(averageCleanses, 1),
+            ProtectionGenerationPerFight: Math.Round(protection?.GenerationPerFight ?? 0.0, 1),
+            ProtectionPresencePerFight: Math.Round(protection?.PresencePerFight ?? 0.0, 1),
+            StabilityGenerationPerFight: Math.Round(stability?.GenerationPerFight ?? 0.0, 1),
+            StabilityPresencePerFight: Math.Round(stability?.PresencePerFight ?? 0.0, 1),
+            BarrierPerFight: Math.Round(averageBarrier, 1),
+            MightGenerationPerFight: Math.Round(might?.GenerationPerFight ?? 0.0, 1),
+            FuryGenerationPerFight: Math.Round(fury?.GenerationPerFight ?? 0.0, 1),
+            FuryPresencePerFight: Math.Round(fury?.PresencePerFight ?? 0.0, 1),
+            QuicknessGenerationPerFight: Math.Round(quickness?.GenerationPerFight ?? 0.0, 1),
+            QuicknessPresencePerFight: Math.Round(quickness?.PresencePerFight ?? 0.0, 1),
+            ResistanceGenerationPerFight: Math.Round(resistance?.GenerationPerFight ?? 0.0, 1),
+            ResistancePresencePerFight: Math.Round(resistance?.PresencePerFight ?? 0.0, 1),
+            StripPerFight: Math.Round(averageStrips, 1),
+            ControlStrength: Math.Round(controlLane?.OverallStrengthPercent ?? 0.0, 1),
+            EffectiveCrowdControlPerFight: Math.Round(effectiveCrowdControlPerFight, 1));
+    }
+
+    private static IReadOnlyDictionary<string, AggregatedProvidedBoonSample> AggregateProvidedBoonsByFight(
+        IReadOnlyList<PlayerFightSample> entries,
+        int sampleCount)
+    {
+        if (sampleCount <= 0)
+        {
+            return new Dictionary<string, AggregatedProvidedBoonSample>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return entries
+            .GroupBy(entry => entry.Fight.FightId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => MergePlayerFightProvidedBoonSample(group.ToArray()))
+            .SelectMany(sample => sample.ProvidedBoons)
+            .GroupBy(boon => NormalizeLookupKey(boon.Name), StringComparer.OrdinalIgnoreCase)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var sample = group.First();
+                    return new AggregatedProvidedBoonSample(
+                        Key: group.Key,
+                        Name: sample.Name,
+                        GenerationPerFight: group.Sum(boon => boon.Generation) / sampleCount,
+                        PresencePerFight: group.Sum(boon => boon.GenerationPresence) / sampleCount,
+                        OverstackPerFight: group.Sum(boon => boon.Overstack) / sampleCount);
+                },
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static FightAnalysisCharacterLaneContributionDto? GetLaneContribution(
+        IReadOnlyList<FightAnalysisCharacterLaneContributionDto> laneContributions,
+        string laneKey)
+    {
+        string normalizedLaneKey = NormalizeLookupKey(laneKey);
+        return laneContributions.FirstOrDefault(lane =>
+            string.Equals(NormalizeLookupKey(lane.LaneKey), normalizedLaneKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(NormalizeLookupKey(lane.LaneLabel), normalizedLaneKey, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static double GetLaneMetricPerFight(
+        IReadOnlyList<FightAnalysisCharacterLaneContributionDto> laneContributions,
+        string laneKey,
+        string metricKey,
+        int sampleCount)
+    {
+        if (sampleCount <= 0)
+        {
+            return 0.0;
+        }
+
+        var lane = GetLaneContribution(laneContributions, laneKey);
+        if (lane is null)
+        {
+            return 0.0;
+        }
+
+        string normalizedMetricKey = NormalizeLookupKey(metricKey);
+        var metric = (lane.Metrics ?? Array.Empty<FightAnalysisLaneMetricDto>())
+            .FirstOrDefault(item =>
+                string.Equals(NormalizeLookupKey(item.Key), normalizedMetricKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(NormalizeLookupKey(item.Label), normalizedMetricKey, StringComparison.OrdinalIgnoreCase));
+        return metric is null ? 0.0 : metric.TotalValue / sampleCount;
+    }
+
+    private static AggregatedProvidedBoonSample? GetProvidedBoon(
+        IReadOnlyDictionary<string, AggregatedProvidedBoonSample> aggregatedProvidedBoons,
+        string boonName)
+    {
+        return aggregatedProvidedBoons.TryGetValue(NormalizeLookupKey(boonName), out var boon)
+            ? boon
+            : null;
+    }
+
+    private static string NormalizeLookupKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
     }
 
     private static double ComputeAveragePresencePercent(
@@ -1599,3 +1781,10 @@ internal sealed record MergedProvidedBoonSample(
     double Generation,
     double GenerationPresence,
     double Overstack);
+
+internal sealed record AggregatedProvidedBoonSample(
+    string Key,
+    string Name,
+    double GenerationPerFight,
+    double PresencePerFight,
+    double OverstackPerFight);

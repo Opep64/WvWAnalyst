@@ -343,7 +343,7 @@ public sealed class ParserImportService
                 if (indexedFight is not null)
                 {
                     fightIndex = new FightIndexSnapshot(
-                        SchemaVersion: 6,
+                        SchemaVersion: 8,
                         IndexedAtUtc: DateTime.UtcNow,
                         Data: indexedFight);
                     fightFingerprint = FightCatalogService.BuildFightFingerprint(indexedFight);

@@ -209,7 +209,10 @@
                         <h2>Fight Browser</h2>
                         <p>Browse the stored catalog by fight time, outcome, commander, or parser version.</p>
                     </div>
-                    <p class="workspace-note" id="fight-browser-summary"></p>
+                    <div class="section-heading-actions">
+                        <button class="action-link action-link-button" id="fight-browser-top-bursts-toggle" type="button">Top Bursts</button>
+                        <p class="workspace-note" id="fight-browser-summary"></p>
+                    </div>
                 </div>
                 <div class="browser-controls">
                     <label class="browser-field browser-field-wide">
@@ -243,6 +246,33 @@
                         </thead>
                         <tbody id="fight-browser-body"></tbody>
                     </table>
+                </div>
+                <div class="top-bursts-panel" id="fight-browser-top-bursts-panel" hidden>
+                    <div class="section-heading">
+                        <div>
+                            <h3>Top Bursts</h3>
+                            <p>Top squad bursts from the fights currently visible in the Fight Browser filters.</p>
+                        </div>
+                        <p class="workspace-note" id="fight-browser-top-bursts-summary"></p>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-top-bursts">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Fight time</th>
+                                    <th>Log file</th>
+                                    <th>Burst</th>
+                                    <th>Top pressure</th>
+                                    <th>Damage</th>
+                                    <th>Top strips</th>
+                                    <th>Strips</th>
+                                    <th>Downs</th>
+                                    <th>Kills</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fight-browser-top-bursts-body"></tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
 
@@ -296,9 +326,10 @@
                     <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
                     <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
                     <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
+                    <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
                 </div>
                 <div class="analysis-panel is-active" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players">
-                    <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. By default the table shows players with at least 40 filtered fights, but search can surface smaller samples.</p>
+                    <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. By default the table shows players with at least 40 total imported fights, but search can surface smaller samples.</p>
                     <div class="browser-controls analysis-player-toolbar">
                         <label class="browser-field browser-field-wide">
                             <span>Search players</span>
@@ -385,6 +416,62 @@
                         </table>
                     </div>
                     <div id="analysis-boon-detail"></div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-comp-helper" data-analysis-panel="comp-helper" role="tabpanel" aria-labelledby="analysis-tab-comp-helper" hidden>
+                    <p class="workspace-note analysis-panel-note">Package-aware v2 comp helper. It keeps the lane-aware v1 model, then adds mandatory and secondary package checks while building balanced 5-player suggestions from the current analysis filter. Hard and soft CC are still combined into one CC package for now.</p>
+                    <div class="browser-controls analysis-player-toolbar">
+                        <label class="browser-field browser-field-wide">
+                            <span>Search candidate cards</span>
+                            <input id="analysis-comp-helper-search" type="search" placeholder="Guild Wars ID, character name, or class">
+                        </label>
+                        <label class="browser-field">
+                            <span>Profile</span>
+                            <select id="analysis-comp-helper-profile">
+                                <option value="balanced">Balanced</option>
+                                <option value="offense">Offense</option>
+                                <option value="defense">Defense</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </label>
+                        <div class="browser-field button-field">
+                            <span>Locks</span>
+                            <button class="action-link action-link-button" id="analysis-comp-helper-clear-locks" type="button">Clear locked cards</button>
+                        </div>
+                    </div>
+                    <div class="tag-block">
+                        <div>
+                            <h3>Favored Lanes</h3>
+                            <div class="comp-helper-favorites" id="analysis-comp-helper-favored-lanes"></div>
+                        </div>
+                        <div>
+                            <h3>Favored Packages</h3>
+                            <div class="comp-helper-favorites" id="analysis-comp-helper-favored-packages"></div>
+                        </div>
+                    </div>
+                    <p class="workspace-note analysis-panel-note" id="analysis-comp-helper-summary"></p>
+                    <div class="tag-block">
+                        <div>
+                            <h3>Locked Cards</h3>
+                            <div class="comp-helper-locks" id="analysis-comp-helper-locks"></div>
+                        </div>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-analysis-candidates">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Action</th>
+                                    <th>Player</th>
+                                    <th>Card</th>
+                                    <th>Filtered</th>
+                                    <th>Total</th>
+                                    <th>Primary lane</th>
+                                    <th>Fit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-comp-helper-candidates-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="analysis-comp-helper-suggestions"></div>
                 </div>
             </section>
 

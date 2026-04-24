@@ -18,7 +18,11 @@ public sealed class WvWAnalystFightPayloadDto
 
     public WvWAnalystCommanderSummaryDto CommanderSummary { get; set; } = new();
 
+    public WvWAnalystDefenseSaveSummaryDto? DefenseSaves { get; set; }
+
     public IReadOnlyList<WvWAnalystThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystThreatBoonSummaryDto>();
+
+    public IReadOnlyList<WvWAnalystTopBurstDto> TopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
 
     public IReadOnlyList<WvWAnalystPlayerSummaryDto> Players { get; set; } = Array.Empty<WvWAnalystPlayerSummaryDto>();
 }
@@ -330,6 +334,29 @@ public sealed class WvWAnalystCommanderSummaryDto
     public IReadOnlyList<string> EvaluationCaveats { get; set; } = Array.Empty<string>();
 }
 
+public sealed class WvWAnalystDefenseSaveSummaryDto
+{
+    public int SavedCases { get; set; }
+
+    public int BarrierSavedCases { get; set; }
+
+    public int DamageReductionSavedCases { get; set; }
+
+    public int BothSavedCases { get; set; }
+
+    public double TotalBarrierAbsorbed { get; set; }
+
+    public double TotalEstimatedDamageReduction { get; set; }
+
+    public double AverageLowestHealthPercent { get; set; }
+
+    public double LowestLowestHealthPercent { get; set; }
+
+    public double TotalIncomingDamage { get; set; }
+
+    public double TotalIncomingHealing { get; set; }
+}
+
 public sealed class WvWAnalystPlayerSummaryDto
 {
     public int ActorId { get; set; }
@@ -473,6 +500,42 @@ public sealed class WvWAnalystThreatBoonSummaryDto
     public double AverageStacks { get; set; }
 
     public double Overapplication { get; set; }
+}
+
+public sealed class WvWAnalystTopBurstDto
+{
+    public long Time { get; set; }
+
+    public string TimeLabel { get; set; } = string.Empty;
+
+    public long Damage { get; set; }
+
+    public int Strips { get; set; }
+
+    public int Downs { get; set; }
+
+    public int Kills { get; set; }
+
+    public WvWAnalystTopBurstActorDto TopPressure { get; set; } = new();
+
+    public WvWAnalystTopBurstActorDto TopStrips { get; set; } = new();
+}
+
+public sealed class WvWAnalystTopBurstActorDto
+{
+    public int ActorId { get; set; }
+
+    public string Account { get; set; } = string.Empty;
+
+    public string Character { get; set; } = string.Empty;
+
+    public string Profession { get; set; } = string.Empty;
+
+    public string EliteSpec { get; set; } = string.Empty;
+
+    public string Icon { get; set; } = string.Empty;
+
+    public double Amount { get; set; }
 }
 
 public sealed class WvWAnalystPlayerThreatBoonSummaryDto

@@ -158,7 +158,9 @@ public sealed record FightIndexDto(
     FightSideIndexDto? SquadSide,
     FightSideIndexDto? EnemySide,
     FightCommanderIndexDto? CommanderSummary,
+    FightDefenseSaveIndexDto? DefenseSaves,
     IReadOnlyList<FightThreatBoonIndexDto> ThreatBoons,
+    IReadOnlyList<FightTopBurstIndexDto> TopBursts,
     IReadOnlyList<FightPlayerIndexDto> Players,
     FightExecutionIndexDto? Execution,
     string Duration,
@@ -279,6 +281,18 @@ public sealed record FightCommanderIndexDto(
     string? EvaluationConfidenceDetail,
     IReadOnlyList<string> EvaluationCaveats);
 
+public sealed record FightDefenseSaveIndexDto(
+    int SavedCases,
+    int BarrierSavedCases,
+    int DamageReductionSavedCases,
+    int BothSavedCases,
+    double TotalBarrierAbsorbed,
+    double TotalEstimatedDamageReduction,
+    double AverageLowestHealthPercent,
+    double LowestLowestHealthPercent,
+    double TotalIncomingDamage,
+    double TotalIncomingHealing);
+
 public sealed record FightPlayerIndexDto(
     int ActorId,
     string? Account,
@@ -353,6 +367,25 @@ public sealed record FightThreatBoonIndexDto(
     double Coverage,
     double AverageStacks,
     double Overapplication);
+
+public sealed record FightTopBurstIndexDto(
+    long Time,
+    string? TimeLabel,
+    long Damage,
+    int Strips,
+    int Downs,
+    int Kills,
+    FightTopBurstActorIndexDto? TopPressure,
+    FightTopBurstActorIndexDto? TopStrips);
+
+public sealed record FightTopBurstActorIndexDto(
+    int ActorId,
+    string? Account,
+    string? Character,
+    string? Profession,
+    string? EliteSpec,
+    string? Icon,
+    double Amount);
 
 public sealed record FightPlayerThreatBoonIndexDto(
     long Id,
