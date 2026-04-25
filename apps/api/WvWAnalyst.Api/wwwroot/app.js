@@ -4,7 +4,6 @@ const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
 const ANALYSIS_TREND_MODE_KEY = "wvw-analyst.analysis-trend-mode";
 const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
-
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
 let lastBatchResult = null;
@@ -5111,7 +5110,7 @@ function setLogFileUploadBusy(isBusy) {
     logFileUploadBusy = isBusy;
     const button = document.querySelector("#log-file-upload-button");
     if (button) {
-        button.textContent = isBusy ? "Adding files..." : "Select files";
+        button.textContent = isBusy ? "Uploading..." : "Select files";
     }
 
     syncManageControls();
@@ -5149,6 +5148,9 @@ function renderLogFileUploadResult(result, success) {
     }
     if (typeof result.skippedCount === "number" && result.skippedCount > 0) {
         counts.push(`<span class="pill">${escapeHtml(`${result.skippedCount} skipped`)}</span>`);
+    }
+    if (typeof result.failedCount === "number" && result.failedCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.failedCount} failed`)}</span>`);
     }
 
     const itemMarkup = items.length
@@ -5188,6 +5190,90 @@ function renderLogFileUploadResult(result, success) {
     summary.textContent = success
         ? `${formatNumber(result.savedCount ?? 0)} file(s) added to ${result.directoryPath ?? "the configured directory"}.`
         : (result.message ?? "No files were added.");
+}
+
+function renderLogFileUploadProgress(progress) {
+    const container = document.querySelector("#log-file-upload-status");
+    const summary = document.querySelector("#log-file-upload-summary");
+    const processedCount = Math.max(0, Number(progress?.processedCount) || 0);
+    const totalCount = Math.max(0, Number(progress?.totalCount) || 0);
+    const savedCount = Math.max(0, Number(progress?.savedCount) || 0);
+    const skippedCount = Math.max(0, Number(progress?.skippedCount) || 0);
+    const failedCount = Math.max(0, Number(progress?.failedCount) || 0);
+    const directoryPath = progress?.directoryPath ?? getConfiguredLogDirectoryPath();
+    const currentFileName = progress?.currentFileName ?? "";
+    const nextFileOrdinal = totalCount > 0 ? Math.min(processedCount + 1, totalCount) : 0;
+    const progressPercent = totalCount > 0
+        ? Math.max(0, Math.min(100, Math.round((processedCount / totalCount) * 100)))
+        : 0;
+    const counts = [
+        `<span class="pill">${escapeHtml(`${processedCount} of ${totalCount} completed`)}</span>`,
+        `<span class="pill">${escapeHtml(`${savedCount} saved`)}</span>`
+    ];
+
+    if (skippedCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${skippedCount} skipped`)}</span>`);
+    }
+    if (failedCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${failedCount} failed`)}</span>`);
+    }
+
+    container.innerHTML = `
+        <div class="batch-status-grid">
+            <div class="batch-status-header">
+                <div class="status status-neutral">Uploading</div>
+                <div class="batch-progress-row">${counts.join("")}</div>
+            </div>
+            <div class="upload-progress-track" aria-hidden="true">
+                <div class="upload-progress-fill" style="width: ${progressPercent}%;"></div>
+            </div>
+            <p>${escapeHtml(progress?.message ?? `Uploading file ${nextFileOrdinal} of ${totalCount}${currentFileName ? `: ${currentFileName}` : ""}.`)}</p>
+        </div>
+    `;
+
+    summary.textContent = totalCount > 0
+        ? `Uploading file ${nextFileOrdinal} of ${totalCount} to ${directoryPath}${currentFileName ? `: ${currentFileName}` : ""}`
+        : `Uploading files to ${directoryPath}...`;
+}
+
+function mergeLogFileUploadResult(aggregate, batchResult) {
+    if (!batchResult || typeof batchResult !== "object") {
+        return aggregate;
+    }
+
+    if (typeof batchResult.directoryPath === "string" && batchResult.directoryPath.trim().length > 0) {
+        aggregate.directoryPath = batchResult.directoryPath;
+    }
+
+    aggregate.savedCount += Number(batchResult.savedCount) || 0;
+    aggregate.skippedCount += Number(batchResult.skippedCount) || 0;
+
+    const batchItems = Array.isArray(batchResult.items) ? batchResult.items : [];
+    aggregate.failedCount += batchItems.filter(item => item?.action === "failed").length;
+    aggregate.items.push(...batchItems);
+    return aggregate;
+}
+
+function buildLogFileUploadCompletionMessage(result, totalCount, stoppedMessage = null) {
+    const directoryPath = result.directoryPath ?? getConfiguredLogDirectoryPath() ?? "the configured directory";
+    const messageParts = [];
+
+    if (stoppedMessage) {
+        messageParts.push(stoppedMessage);
+    } else if (result.savedCount > 0) {
+        messageParts.push(`Saved ${result.savedCount} of ${totalCount} uploaded files to ${directoryPath}.`);
+    } else {
+        messageParts.push(`No uploaded files were saved to ${directoryPath}.`);
+    }
+
+    if (result.skippedCount > 0) {
+        messageParts.push(`Skipped ${result.skippedCount}.`);
+    }
+    if (result.failedCount > 0) {
+        messageParts.push(`Failed ${result.failedCount}.`);
+    }
+
+    return messageParts.join(" ");
 }
 
 function renderManageResetResult(result, success) {
@@ -5265,26 +5351,71 @@ async function uploadLogFiles(fileList) {
         return;
     }
 
-    const formData = new FormData();
-    files.forEach(file => formData.append("files", file, file.name));
+    const directoryPath = getConfiguredLogDirectoryPath();
+    const aggregateResult = {
+        directoryPath,
+        uploadedCount: files.length,
+        savedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        items: []
+    };
+    let processedCount = 0;
 
     setLogFileUploadBusy(true);
-    document.querySelector("#log-file-upload-summary").textContent = `Adding ${files.length} file(s) to ${getConfiguredLogDirectoryPath()}...`;
+    renderLogFileUploadProgress({
+        processedCount,
+        totalCount: files.length,
+        savedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        directoryPath,
+        currentFileName: files[0]?.name ?? "",
+        message: `Preparing to upload file 1 of ${files.length}${files[0]?.name ? `: ${files[0].name}` : ""}.`
+    });
 
     try {
-        const response = await fetch("/api/imports/log-directory/files", {
-            method: "POST",
-            body: formData
-        });
-        const result = await readApiPayload(response);
-        renderLogFileUploadResult(result, response.ok);
+        for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+            const file = files[fileIndex];
+            const formData = new FormData();
+            formData.append("files", file, file.name);
+
+            renderLogFileUploadProgress({
+                processedCount,
+                totalCount: files.length,
+                savedCount: aggregateResult.savedCount,
+                skippedCount: aggregateResult.skippedCount,
+                failedCount: aggregateResult.failedCount,
+                directoryPath: aggregateResult.directoryPath,
+                currentFileName: file.name,
+                message: `Uploading file ${fileIndex + 1} of ${files.length}: ${file.name}`
+            });
+
+            const response = await fetch("/api/imports/log-directory/files", {
+                method: "POST",
+                body: formData
+            });
+            const fileResult = await readApiPayload(response);
+            mergeLogFileUploadResult(aggregateResult, fileResult);
+            processedCount += 1;
+        }
+
+        aggregateResult.message = buildLogFileUploadCompletionMessage(aggregateResult, files.length);
+        renderLogFileUploadResult(aggregateResult, aggregateResult.savedCount > 0 && aggregateResult.failedCount === 0);
     } catch (error) {
+        aggregateResult.message = buildLogFileUploadCompletionMessage(
+            aggregateResult,
+            files.length,
+            `Upload stopped after ${processedCount} of ${files.length} files. ${error instanceof Error ? error.message : String(error)}`
+        );
         renderLogFileUploadResult({
-            message: error instanceof Error ? error.message : String(error),
+            ...aggregateResult,
             uploadedCount: files.length,
-            savedCount: 0,
-            skippedCount: files.length,
-            items: []
+            savedCount: aggregateResult.savedCount,
+            skippedCount: aggregateResult.skippedCount,
+            failedCount: aggregateResult.failedCount,
+            items: aggregateResult.items,
+            message: aggregateResult.message
         }, false);
     } finally {
         document.querySelector("#log-file-upload-input").value = "";
