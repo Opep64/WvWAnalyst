@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using WvWAnalyst.Api.Analysis;
+using WvWAnalyst.Api.Services;
 using WvWAnalyst.Contracts;
 
 namespace WvWAnalyst.Api.Bridge;
@@ -15,14 +17,22 @@ public sealed class FightCatalogService
 
     private readonly AppPathService _paths;
     private readonly EliteInsightsFightIndexer _fightIndexer;
+    private readonly PatchMetadataService _patchMetadata;
+    private readonly FightAttributeService _fightAttributes;
     private readonly object _cacheLock = new();
     private IReadOnlyList<FightArtifactSummaryDto>? _cachedCanonicalSummaries;
     private FightBrowserSnapshotDto? _cachedFightBrowserSnapshot;
 
-    public FightCatalogService(AppPathService paths, EliteInsightsFightIndexer fightIndexer)
+    public FightCatalogService(
+        AppPathService paths,
+        EliteInsightsFightIndexer fightIndexer,
+        PatchMetadataService patchMetadata,
+        FightAttributeService fightAttributes)
     {
         _paths = paths;
         _fightIndexer = fightIndexer;
+        _patchMetadata = patchMetadata;
+        _fightAttributes = fightAttributes;
     }
 
     public string GetFightDirectoryPath(string fightId)
@@ -280,10 +290,13 @@ public sealed class FightCatalogService
                 HtmlReportUrl: null,
                 JsonReportUrl: null,
                 ParserConsoleLogUrl: null,
+                PatchEra: null,
+                Attributes: [],
                 FightIndex: null);
         }
 
         var links = BuildArtifactLinks(manifest);
+        var fightIndex = manifest.FightIndex?.Data;
 
         return new FightArtifactSummaryDto(
             FightId: manifest.FightId,
@@ -299,11 +312,14 @@ public sealed class FightCatalogService
             HtmlReportUrl: links.HtmlReportUrl,
             JsonReportUrl: links.JsonReportUrl,
             ParserConsoleLogUrl: links.ParserConsoleLogUrl,
-            FightIndex: manifest.FightIndex?.Data);
+            PatchEra: ResolvePatchEra(fightIndex, manifest.ImportedAtUtc),
+            Attributes: _fightAttributes.BuildAttributes(fightIndex),
+            FightIndex: fightIndex);
     }
 
     private FightDetailDto BuildDetail(FightArtifactManifest manifest)
     {
+        var fightIndex = manifest.FightIndex?.Data;
         return new FightDetailDto(
             FightId: manifest.FightId,
             Status: manifest.EffectiveStatus,
@@ -316,7 +332,9 @@ public sealed class FightCatalogService
             ParserElapsedMilliseconds: manifest.ParserElapsedMilliseconds,
             ParserExecutablePath: manifest.ParserExecutablePath,
             RawLogRetained: manifest.RawLogRetained,
-            FightIndex: manifest.FightIndex?.Data,
+            PatchEra: ResolvePatchEra(fightIndex, manifest.ImportedAtUtc),
+            Attributes: _fightAttributes.BuildAttributes(fightIndex),
+            FightIndex: fightIndex,
             ArtifactLinks: BuildArtifactLinks(manifest),
             GeneratedArtifacts: manifest.GeneratedArtifactRelativePaths.Select(path => Path.GetFileName(path) ?? path).ToArray());
     }
@@ -498,6 +516,35 @@ public sealed class FightCatalogService
         return DateTime.MinValue;
     }
 
+    private PatchEraDto? ResolvePatchEra(FightIndexDto? fightIndex, DateTime importedAtUtc)
+    {
+        return _patchMetadata.FindPatchEra(GetFightLocalDate(fightIndex, importedAtUtc));
+    }
+
+    private static DateOnly? GetFightLocalDate(FightIndexDto? fightIndex, DateTime importedAtUtc)
+    {
+        var timestamps = new[]
+        {
+            fightIndex?.TimeStartStandard,
+            fightIndex?.TimeStart
+        };
+
+        foreach (var timestamp in timestamps)
+        {
+            if (string.IsNullOrWhiteSpace(timestamp))
+            {
+                continue;
+            }
+
+            if (DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                return DateOnly.FromDateTime(parsed.ToLocalTime().DateTime);
+            }
+        }
+
+        return DateOnly.FromDateTime(importedAtUtc.ToLocalTime());
+    }
+
     private static string? ResolveArtifactPath(string fightDirectoryPath, string relativePath)
     {
         var resolvedPath = Path.GetFullPath(Path.Combine(fightDirectoryPath, relativePath));
@@ -557,7 +604,7 @@ public sealed class FightCatalogService
             Fights: fights);
     }
 
-    private void InvalidateCatalogCache()
+    public void InvalidateCatalogCache()
     {
         lock (_cacheLock)
         {

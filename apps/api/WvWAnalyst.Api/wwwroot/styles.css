@@ -688,7 +688,8 @@ h1 {
     transition: transform 120ms ease;
 }
 
-.class-filter-field[open] .class-filter-trigger-label::after {
+.class-filter-field[open] .class-filter-trigger-label::after,
+.attribute-filter-field[open] .class-filter-trigger-label::after {
     transform: rotate(-135deg) translateY(-1px);
 }
 
@@ -746,6 +747,150 @@ h1 {
     margin: 0;
     color: var(--muted);
     font-size: 0.9rem;
+}
+
+.metadata-editor {
+    display: grid;
+    gap: 12px;
+}
+
+.metadata-editor textarea {
+    width: 100%;
+    min-height: 320px;
+    resize: vertical;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: rgba(8, 13, 20, 0.92);
+    color: var(--ink);
+    padding: 12px;
+    font: 0.88rem/1.45 Consolas, "Liberation Mono", monospace;
+}
+
+.metadata-actions {
+    margin-top: 0;
+}
+
+.attribute-filter-field {
+    overflow: hidden;
+    margin: -2px 0 10px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: rgba(17, 25, 35, 0.78);
+}
+
+.attribute-filter-field .class-filter-trigger {
+    padding: 10px 12px;
+}
+
+.attribute-filter-field .class-filter-title-block {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 10px;
+}
+
+.attribute-filter-field .class-filter-title-block strong {
+    font-size: 0.9rem;
+}
+
+.attribute-filter-field .class-filter-summary {
+    font-size: 0.82rem;
+}
+
+.attribute-filter-panel {
+    display: grid;
+    gap: 8px;
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--line);
+}
+
+.attribute-filter-panel .class-filter-panel-actions {
+    gap: 8px;
+    padding-top: 8px;
+}
+
+.attribute-filter-box {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 8px 14px;
+    margin-bottom: 0;
+}
+
+.attribute-filter-group {
+    display: grid;
+    grid-template-columns: 94px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.attribute-filter-group strong {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.25;
+}
+
+.attribute-filter-options,
+.attribute-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.attribute-filter-option,
+.attribute-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(159, 176, 195, 0.16);
+    background: rgba(159, 176, 195, 0.07);
+    color: var(--ink);
+    font-size: 0.78rem;
+    line-height: 1.15;
+}
+
+.attribute-filter-option input {
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.attribute-filter-option.is-active,
+.attribute-pill {
+    border-color: rgba(94, 234, 212, 0.28);
+    background: rgba(94, 234, 212, 0.10);
+}
+
+.attribute-pill-muted {
+    border-color: rgba(159, 176, 195, 0.14);
+    background: rgba(159, 176, 195, 0.08);
+    color: var(--muted);
+}
+
+.attribute-pill-positive {
+    border-color: rgba(74, 222, 128, 0.35);
+    background: rgba(74, 222, 128, 0.12);
+}
+
+.attribute-pill-negative {
+    border-color: rgba(251, 113, 133, 0.35);
+    background: rgba(251, 113, 133, 0.12);
+}
+
+.patch-impact-panel {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.patch-impact-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: rgba(12, 19, 27, 0.88);
 }
 
 .primary-button,
@@ -816,6 +961,11 @@ h1 {
     border-radius: 16px;
     border: 1px solid var(--line);
     background: var(--panel-soft);
+}
+
+.import-status-error {
+    border-color: rgba(251, 113, 133, 0.42);
+    background: rgba(127, 29, 29, 0.18);
 }
 
 .import-status p {
@@ -1725,5 +1875,10 @@ h1 {
 
     .class-filter-box {
         grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+
+    .attribute-filter-field .class-filter-title-block,
+    .attribute-filter-group {
+        grid-template-columns: 1fr;
     }
 }

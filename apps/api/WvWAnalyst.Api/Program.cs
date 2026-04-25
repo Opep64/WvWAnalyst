@@ -36,6 +36,8 @@ builder.Services.AddSingleton<ParserImportService>();
 builder.Services.AddSingleton<DirectoryImportJobService>();
 builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
 builder.Services.AddSingleton<WorkspaceResetService>();
+builder.Services.AddSingleton<PatchMetadataService>();
+builder.Services.AddSingleton<FightAttributeService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 
@@ -80,6 +82,13 @@ app.MapGet("/api/health", () => Results.Ok(new
 }));
 
 app.MapGet("/api/dashboard", (PrototypeDashboardService service) => Results.Ok(service.BuildSnapshot()));
+app.MapGet("/api/patch-metadata", (PatchMetadataService service) => Results.Ok(service.GetMetadata()));
+app.MapPut("/api/patch-metadata", (PatchMetadataDto request, PatchMetadataService service, FightCatalogService catalog) =>
+{
+    var metadata = service.SaveMetadata(request);
+    catalog.InvalidateCatalogCache();
+    return Results.Ok(metadata);
+});
 app.MapGet("/api/analysis/team-fight-scorecard", (PrototypeDashboardService service) => Results.Ok(service.GetTeamFightScorecardBlueprint()));
 app.MapGet("/api/analysis", (
     string? commander,
@@ -90,6 +99,9 @@ app.MapGet("/api/analysis", (
     string? squadExcludeClasses,
     string? enemyIncludeClasses,
     string? enemyExcludeClasses,
+    string? patchScope,
+    string? patchEraIds,
+    string? fightAttributes,
     FightAnalysisService service) =>
     Results.Ok(service.BuildSnapshot(
         commander,
@@ -99,7 +111,10 @@ app.MapGet("/api/analysis", (
         squadIncludeClasses,
         squadExcludeClasses,
         enemyIncludeClasses,
-        enemyExcludeClasses)));
+        enemyExcludeClasses,
+        patchScope,
+        patchEraIds,
+        fightAttributes)));
 app.MapGet("/api/fights/{fightId}", (string fightId, FightCatalogService catalog) =>
     catalog.TryGetFightDetail(fightId, out var detail)
         ? Results.Ok(detail)

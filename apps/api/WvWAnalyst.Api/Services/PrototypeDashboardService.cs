@@ -14,6 +14,8 @@ public sealed class PrototypeDashboardService
     private readonly FightCatalogService _fightCatalog;
     private readonly DirectoryImportJobService _directoryImportJobs;
     private readonly ConfiguredLogDirectoryUploadService _uploadService;
+    private readonly PatchMetadataService _patchMetadata;
+    private readonly FightAttributeService _fightAttributes;
 
     public PrototypeDashboardService(
         AppPathService paths,
@@ -21,7 +23,9 @@ public sealed class PrototypeDashboardService
         WorkspaceInventoryProbe workspaceProbe,
         FightCatalogService fightCatalog,
         DirectoryImportJobService directoryImportJobs,
-        ConfiguredLogDirectoryUploadService uploadService)
+        ConfiguredLogDirectoryUploadService uploadService,
+        PatchMetadataService patchMetadata,
+        FightAttributeService fightAttributes)
     {
         _paths = paths;
         _scorecardFactory = scorecardFactory;
@@ -29,6 +33,8 @@ public sealed class PrototypeDashboardService
         _fightCatalog = fightCatalog;
         _directoryImportJobs = directoryImportJobs;
         _uploadService = uploadService;
+        _patchMetadata = patchMetadata;
+        _fightAttributes = fightAttributes;
     }
 
     public DashboardSnapshotDto BuildSnapshot()
@@ -95,6 +101,8 @@ public sealed class PrototypeDashboardService
             RecentParses: _fightCatalog.GetRecentParseSummaries(10),
             FightBrowser: fightBrowserSnapshot,
             ManageActivity: BuildManageActivity(hasRunningJob ? activeBatchJob : null, activeUploadCount),
+            PatchMetadata: _patchMetadata.GetMetadata(),
+            FightAttributeDefinitions: _fightAttributes.GetDefinitions(),
             RetentionPolicy: new ArtifactRetentionPolicyDto(
                 Summary: "Keep the compact index data and retained HTML review artifact, treat parser-generated analysis payloads as ingest-only, and avoid retaining extra regenerable outputs.",
                 KeepAlways:

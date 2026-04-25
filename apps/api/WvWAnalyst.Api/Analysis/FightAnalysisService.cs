@@ -1,5 +1,6 @@
 using System.Globalization;
 using WvWAnalyst.Api.Bridge;
+using WvWAnalyst.Api.Services;
 using WvWAnalyst.Contracts;
 
 namespace WvWAnalyst.Api.Analysis;
@@ -10,10 +11,17 @@ public sealed class FightAnalysisService
     private const int MinimumClassPlayerFightCount = 20;
 
     private readonly FightCatalogService _fightCatalog;
+    private readonly PatchMetadataService _patchMetadata;
+    private readonly FightAttributeService _fightAttributes;
 
-    public FightAnalysisService(FightCatalogService fightCatalog)
+    public FightAnalysisService(
+        FightCatalogService fightCatalog,
+        PatchMetadataService patchMetadata,
+        FightAttributeService fightAttributes)
     {
         _fightCatalog = fightCatalog;
+        _patchMetadata = patchMetadata;
+        _fightAttributes = fightAttributes;
     }
 
     public FightAnalysisSnapshotDto BuildSnapshot(
@@ -24,12 +32,17 @@ public sealed class FightAnalysisService
         string? squadIncludeClasses,
         string? squadExcludeClasses,
         string? enemyIncludeClasses,
-        string? enemyExcludeClasses)
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
     {
         var allFights = _fightCatalog.GetFightBrowserSnapshot().Fights
             .Where(fight => fight.FightIndex is not null)
             .Where(fight => string.Equals(fight.Status, "Imported", StringComparison.OrdinalIgnoreCase))
             .ToArray();
+        var patchMetadata = _patchMetadata.GetMetadata();
+        var patchSelection = NormalizePatchSelection(patchScope, patchEraIds, patchMetadata);
 
         var commanderOptions = allFights
             .SelectMany(fight => fight.FightIndex?.CommanderDisplayNames ?? Array.Empty<string>())
@@ -57,6 +70,7 @@ public sealed class FightAnalysisService
         var normalizedSquadExcludeClasses = NormalizeClassFilter(squadExcludeClasses);
         var normalizedEnemyIncludeClasses = NormalizeClassFilter(enemyIncludeClasses);
         var normalizedEnemyExcludeClasses = NormalizeClassFilter(enemyExcludeClasses);
+        var normalizedFightAttributes = NormalizeTokenFilter(fightAttributes);
 
         var filteredFights = allFights
             .Where(fight => MatchesCommander(fight, normalizedCommander))
@@ -64,6 +78,8 @@ public sealed class FightAnalysisService
             .Where(fight => MatchesDateRange(fight, normalizedStartDate, normalizedEndDate))
             .Where(fight => MatchesSideClassFilters(fight, "squad", normalizedSquadIncludeClasses, normalizedSquadExcludeClasses))
             .Where(fight => MatchesSideClassFilters(fight, "enemy", normalizedEnemyIncludeClasses, normalizedEnemyExcludeClasses))
+            .Where(fight => MatchesPatchSelection(fight, patchSelection))
+            .Where(fight => MatchesFightAttributeSelection(fight, normalizedFightAttributes))
             .OrderBy(fight => GetFightSortValue(fight))
             .ToArray();
 
@@ -78,7 +94,9 @@ public sealed class FightAnalysisService
                 Commanders: commanderOptions,
                 ClassOptions: classOptions,
                 MinFightDate: minDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                MaxFightDate: maxDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                MaxFightDate: maxDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                PatchEras: patchMetadata.PatchEras,
+                FightAttributes: _fightAttributes.GetDefinitions()),
             Selection: new FightAnalysisSelectionDto(
                 Commander: normalizedCommander,
                 StartDate: normalizedStartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -87,12 +105,15 @@ public sealed class FightAnalysisService
                 SquadIncludeClasses: normalizedSquadIncludeClasses,
                 SquadExcludeClasses: normalizedSquadExcludeClasses,
                 EnemyIncludeClasses: normalizedEnemyIncludeClasses,
-                EnemyExcludeClasses: normalizedEnemyExcludeClasses),
+                EnemyExcludeClasses: normalizedEnemyExcludeClasses,
+                PatchScope: patchSelection.Scope,
+                PatchEraIds: patchSelection.EraIds,
+                FightAttributeKeys: normalizedFightAttributes),
             Scope: BuildScope(allFights, filteredFights),
             Overview: BuildOverview(filteredFights),
             Trends: BuildTrends(filteredFights),
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
-            TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts),
+            TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
             TopLanes: BuildTopLanes(filteredFights),
             TopBoons: BuildTopBoons(filteredFights));
     }
@@ -112,7 +133,36 @@ public sealed class FightAnalysisService
             WinCount: wins,
             LossCount: losses,
             DrawCount: draws,
-            WinRatePercent: winRate);
+            WinRatePercent: winRate,
+            PatchEraBreakdown: BuildPatchEraBreakdown(filteredFights),
+            AttributeBreakdown: BuildAttributeBreakdown(filteredFights));
+    }
+
+    private static IReadOnlyList<FightAnalysisBreakdownDto> BuildPatchEraBreakdown(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .GroupBy(fight => fight.PatchEra?.Id ?? "unknown", StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightAnalysisBreakdownDto(
+                Key: group.Key,
+                Label: group.Select(fight => fight.PatchEra?.Label).FirstOrDefault(label => !string.IsNullOrWhiteSpace(label)) ?? "Unknown patch",
+                FightCount: group.Count()))
+            .OrderByDescending(entry => entry.FightCount)
+            .ThenBy(entry => entry.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisBreakdownDto> BuildAttributeBreakdown(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .SelectMany(fight => fight.Attributes ?? Array.Empty<FightAttributeDto>())
+            .GroupBy(attribute => attribute.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightAnalysisBreakdownDto(
+                Key: group.Key,
+                Label: group.First().Label,
+                FightCount: group.Count()))
+            .OrderByDescending(entry => entry.FightCount)
+            .ThenBy(entry => entry.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static FightAnalysisOverviewDto BuildOverview(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -305,6 +355,10 @@ public sealed class FightAnalysisService
                     FightDateUtc: fightTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
                     Commander: fight.FightIndex?.CommanderDisplayNames?.FirstOrDefault(),
                     OutcomeLabel: fight.FightIndex?.Outcome.DisplayLabel ?? "Unavailable",
+                    PatchEraId: fight.PatchEra?.Id,
+                    PatchEraLabel: fight.PatchEra?.Label,
+                    AttributeKeys: (fight.Attributes ?? Array.Empty<FightAttributeDto>()).Select(attribute => attribute.Key).ToArray(),
+                    AttributeLabels: (fight.Attributes ?? Array.Empty<FightAttributeDto>()).Select(attribute => attribute.Label).ToArray(),
                     OverallScore: fight.FightIndex?.Execution?.OverallScore,
                     CohesionScore: pillars.TryGetValue("cohesion-positioning", out int cohesion) ? cohesion : null,
                     PressureScore: pillars.TryGetValue("pressure-burst", out int pressure) ? pressure : null,
@@ -445,7 +499,8 @@ public sealed class FightAnalysisService
 
     private static IReadOnlyList<FightAnalysisClassRowDto> BuildTopClasses(
         IReadOnlyList<FightArtifactSummaryDto> fights,
-        IReadOnlyDictionary<string, int> totalClassPlayerFightCounts)
+        IReadOnlyDictionary<string, int> totalClassPlayerFightCounts,
+        IReadOnlyList<PatchImpactDto> patchImpacts)
     {
         return fights
             .SelectMany(fight => (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
@@ -518,6 +573,7 @@ public sealed class FightAnalysisService
                     AveragePrimaryLaneScore: laneScores.Length == 0 ? 0.0 : Math.Round(laneScores.Average(score => score.Primary), 1),
                     AverageWeightedLaneScore: laneScores.Length == 0 ? 0.0 : Math.Round(laneScores.Average(score => score.Weighted), 1),
                     LaneContributions: laneContributions,
+                    PatchImpacts: GetPatchImpactsForClass(group.Key, patchImpacts),
                     Players: classPlayers);
             })
             .Where(row => row.SampleCount >= MinimumClassSampleCount)
@@ -1892,6 +1948,92 @@ public sealed class FightAnalysisService
         return true;
     }
 
+    private static bool MatchesPatchSelection(FightArtifactSummaryDto fight, PatchSelection selection)
+    {
+        if (selection.EraIds.Count == 0)
+        {
+            return true;
+        }
+
+        var patchEraId = fight.PatchEra?.Id;
+        return !string.IsNullOrWhiteSpace(patchEraId)
+            && selection.EraIds.Any(eraId => string.Equals(eraId, patchEraId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesFightAttributeSelection(FightArtifactSummaryDto fight, IReadOnlyCollection<string> requiredAttributes)
+    {
+        if (requiredAttributes.Count == 0)
+        {
+            return true;
+        }
+
+        var attributeKeys = (fight.Attributes ?? Array.Empty<FightAttributeDto>())
+            .Select(attribute => attribute.Key)
+            .ToArray();
+        return requiredAttributes.All(required =>
+            attributeKeys.Any(key => string.Equals(key, required, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static PatchSelection NormalizePatchSelection(string? patchScope, string? patchEraIds, PatchMetadataDto metadata)
+    {
+        var rawScope = (patchScope ?? string.Empty).Trim();
+        var explicitEraIds = NormalizeTokenFilter(patchEraIds);
+        if (rawScope.StartsWith("era:", StringComparison.OrdinalIgnoreCase))
+        {
+            var eraId = rawScope["era:".Length..].Trim();
+            explicitEraIds = string.IsNullOrWhiteSpace(eraId) ? explicitEraIds : [eraId];
+            rawScope = "era";
+        }
+
+        var normalizedScope = rawScope.ToLowerInvariant() switch
+        {
+            "current" => "current",
+            "last2" => "last2",
+            "era" => "era",
+            _ when explicitEraIds.Length > 0 => "custom",
+            _ => "all"
+        };
+
+        var eraIds = normalizedScope switch
+        {
+            "current" => metadata.PatchEras.Where(era => era.IsCurrent).Select(era => era.Id).Take(1).ToArray(),
+            "last2" => metadata.PatchEras
+                .OrderByDescending(era => ParseDateOnly(era.StartsOn) ?? DateOnly.MinValue)
+                .Take(2)
+                .Select(era => era.Id)
+                .ToArray(),
+            "era" or "custom" => explicitEraIds,
+            _ => []
+        };
+
+        return new PatchSelection(normalizedScope, eraIds);
+    }
+
+    private static IReadOnlyList<PatchImpactDto> GetPatchImpactsForSelection(PatchMetadataDto metadata, PatchSelection selection)
+    {
+        var activeEraIds = selection.EraIds.Count > 0
+            ? selection.EraIds
+            : metadata.PatchEras.Where(era => era.IsCurrent).Select(era => era.Id).ToArray();
+
+        if (activeEraIds.Count == 0)
+        {
+            return [];
+        }
+
+        return metadata.PatchImpacts
+            .Where(impact => activeEraIds.Any(eraId => string.Equals(eraId, impact.PatchEraId, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<PatchImpactDto> GetPatchImpactsForClass(string classLabel, IReadOnlyList<PatchImpactDto> patchImpacts)
+    {
+        return patchImpacts
+            .Where(impact =>
+                string.Equals(impact.ClassLabel, classLabel, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(impact.BuildLabel, classLabel, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     private static string NormalizeOutcomeFilter(string? outcomeCode)
     {
         var normalized = (outcomeCode ?? string.Empty).Trim().ToLowerInvariant();
@@ -1914,6 +2056,16 @@ public sealed class FightAnalysisService
             .ToArray();
     }
 
+    private static string[] NormalizeTokenFilter(string? value)
+    {
+        return (value ?? string.Empty)
+            .Split([',', ';', '|', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static DateOnly? ParseDateOnly(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1926,6 +2078,10 @@ public sealed class FightAnalysisService
             : null;
     }
 }
+
+internal sealed record PatchSelection(
+    string Scope,
+    IReadOnlyList<string> EraIds);
 
 internal sealed record PlayerFightSample(
     FightArtifactSummaryDto Fight,

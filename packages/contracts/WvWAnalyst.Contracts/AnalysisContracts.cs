@@ -15,7 +15,9 @@ public sealed record FightAnalysisFilterOptionsDto(
     IReadOnlyList<string> Commanders,
     IReadOnlyList<string> ClassOptions,
     string? MinFightDate,
-    string? MaxFightDate);
+    string? MaxFightDate,
+    IReadOnlyList<PatchEraDto> PatchEras,
+    IReadOnlyList<FightAttributeDefinitionDto> FightAttributes);
 
 public sealed record FightAnalysisSelectionDto(
     string? Commander,
@@ -25,7 +27,10 @@ public sealed record FightAnalysisSelectionDto(
     IReadOnlyList<string> SquadIncludeClasses,
     IReadOnlyList<string> SquadExcludeClasses,
     IReadOnlyList<string> EnemyIncludeClasses,
-    IReadOnlyList<string> EnemyExcludeClasses);
+    IReadOnlyList<string> EnemyExcludeClasses,
+    string PatchScope,
+    IReadOnlyList<string> PatchEraIds,
+    IReadOnlyList<string> FightAttributeKeys);
 
 public sealed record FightAnalysisScopeDto(
     int TotalImportedFights,
@@ -33,7 +38,14 @@ public sealed record FightAnalysisScopeDto(
     int WinCount,
     int LossCount,
     int DrawCount,
-    double WinRatePercent);
+    double WinRatePercent,
+    IReadOnlyList<FightAnalysisBreakdownDto> PatchEraBreakdown,
+    IReadOnlyList<FightAnalysisBreakdownDto> AttributeBreakdown);
+
+public sealed record FightAnalysisBreakdownDto(
+    string Key,
+    string Label,
+    int FightCount);
 
 public sealed record FightAnalysisOverviewDto(
     double? AverageOverallScore,
@@ -96,6 +108,10 @@ public sealed record FightAnalysisTrendPointDto(
     string? FightDateUtc,
     string? Commander,
     string OutcomeLabel,
+    string? PatchEraId,
+    string? PatchEraLabel,
+    IReadOnlyList<string> AttributeKeys,
+    IReadOnlyList<string> AttributeLabels,
     int? OverallScore,
     int? CohesionScore,
     int? PressureScore,
@@ -215,6 +231,7 @@ public sealed record FightAnalysisClassRowDto(
     double AveragePrimaryLaneScore,
     double AverageWeightedLaneScore,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions,
+    IReadOnlyList<PatchImpactDto> PatchImpacts,
     IReadOnlyList<FightAnalysisClassPlayerRowDto> Players);
 
 public sealed record FightAnalysisClassPlayerRowDto(

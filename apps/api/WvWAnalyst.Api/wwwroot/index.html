@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260425b">
+    <link rel="stylesheet" href="/styles.css?v=20260425d">
 </head>
 <body>
     <div class="page-shell">
@@ -102,6 +102,33 @@
                         </thead>
                         <tbody id="batch-results-body"></tbody>
                     </table>
+                </div>
+            </section>
+
+            <section class="panel panel-wide" data-app-panel="manage">
+                <div class="section-heading">
+                    <div>
+                        <h2>Patch Metadata</h2>
+                        <p>Balance eras and perceived class impacts used by the analysis filters and current-meta warnings.</p>
+                    </div>
+                    <p class="workspace-note" id="patch-metadata-summary"></p>
+                </div>
+                <div class="metadata-editor">
+                    <label class="browser-field browser-field-wide">
+                        <span>Patch metadata JSON</span>
+                        <textarea id="patch-metadata-json" spellcheck="false"></textarea>
+                    </label>
+                    <div class="browser-controls metadata-actions">
+                        <div class="browser-field button-field">
+                            <span>Save</span>
+                            <button class="primary-button" id="patch-metadata-save-button" type="button">Save patch metadata</button>
+                        </div>
+                        <div class="browser-field button-field">
+                            <span>Reload</span>
+                            <button class="action-link action-link-button" id="patch-metadata-reload-button" type="button">Reload from disk</button>
+                        </div>
+                    </div>
+                    <div class="import-status" id="patch-metadata-status">Patch metadata has not been edited in this browser session yet.</div>
                 </div>
             </section>
 
@@ -296,7 +323,29 @@
                             <option value="unknown">Unavailable</option>
                         </select>
                     </label>
+                    <label class="browser-field">
+                        <span>Patch scope</span>
+                        <select id="fight-browser-patch-scope">
+                            <option value="all">All patches</option>
+                        </select>
+                    </label>
                 </div>
+                <details class="attribute-filter-field">
+                    <summary class="class-filter-trigger">
+                        <span class="class-filter-title-block">
+                            <strong>Fight attributes</strong>
+                            <span class="class-filter-summary" id="fight-browser-attribute-summary">Any attribute</span>
+                        </span>
+                        <span class="class-filter-trigger-label">Choose</span>
+                    </summary>
+                    <div class="attribute-filter-panel">
+                        <div class="class-filter-panel-actions">
+                            <p class="workspace-note">Require one or more derived fight labels.</p>
+                            <button class="action-link action-link-button" id="fight-browser-clear-attribute-filters" type="button">Clear</button>
+                        </div>
+                        <div class="attribute-filter-box" id="fight-browser-attribute-filters"></div>
+                    </div>
+                </details>
                 <div class="class-filter-toolbar">
                     <p class="workspace-note">Check one or more classes to require them or exclude them. Leave everything unchecked to include all fights.</p>
                     <button class="action-link action-link-button" id="fight-browser-clear-class-filters" type="button">Clear all class filters</button>
@@ -378,6 +427,7 @@
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="score">Score</button></th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="squad">Squad</button></th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="enemy">Enemy</button></th>
+                                <th>Attributes</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -418,11 +468,33 @@
                             <option value="draw">Draws</option>
                         </select>
                     </label>
+                    <label class="browser-field">
+                        <span>Patch scope</span>
+                        <select id="analysis-patch-scope">
+                            <option value="all">All patches</option>
+                        </select>
+                    </label>
                     <div class="browser-field button-field">
                         <span>Run</span>
                         <button class="primary-button" id="analysis-apply-button" type="button">Refresh analysis</button>
                     </div>
                 </div>
+                <details class="attribute-filter-field">
+                    <summary class="class-filter-trigger">
+                        <span class="class-filter-title-block">
+                            <strong>Fight attributes</strong>
+                            <span class="class-filter-summary" id="analysis-attribute-summary">Any attribute</span>
+                        </span>
+                        <span class="class-filter-trigger-label">Choose</span>
+                    </summary>
+                    <div class="attribute-filter-panel">
+                        <div class="class-filter-panel-actions">
+                            <p class="workspace-note">Require one or more derived fight labels.</p>
+                            <button class="action-link action-link-button" id="analysis-clear-attribute-filters" type="button">Clear</button>
+                        </div>
+                        <div class="attribute-filter-box" id="analysis-attribute-filters"></div>
+                    </div>
+                </details>
                 <div class="class-filter-toolbar">
                     <p class="workspace-note">Check classes to require or exclude them on either side. Leave everything unchecked to include all fights.</p>
                     <button class="action-link action-link-button" id="analysis-clear-class-filters" type="button">Clear all class filters</button>

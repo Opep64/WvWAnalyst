@@ -9,6 +9,8 @@ public sealed record DashboardSnapshotDto(
     IReadOnlyList<FightArtifactSummaryDto> RecentParses,
     FightBrowserSnapshotDto FightBrowser,
     ManageActivityStatusDto ManageActivity,
+    PatchMetadataDto PatchMetadata,
+    IReadOnlyList<FightAttributeDefinitionDto> FightAttributeDefinitions,
     ArtifactRetentionPolicyDto RetentionPolicy);
 
 public sealed record ApplicationInfoDto(
@@ -56,6 +58,8 @@ public sealed record FightArtifactSummaryDto(
     string? HtmlReportUrl,
     string? JsonReportUrl,
     string? ParserConsoleLogUrl,
+    PatchEraDto? PatchEra,
+    IReadOnlyList<FightAttributeDto> Attributes,
     FightIndexDto? FightIndex);
 
 public sealed record FightBrowserSnapshotDto(
@@ -168,6 +172,8 @@ public sealed record FightDetailDto(
     long ParserElapsedMilliseconds,
     string ParserExecutablePath,
     bool RawLogRetained,
+    PatchEraDto? PatchEra,
+    IReadOnlyList<FightAttributeDto> Attributes,
     FightIndexDto? FightIndex,
     FightArtifactLinksDto ArtifactLinks,
     IReadOnlyList<string> GeneratedArtifacts);
@@ -499,6 +505,50 @@ public sealed record FightOutcomeDto(
     string DisplayLabel,
     string DecidedBy,
     string Source,
+    string Detail);
+
+public sealed record PatchMetadataDto(
+    string SchemaVersion,
+    string UpdatedAtUtc,
+    IReadOnlyList<PatchEraDto> PatchEras,
+    IReadOnlyList<PatchImpactDto> PatchImpacts);
+
+public sealed record PatchEraDto(
+    string Id,
+    string Label,
+    string? StartsOn,
+    string? EndsOn,
+    bool IsCurrent,
+    string? Notes);
+
+public sealed record PatchImpactDto(
+    string Id,
+    string PatchEraId,
+    string ClassLabel,
+    string? BuildLabel,
+    string? AdoptionExpectation,
+    string Confidence,
+    string Notes,
+    IReadOnlyList<PatchImpactLaneDeltaDto> LaneImpacts);
+
+public sealed record PatchImpactLaneDeltaDto(
+    string LaneKey,
+    string LaneLabel,
+    int Impact,
+    string? Notes);
+
+public sealed record FightAttributeDefinitionDto(
+    string Key,
+    string Label,
+    string Group,
+    string Summary);
+
+public sealed record FightAttributeDto(
+    string Key,
+    string Label,
+    string Group,
+    double Confidence,
+    int Severity,
     string Detail);
 
 public sealed record ArtifactRetentionPolicyDto(

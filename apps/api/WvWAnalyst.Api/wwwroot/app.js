@@ -6,6 +6,7 @@ const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
+let currentPatchMetadata = null;
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
@@ -637,8 +638,14 @@ function buildAnalysisTrendSummary(rawPoints, aggregatedPoints, mode, smoothingW
     const smoothingSummary = smoothingWindow > 1
         ? ` ${smoothingWindow}-${modeOption.usesMedianBuckets ? "bucket" : "fight"} trailing average is overlaid.`
         : " Raw values are shown without smoothing.";
+    const patchLabels = [...new Set(rawPoints.map(point => point.patchEraLabel).filter(Boolean))];
+    const patchSummary = patchLabels.length === 0
+        ? ""
+        : patchLabels.length <= 2
+            ? ` Patch eras: ${patchLabels.join(", ")}.`
+            : ` Patch eras: ${patchLabels.slice(0, 2).join(", ")} +${patchLabels.length - 2} more.`;
 
-    return `${modeOption.description} ${sourceSummary}${smoothingSummary}`;
+    return `${modeOption.description} ${sourceSummary}${smoothingSummary}${patchSummary}`;
 }
 
 function startOfLocalDay(date) {
@@ -994,6 +1001,31 @@ async function loadDashboard() {
     return response.json();
 }
 
+async function loadPatchMetadata() {
+    const response = await fetch("/api/patch-metadata");
+    if (!response.ok) {
+        throw new Error(`Patch metadata request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function savePatchMetadata(metadata) {
+    const response = await fetch("/api/patch-metadata", {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(metadata)
+    });
+    const payload = await readApiPayload(response);
+    if (!response.ok) {
+        throw new Error(payload?.message ?? `Patch metadata save failed with status ${response.status}`);
+    }
+
+    return payload;
+}
+
 async function loadFightDetail(fightId) {
     const response = await fetch(`/api/fights/${encodeURIComponent(fightId)}`);
     if (!response.ok) {
@@ -1017,6 +1049,13 @@ async function loadAnalysis(filters = {}) {
     }
     if (filters.outcome && filters.outcome !== "all") {
         params.set("outcome", filters.outcome);
+    }
+    if (filters.patchScope && filters.patchScope !== "all") {
+        params.set("patchScope", filters.patchScope);
+    }
+    const fightAttributes = joinKeyFilterValues(filters.fightAttributes);
+    if (fightAttributes) {
+        params.set("fightAttributes", fightAttributes);
     }
     const squadIncludeClasses = joinClassFilterLabels(filters.squadIncludeClasses);
     const squadExcludeClasses = joinClassFilterLabels(filters.squadExcludeClasses);
@@ -1157,6 +1196,236 @@ function normalizeClassFilterLabels(values) {
 
 function joinClassFilterLabels(labels) {
     return normalizeClassFilterLabels(labels).join(", ");
+}
+
+function normalizeKeyFilterValues(values) {
+    const rawValues = Array.isArray(values)
+        ? values
+        : String(values ?? "").split(/[,\n;\r|]+/);
+
+    return [...new Set(rawValues
+        .map(value => String(value ?? "").trim())
+        .filter(Boolean))];
+}
+
+function joinKeyFilterValues(values) {
+    return normalizeKeyFilterValues(values).join(",");
+}
+
+function getPatchErasFromSource(source) {
+    return source?.patchEras
+        ?? source?.patchMetadata?.patchEras
+        ?? currentPatchMetadata?.patchEras
+        ?? [];
+}
+
+function getCurrentPatchEra(eras) {
+    return (eras ?? []).find(era => era?.isCurrent)
+        ?? [...(eras ?? [])].sort((left, right) => String(right?.startsOn ?? "").localeCompare(String(left?.startsOn ?? "")))[0]
+        ?? null;
+}
+
+function getLastPatchEraIds(eras, count = 2) {
+    return [...(eras ?? [])]
+        .sort((left, right) => String(right?.startsOn ?? "").localeCompare(String(left?.startsOn ?? "")))
+        .slice(0, count)
+        .map(era => era?.id)
+        .filter(Boolean);
+}
+
+function renderPatchScopeOptions(selector, eras, selectedValue = "all") {
+    const select = document.querySelector(selector);
+    if (!select) {
+        return;
+    }
+
+    const previousValue = selectedValue || select.value || "all";
+    const currentEra = getCurrentPatchEra(eras);
+    const options = [
+        { value: "all", label: "All patches" },
+        { value: "current", label: currentEra ? `Current: ${currentEra.label}` : "Current patch" },
+        { value: "last2", label: "Last 2 patches" },
+        ...(eras ?? []).map(era => ({ value: `era:${era.id}`, label: era.label }))
+    ];
+    const nextValue = options.some(option => option.value === previousValue)
+        ? previousValue
+        : "all";
+
+    select.innerHTML = options
+        .map(option => `<option value="${escapeHtml(option.value)}" ${option.value === nextValue ? "selected" : ""}>${escapeHtml(option.label)}</option>`)
+        .join("");
+    select.value = nextValue;
+}
+
+function getSelectedAttributeFilterValues(selector) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return [];
+    }
+
+    return normalizeKeyFilterValues(Array.from(container.querySelectorAll("input[type='checkbox']:checked"))
+        .map(input => input.value));
+}
+
+function updateAttributeFilterSelectionUi(selector) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return;
+    }
+
+    container.querySelectorAll(".attribute-filter-option").forEach(option => {
+        const input = option.querySelector("input[type='checkbox']");
+        option.classList.toggle("is-active", Boolean(input?.checked));
+    });
+    updateAttributeFilterSummary(selector);
+}
+
+function clearSelectedAttributeFilterValues(selector) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return;
+    }
+
+    container.querySelectorAll("input[type='checkbox']").forEach(input => {
+        input.checked = false;
+    });
+    updateAttributeFilterSelectionUi(selector);
+}
+
+function getAttributeFilterSummarySelector(selector) {
+    if (selector.includes("fight-browser")) {
+        return "#fight-browser-attribute-summary";
+    }
+
+    if (selector.includes("analysis")) {
+        return "#analysis-attribute-summary";
+    }
+
+    return "";
+}
+
+function buildAttributeFilterSummaryText(values) {
+    const labels = normalizeKeyFilterValues(values);
+    if (labels.length === 0) {
+        return "Any attribute";
+    }
+
+    if (labels.length === 1) {
+        return "1 selected";
+    }
+
+    return `${labels.length} selected`;
+}
+
+function updateAttributeFilterSummary(selector, values = null) {
+    const summarySelector = getAttributeFilterSummarySelector(selector);
+    const summary = summarySelector ? document.querySelector(summarySelector) : null;
+    if (!summary) {
+        return;
+    }
+
+    summary.textContent = buildAttributeFilterSummaryText(values ?? getSelectedAttributeFilterValues(selector));
+}
+
+function renderAttributeFilterBox(selector, definitions, selectedValues) {
+    const container = document.querySelector(selector);
+    if (!container) {
+        return;
+    }
+
+    const selected = new Set(normalizeKeyFilterValues(selectedValues));
+    const grouped = new Map();
+    (definitions ?? []).forEach(definition => {
+        if (!definition?.key || !definition?.label) {
+            return;
+        }
+
+        const group = definition.group || "Attributes";
+        if (!grouped.has(group)) {
+            grouped.set(group, []);
+        }
+
+        grouped.get(group).push(definition);
+    });
+
+    if (grouped.size === 0) {
+        container.innerHTML = `<p class="class-filter-empty">No fight attributes are available yet.</p>`;
+        updateAttributeFilterSummary(selector, []);
+        return;
+    }
+
+    container.innerHTML = Array.from(grouped.entries())
+        .map(([group, items]) => `
+            <div class="attribute-filter-group">
+                <strong>${escapeHtml(group)}</strong>
+                <div class="attribute-filter-options">
+                    ${items.map(item => {
+                        const inputId = `${selector.slice(1)}-${item.key}`;
+                        return `
+                            <label class="attribute-filter-option ${selected.has(item.key) ? "is-active" : ""}" for="${escapeHtml(inputId)}">
+                                <input id="${escapeHtml(inputId)}" type="checkbox" value="${escapeHtml(item.key)}" ${selected.has(item.key) ? "checked" : ""}>
+                                <span>${escapeHtml(item.label)}</span>
+                            </label>
+                        `;
+                    }).join("")}
+                </div>
+            </div>
+        `)
+        .join("");
+    updateAttributeFilterSelectionUi(selector);
+}
+
+function buildAttributePills(attributes, limit = 4) {
+    const retained = (attributes ?? []).filter(attribute => attribute?.label);
+    if (retained.length === 0) {
+        return `<span class="table-inline-note">-</span>`;
+    }
+
+    const visible = retained.slice(0, limit);
+    const hiddenCount = Math.max(0, retained.length - visible.length);
+    return `
+        <div class="attribute-pill-list">
+            ${visible.map(attribute => `<span class="attribute-pill" title="${escapeHtml(attribute.detail ?? attribute.label)}">${escapeHtml(attribute.label)}</span>`).join("")}
+            ${hiddenCount > 0 ? `<span class="attribute-pill attribute-pill-muted">+${escapeHtml(String(hiddenCount))}</span>` : ""}
+        </div>
+    `;
+}
+
+function matchesPatchScope(fight, patchScope, eras) {
+    const normalized = String(patchScope || "all").trim();
+    if (!normalized || normalized === "all") {
+        return true;
+    }
+
+    const fightEraId = fight?.patchEra?.id;
+    if (!fightEraId) {
+        return false;
+    }
+
+    if (normalized === "current") {
+        return stringEqualsIgnoreCase(fightEraId, getCurrentPatchEra(eras)?.id);
+    }
+
+    if (normalized === "last2") {
+        return getLastPatchEraIds(eras, 2).some(eraId => stringEqualsIgnoreCase(fightEraId, eraId));
+    }
+
+    if (normalized.startsWith("era:")) {
+        return stringEqualsIgnoreCase(fightEraId, normalized.slice(4));
+    }
+
+    return true;
+}
+
+function matchesFightAttributeFilters(fight, requiredAttributeKeys) {
+    const required = normalizeKeyFilterValues(requiredAttributeKeys);
+    if (required.length === 0) {
+        return true;
+    }
+
+    const fightKeys = (fight?.attributes ?? []).map(attribute => attribute.key);
+    return required.every(requiredKey =>
+        fightKeys.some(fightKey => stringEqualsIgnoreCase(fightKey, requiredKey)));
 }
 
 function buildFightPlayerClassLabel(player) {
@@ -1513,8 +1782,34 @@ function buildStatusClass(value) {
     return "status status-neutral";
 }
 
+function renderPatchMetadata(metadata) {
+    currentPatchMetadata = metadata ?? currentPatchMetadata;
+    const summary = document.querySelector("#patch-metadata-summary");
+    const textarea = document.querySelector("#patch-metadata-json");
+    if (!summary || !textarea || !currentPatchMetadata) {
+        return;
+    }
+
+    const patchEras = currentPatchMetadata.patchEras ?? [];
+    const patchImpacts = currentPatchMetadata.patchImpacts ?? [];
+    const currentEra = getCurrentPatchEra(patchEras);
+    summary.textContent = `${patchEras.length} patch eras, ${patchImpacts.length} perceived impact notes${currentEra ? `, current: ${currentEra.label}` : ""}.`;
+    textarea.value = JSON.stringify(currentPatchMetadata, null, 2);
+}
+
+function renderPatchMetadataStatus(message, success = true) {
+    const status = document.querySelector("#patch-metadata-status");
+    if (!status) {
+        return;
+    }
+
+    status.classList.toggle("import-status-error", !success);
+    status.textContent = message;
+}
+
 function renderWorkspace(snapshot) {
     document.querySelector("#mode-pill").textContent = snapshot.application.mode;
+    renderPatchMetadata(snapshot.patchMetadata);
     const configuredLogDirectory = snapshot.workspace.logDirectoryPath ?? "Not configured";
     document.querySelector("#configured-log-directory-input").value = configuredLogDirectory;
     const manageSummary = snapshot.manageActivity && (snapshot.manageActivity.parseRunning || snapshot.manageActivity.uploadRunning)
@@ -1533,6 +1828,8 @@ function getAnalysisFiltersFromUi() {
         startDate: document.querySelector("#analysis-start-date").value || "",
         endDate: document.querySelector("#analysis-end-date").value || "",
         outcome: document.querySelector("#analysis-outcome").value || "all",
+        patchScope: document.querySelector("#analysis-patch-scope").value || "all",
+        fightAttributes: getSelectedAttributeFilterValues("#analysis-attribute-filters"),
         squadIncludeClasses: getSelectedClassFilterValues("#analysis-squad-has"),
         squadExcludeClasses: getSelectedClassFilterValues("#analysis-squad-lacks"),
         enemyIncludeClasses: getSelectedClassFilterValues("#analysis-enemy-has"),
@@ -1545,6 +1842,7 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
     const startDateInput = document.querySelector("#analysis-start-date");
     const endDateInput = document.querySelector("#analysis-end-date");
     const outcomeSelect = document.querySelector("#analysis-outcome");
+    const patchScopeSelect = document.querySelector("#analysis-patch-scope");
 
     const previousCommander = preserveSelection ? commanderSelect.value : "";
     const selectedCommander = snapshot.selection?.commander ?? previousCommander;
@@ -1569,6 +1867,16 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
     }
 
     outcomeSelect.value = snapshot.selection?.outcomeCode ?? "all";
+    renderPatchScopeOptions(
+        "#analysis-patch-scope",
+        snapshot.options?.patchEras ?? [],
+        snapshot.selection?.patchScope === "era" && (snapshot.selection?.patchEraIds?.length ?? 0) === 1
+            ? `era:${snapshot.selection.patchEraIds[0]}`
+            : snapshot.selection?.patchScope ?? patchScopeSelect?.value ?? "all");
+    renderAttributeFilterBox(
+        "#analysis-attribute-filters",
+        snapshot.options?.fightAttributes ?? [],
+        snapshot.selection?.fightAttributeKeys ?? getSelectedAttributeFilterValues("#analysis-attribute-filters"));
     renderAnalysisClassFilters(snapshot.options?.classOptions ?? [], {
         squadIncludeClasses: snapshot.selection?.squadIncludeClasses ?? [],
         squadExcludeClasses: snapshot.selection?.squadExcludeClasses ?? [],
@@ -3743,7 +4051,14 @@ function buildAnalysisClassRow(classRow) {
 
     return `
         <tr class="${rowClasses.join(" ")}" data-class-label="${escapeHtml(classRow.classLabel)}">
-            <td><strong>${escapeHtml(classRow.classLabel)}</strong></td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(classRow.classLabel)}</strong>
+                    ${buildPatchImpactPills(classRow.patchImpacts, 2)
+                        ? `<div class="attribute-pill-list">${buildPatchImpactPills(classRow.patchImpacts, 2)}</div>`
+                        : ""}
+                </div>
+            </td>
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(String(classRow.sampleCount))}</strong>
@@ -3777,6 +4092,58 @@ function getSortedAnalysisClasses(snapshot) {
     });
 
     return classes;
+}
+
+function buildPatchImpactPills(impacts, limit = 3) {
+    const retained = (impacts ?? []).filter(impact => impact?.classLabel);
+    if (retained.length === 0) {
+        return "";
+    }
+
+    const laneDeltas = retained
+        .flatMap(impact => (impact.laneImpacts ?? []).map(lane => ({ impact, lane })))
+        .filter(entry => Number(entry.lane?.impact ?? 0) !== 0)
+        .sort((left, right) => Math.abs(Number(right.lane.impact ?? 0)) - Math.abs(Number(left.lane.impact ?? 0)))
+        .slice(0, limit);
+
+    if (laneDeltas.length === 0) {
+        return retained
+            .slice(0, limit)
+            .map(impact => `<span class="attribute-pill attribute-pill-muted">${escapeHtml(`${impact.buildLabel ?? impact.classLabel}: ${impact.adoptionExpectation ?? impact.confidence}`)}</span>`)
+            .join("");
+    }
+
+    return laneDeltas
+        .map(({ impact, lane }) => {
+            const value = Number(lane.impact ?? 0);
+            const sign = value > 0 ? "+" : "";
+            const className = value > 0 ? "attribute-pill-positive" : "attribute-pill-negative";
+            const title = [impact.notes, lane.notes].filter(Boolean).join(" ");
+            return `<span class="attribute-pill ${className}" title="${escapeHtml(title)}">${escapeHtml(`${lane.laneLabel} ${sign}${value}`)}</span>`;
+        })
+        .join("");
+}
+
+function buildPatchImpactDetail(impacts) {
+    const retained = (impacts ?? []).filter(impact => impact?.classLabel);
+    if (retained.length === 0) {
+        return "";
+    }
+
+    return `
+        <div class="patch-impact-panel">
+            ${retained.map(impact => `
+                <article class="patch-impact-card">
+                    <div class="table-stack">
+                        <strong>${escapeHtml(`${impact.classLabel}${impact.buildLabel ? ` / ${impact.buildLabel}` : ""}`)}</strong>
+                        <span class="table-inline-note">${escapeHtml(`${impact.adoptionExpectation ?? "Adoption unchanged"} | ${impact.confidence} confidence`)}</span>
+                    </div>
+                    <div class="attribute-pill-list">${buildPatchImpactPills([impact], 8)}</div>
+                    ${impact.notes ? `<p class="table-inline-note">${escapeHtml(impact.notes)}</p>` : ""}
+                </article>
+            `).join("")}
+        </div>
+    `;
 }
 
 function buildAnalysisClassPlayerRow(player) {
@@ -3863,6 +4230,7 @@ function renderAnalysisClassDetail(classRow) {
                 </div>
             </article>
         </div>
+        ${buildPatchImpactDetail(classRow.patchImpacts)}
         <div class="section-heading">
             <div>
                 <h3>Players on ${escapeHtml(classRow.classLabel)}</h3>
@@ -4371,6 +4739,12 @@ function renderAnalysis(snapshot) {
             snapshot.selection.outcomeCode && snapshot.selection.outcomeCode !== "all"
                 ? `Outcome filter: ${snapshot.selection.outcomeCode}`
                 : "Outcome filter: all",
+            snapshot.selection.patchScope && snapshot.selection.patchScope !== "all"
+                ? `Patch scope: ${snapshot.selection.patchScope}${(snapshot.selection.patchEraIds?.length ?? 0) > 0 ? ` (${snapshot.selection.patchEraIds.join(", ")})` : ""}`
+                : "Patch scope: all",
+            (snapshot.selection?.fightAttributeKeys?.length ?? 0) > 0
+                ? `Attributes: ${snapshot.selection.fightAttributeKeys.join(", ")}`
+                : "Attributes: all",
             (snapshot.selection?.squadIncludeClasses?.length ?? 0) > 0
                 ? `Our side has: ${joinClassFilterLabels(snapshot.selection.squadIncludeClasses)}`
                 : "Our side has: any",
@@ -4476,6 +4850,9 @@ function applyFightBrowserFilters(snapshot) {
     const endDateValue = document.querySelector("#fight-browser-end-date").value || "";
     const outcomeValue = document.querySelector("#fight-browser-outcome").value;
     const classFilters = getFightBrowserClassFiltersFromUi();
+    const patchScope = document.querySelector("#fight-browser-patch-scope")?.value ?? "all";
+    const attributeFilters = getSelectedAttributeFilterValues("#fight-browser-attribute-filters");
+    const patchEras = snapshot.patchMetadata?.patchEras ?? [];
 
     let fights = snapshot.fightBrowser.fights;
 
@@ -4510,7 +4887,9 @@ function applyFightBrowserFilters(snapshot) {
 
     fights = fights
         .filter(fight => matchesFightSideClassFilters(fight, "squad", classFilters.squadIncludeClasses, classFilters.squadExcludeClasses))
-        .filter(fight => matchesFightSideClassFilters(fight, "enemy", classFilters.enemyIncludeClasses, classFilters.enemyExcludeClasses));
+        .filter(fight => matchesFightSideClassFilters(fight, "enemy", classFilters.enemyIncludeClasses, classFilters.enemyExcludeClasses))
+        .filter(fight => matchesPatchScope(fight, patchScope, patchEras))
+        .filter(fight => matchesFightAttributeFilters(fight, attributeFilters));
 
     return sortFights(fights);
 }
@@ -4536,6 +4915,7 @@ function buildFightBrowserRow(fight, selectedFightId) {
             <td>${escapeHtml(getExecutionScoreLabel(fight))}</td>
             <td>${escapeHtml(String(squadCount))}</td>
             <td>${escapeHtml(String(enemyCount))}</td>
+            <td>${buildAttributePills(fight.attributes)}</td>
             <td>
                 <div class="table-actions">
                     <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Summary</a>
@@ -4615,6 +4995,14 @@ function renderFightBrowser(snapshot, selectedFightId) {
     const summary = document.querySelector("#fight-browser-summary");
     const body = document.querySelector("#fight-browser-body");
     renderFightBrowserFilterOptions(snapshot.fightBrowser.fights);
+    renderPatchScopeOptions(
+        "#fight-browser-patch-scope",
+        snapshot.patchMetadata?.patchEras ?? [],
+        document.querySelector("#fight-browser-patch-scope")?.value ?? "all");
+    renderAttributeFilterBox(
+        "#fight-browser-attribute-filters",
+        snapshot.fightAttributeDefinitions ?? [],
+        getSelectedAttributeFilterValues("#fight-browser-attribute-filters"));
     renderFightBrowserClassFilters(
         collectClassOptionsFromFights(snapshot.fightBrowser.fights),
         getFightBrowserClassFiltersFromUi());
@@ -4629,7 +5017,7 @@ function renderFightBrowser(snapshot, selectedFightId) {
     if (filteredFights.length === 0) {
         body.innerHTML = `
             <tr>
-                <td colspan="8">No fights matched the current filters.</td>
+                <td colspan="9">No fights matched the current filters.</td>
             </tr>
         `;
         return;
@@ -5464,6 +5852,53 @@ async function handleManageReset() {
     }
 }
 
+async function handlePatchMetadataSave() {
+    const button = document.querySelector("#patch-metadata-save-button");
+    const textarea = document.querySelector("#patch-metadata-json");
+    if (!textarea) {
+        return;
+    }
+
+    let metadata;
+    try {
+        metadata = JSON.parse(textarea.value || "{}");
+    } catch (error) {
+        renderPatchMetadataStatus(error instanceof Error ? error.message : String(error), false);
+        return;
+    }
+
+    button.disabled = true;
+    renderPatchMetadataStatus("Saving patch metadata...");
+    try {
+        const saved = await savePatchMetadata(metadata);
+        renderPatchMetadata(saved);
+        renderPatchMetadataStatus("Patch metadata saved.");
+        currentAnalysisSnapshot = null;
+        await main();
+    } catch (error) {
+        renderPatchMetadataStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function handlePatchMetadataReload() {
+    const button = document.querySelector("#patch-metadata-reload-button");
+    button.disabled = true;
+    renderPatchMetadataStatus("Reloading patch metadata...");
+    try {
+        const metadata = await loadPatchMetadata();
+        renderPatchMetadata(metadata);
+        renderPatchMetadataStatus("Patch metadata reloaded.");
+        currentAnalysisSnapshot = null;
+        await main();
+    } catch (error) {
+        renderPatchMetadataStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function handleBatchSubmit(event) {
     event.preventDefault();
 
@@ -5785,10 +6220,21 @@ document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
 });
 document.querySelector("#batch-results-show-all").addEventListener("change", () => renderBatchResults(lastBatchResult));
 document.querySelector("#batch-results-show-excluded").addEventListener("change", () => renderBatchResults(lastBatchResult));
+document.querySelector("#patch-metadata-save-button").addEventListener("click", () => void handlePatchMetadataSave());
+document.querySelector("#patch-metadata-reload-button").addEventListener("click", () => void handlePatchMetadataReload());
 document.querySelector("#fight-browser-commander").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-start-date").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-end-date").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-outcome").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-patch-scope").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-attribute-filters").addEventListener("change", () => {
+    updateAttributeFilterSelectionUi("#fight-browser-attribute-filters");
+    handleFightBrowserChange();
+});
+document.querySelector("#fight-browser-clear-attribute-filters").addEventListener("click", () => {
+    clearSelectedAttributeFilterValues("#fight-browser-attribute-filters");
+    handleFightBrowserChange();
+});
 document.querySelector("#fight-browser-class-filters").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-class-filters").addEventListener("click", event => {
     const button = event.target.closest("[data-class-filter-clear]");
@@ -5822,6 +6268,17 @@ document.querySelector("#analysis-class-filters").addEventListener("click", even
 });
 document.querySelector("#analysis-clear-class-filters").addEventListener("click", () => {
     clearAnalysisClassFilters();
+});
+document.querySelector("#analysis-patch-scope").addEventListener("change", () => {
+    currentAnalysisSnapshot = null;
+});
+document.querySelector("#analysis-attribute-filters").addEventListener("change", () => {
+    updateAttributeFilterSelectionUi("#analysis-attribute-filters");
+    currentAnalysisSnapshot = null;
+});
+document.querySelector("#analysis-clear-attribute-filters").addEventListener("click", () => {
+    clearSelectedAttributeFilterValues("#analysis-attribute-filters");
+    currentAnalysisSnapshot = null;
 });
 document.querySelector("#analysis-player-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
