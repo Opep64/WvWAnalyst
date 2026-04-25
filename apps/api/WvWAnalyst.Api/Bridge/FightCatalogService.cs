@@ -109,6 +109,13 @@ public sealed class FightCatalogService
             .ToList();
     }
 
+    public IReadOnlyList<FightArtifactSummaryDto> GetDashboardRecentParseSummaries(int maxCount)
+    {
+        return GetRecentParseSummaries(maxCount)
+            .Select(BuildDashboardSummary)
+            .ToList();
+    }
+
     public FightBrowserSnapshotDto GetFightBrowserSnapshot()
     {
         lock (_cacheLock)
@@ -117,6 +124,17 @@ public sealed class FightCatalogService
             _cachedFightBrowserSnapshot ??= BuildFightBrowserSnapshot(_cachedCanonicalSummaries);
             return _cachedFightBrowserSnapshot;
         }
+    }
+
+    public FightBrowserSnapshotDto GetDashboardFightBrowserSnapshot()
+    {
+        var snapshot = GetFightBrowserSnapshot();
+        return snapshot with
+        {
+            Fights = snapshot.Fights
+                .Select(BuildDashboardSummary)
+                .ToList()
+        };
     }
 
     public FightArtifactManifest? TryFindReplacementFight(string? sourceFileSha256, string? fightFingerprint)
@@ -602,6 +620,119 @@ public sealed class FightCatalogService
             ImportedCount: fights.Count,
             FailedCount: allCatalogItems.Count(fight => string.Equals(fight.Status, "Parser failed", StringComparison.OrdinalIgnoreCase)),
             Fights: fights);
+    }
+
+    private static FightArtifactSummaryDto BuildDashboardSummary(FightArtifactSummaryDto summary)
+    {
+        return summary with
+        {
+            FightIndex = BuildDashboardFightIndex(summary.FightIndex)
+        };
+    }
+
+    private static FightIndexDto? BuildDashboardFightIndex(FightIndexDto? fightIndex)
+    {
+        if (fightIndex is null)
+        {
+            return null;
+        }
+
+        return fightIndex with
+        {
+            SquadSide = BuildDashboardSide(fightIndex.SquadSide, fightIndex.Players, includePlayerFallbackClasses: true),
+            EnemySide = BuildDashboardSide(fightIndex.EnemySide, fightIndex.Players, includePlayerFallbackClasses: false),
+            CommanderSummary = null,
+            DefenseSaves = null,
+            MitigationSummary = null,
+            Obliterate = null,
+            ThreatBoons = Array.Empty<FightThreatBoonIndexDto>(),
+            TopBursts = BuildDashboardTopBursts(fightIndex.TopBursts),
+            Players = Array.Empty<FightPlayerIndexDto>(),
+            Execution = BuildDashboardExecution(fightIndex.Execution),
+            ActiveExtensions = Array.Empty<string>()
+        };
+    }
+
+    private static FightSideIndexDto? BuildDashboardSide(
+        FightSideIndexDto? side,
+        IReadOnlyList<FightPlayerIndexDto>? players,
+        bool includePlayerFallbackClasses)
+    {
+        if (side is null)
+        {
+            return null;
+        }
+
+        var classes = side.Classes ?? Array.Empty<FightSideClassIndexDto>();
+        if (includePlayerFallbackClasses && classes.Count == 0)
+        {
+            classes = BuildPlayerClassSummaries(players);
+        }
+
+        return side with
+        {
+            Classes = classes
+        };
+    }
+
+    private static IReadOnlyList<FightSideClassIndexDto> BuildPlayerClassSummaries(IReadOnlyList<FightPlayerIndexDto>? players)
+    {
+        return (players ?? Array.Empty<FightPlayerIndexDto>())
+            .Select(player => new
+            {
+                ClassLabel = string.IsNullOrWhiteSpace(player.EliteSpec) ? player.Profession : player.EliteSpec,
+                player.Icon
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.ClassLabel))
+            .GroupBy(item => item.ClassLabel!, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightSideClassIndexDto(
+                ClassLabel: group.Key,
+                Icon: group.Select(item => item.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
+                Count: group.Count()))
+            .OrderBy(item => item.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static FightExecutionIndexDto? BuildDashboardExecution(FightExecutionIndexDto? execution)
+    {
+        if (execution is null)
+        {
+            return null;
+        }
+
+        return execution with
+        {
+            Summary = null,
+            Detail = null,
+            ConfidenceLabel = null,
+            ConfidenceNotes = Array.Empty<string>(),
+            StrongestPillarSummary = null,
+            WeakestPillarSummary = null,
+            Context = null,
+            Outcome = null,
+            Pillars = Array.Empty<FightExecutionPillarIndexDto>()
+        };
+    }
+
+    private static IReadOnlyList<FightTopBurstIndexDto> BuildDashboardTopBursts(IReadOnlyList<FightTopBurstIndexDto>? topBursts)
+    {
+        return (topBursts ?? Array.Empty<FightTopBurstIndexDto>())
+            .Select(burst => burst with
+            {
+                TopPressure = BuildDashboardTopBurstActor(burst.TopPressure),
+                TopStrips = BuildDashboardTopBurstActor(burst.TopStrips)
+            })
+            .ToArray();
+    }
+
+    private static FightTopBurstActorIndexDto? BuildDashboardTopBurstActor(FightTopBurstActorIndexDto? actor)
+    {
+        return actor is null
+            ? null
+            : actor with
+            {
+                Icon = null
+            };
     }
 
     public void InvalidateCatalogCache()

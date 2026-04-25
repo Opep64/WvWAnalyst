@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.ResponseCompression;
 using WvWAnalyst.Api.Analysis;
 using WvWAnalyst.Api.Bridge;
 using WvWAnalyst.Api.Configuration;
@@ -25,6 +27,21 @@ builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = MaxUploadBodyBytes;
 });
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/json"]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
 
 builder.Services.AddSingleton<AppPathService>();
 builder.Services.AddSingleton<FightTeamScorecardBlueprintFactory>();
@@ -42,6 +59,8 @@ builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 
 var app = builder.Build();
+
+app.UseResponseCompression();
 
 app.Use(async (context, next) =>
 {

@@ -45,7 +45,7 @@ public sealed class PrototypeDashboardService
         var databasePath = _paths.DatabasePath;
         var fightsPath = _paths.FightsPath;
         var cachePath = _paths.CachePath;
-        var fightBrowserSnapshot = _fightCatalog.GetFightBrowserSnapshot();
+        var fightBrowserSnapshot = _fightCatalog.GetDashboardFightBrowserSnapshot();
         var hasRunningJob = _directoryImportJobs.TryGetRunningJob(out var activeBatchJob);
         var activeUploadCount = _uploadService.GetActiveUploadCount();
 
@@ -98,7 +98,7 @@ public sealed class PrototypeDashboardService
                     Status: "active",
                     Summary: "The local catalog keeps compact manifest data, retained HTML reports, and parser logs while still treating analyst JSON payloads as temporary ingest artifacts.")
             ],
-            RecentParses: _fightCatalog.GetRecentParseSummaries(10),
+            RecentParses: _fightCatalog.GetDashboardRecentParseSummaries(10),
             FightBrowser: fightBrowserSnapshot,
             ManageActivity: BuildManageActivity(hasRunningJob ? activeBatchJob : null, activeUploadCount),
             PatchMetadata: _patchMetadata.GetMetadata(),
