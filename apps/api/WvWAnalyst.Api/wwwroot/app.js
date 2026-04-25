@@ -29,6 +29,7 @@ let activeAnalysisLaneDetailTab = "players";
 const MINIMUM_LANE_FILTER_APPEARANCES = 20;
 const MINIMUM_PLAYER_TABLE_FIGHTS = 40;
 const ANALYSIS_TREND_ROLLING_WINDOW = 5;
+const SHOW_ANALYSIS_OBLITERATE_CARD = false;
 const COMP_HELPER_TEAM_SIZE = 5;
 const COMP_HELPER_MAX_LOCKED_CARDS = 5;
 const COMP_HELPER_MIN_TOTAL_FIGHTS = 20;
@@ -1406,10 +1407,16 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
     ];
 
     return `
-        <article class="analysis-card analysis-card--wide analysis-card--table">
-            <strong>Mitigation</strong>
-            <div class="table-stack">
-                ${headerLines.map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}
+        <details class="analysis-card analysis-card--wide analysis-card--table analysis-collapsible-card">
+            <summary class="analysis-collapsible-summary">
+                <span>
+                    <strong>Mitigation details</strong>
+                    <span class="table-inline-note">${escapeHtml(availabilityDetail)}</span>
+                </span>
+                <span class="analysis-card-value">${escapeHtml(formatNumber(totalPrevention, 0))}</span>
+            </summary>
+            <div class="table-stack analysis-collapsible-body">
+                ${headerLines.slice(1).map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}
             </div>
             <div class="analysis-mitigation-table-wrap">
                 <table class="data-table data-table-compact analysis-mitigation-table">
@@ -1433,13 +1440,12 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
                     </tbody>
                 </table>
             </div>
-        </article>
+        </details>
     `;
 }
 
 function buildAnalysisOverviewCards(snapshot) {
     const overview = snapshot.overview ?? {};
-    const mitigationSummary = overview.mitigationSummary ?? null;
     const obliterateSummary = overview.obliterateSummary ?? null;
     const cards = [
         {
@@ -1476,12 +1482,7 @@ function buildAnalysisOverviewCards(snapshot) {
         }
     ];
 
-    if (mitigationSummary) {
-        const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
-        cards.push(buildAnalysisMitigationOverviewCard(mitigationSummary, filteredFightCount));
-    }
-
-    if (obliterateSummary) {
+    if (SHOW_ANALYSIS_OBLITERATE_CARD && obliterateSummary) {
         const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
         const availabilityDetail = obliterateSummary.availableFightCount === filteredFightCount
             ? "Aggregated across all filtered fights."
@@ -1502,6 +1503,17 @@ function buildAnalysisOverviewCards(snapshot) {
     }
 
     return cards.map(card => typeof card === "string" ? card : buildAnalysisOverviewStandardCard(card)).join("");
+}
+
+function renderAnalysisMitigation(snapshot) {
+    const mitigationSummary = snapshot.overview?.mitigationSummary ?? null;
+    if (!mitigationSummary) {
+        setInnerHtml("#analysis-mitigation-card", "");
+        return;
+    }
+
+    const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
+    setInnerHtml("#analysis-mitigation-card", buildAnalysisMitigationOverviewCard(mitigationSummary, filteredFightCount));
 }
 
 function renderAnalysisCharts(snapshot) {
@@ -4023,6 +4035,7 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-summary").textContent = message;
     setInnerHtml("#analysis-overview-cards", "");
     setInnerHtml("#analysis-chart-grid", "");
+    setInnerHtml("#analysis-mitigation-card", "");
     setInnerHtml("#analysis-scope-list", buildTagListHtml([message]));
     document.querySelector("#analysis-players-summary").textContent = message;
     setInnerHtml("#analysis-players-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
@@ -4053,6 +4066,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisFilterOptions(snapshot);
     setInnerHtml("#analysis-overview-cards", buildAnalysisOverviewCards(snapshot));
     renderAnalysisCharts(snapshot);
+    renderAnalysisMitigation(snapshot);
 
     setInnerHtml(
         "#analysis-scope-list",

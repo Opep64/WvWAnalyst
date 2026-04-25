@@ -1166,6 +1166,48 @@ h1 {
     min-height: 0;
 }
 
+.analysis-collapsible-card {
+    padding: 0;
+}
+
+.analysis-collapsible-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.analysis-collapsible-summary::-webkit-details-marker {
+    display: none;
+}
+
+.analysis-collapsible-summary::before {
+    content: "+";
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.analysis-collapsible-card[open] .analysis-collapsible-summary::before {
+    content: "-";
+}
+
+.analysis-collapsible-summary > span:first-child {
+    display: grid;
+    gap: 4px;
+}
+
+.analysis-collapsible-summary .analysis-card-value {
+    margin: 0;
+    text-align: right;
+}
+
+.analysis-collapsible-body {
+    padding: 0 16px;
+}
+
 .analysis-card-value {
     font-size: 1.9rem;
     font-weight: 700;
@@ -1174,7 +1216,7 @@ h1 {
 }
 
 .analysis-mitigation-table-wrap {
-    margin-top: 12px;
+    margin: 12px 16px 16px;
     overflow-x: auto;
 }
 
