@@ -6,16 +6,22 @@ using WvWAnalyst.Api.Services;
 using WvWAnalyst.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
+const long MaxUploadBodyBytes = 4L * 1024L * 1024L * 1024L;
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = MaxUploadBodyBytes;
+});
+
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection(WorkspaceOptions.SectionName));
 builder.Services.Configure<FormOptions>(options =>
 {
-    options.MultipartBodyLengthLimit = 512L * 1024L * 1024L;
+    options.MultipartBodyLengthLimit = MaxUploadBodyBytes;
 });
 
 builder.Services.AddSingleton<AppPathService>();
@@ -26,6 +32,7 @@ builder.Services.AddSingleton<WorkspaceInventoryProbe>();
 builder.Services.AddSingleton<FightCatalogService>();
 builder.Services.AddSingleton<ParserImportService>();
 builder.Services.AddSingleton<DirectoryImportJobService>();
+builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 
@@ -66,19 +73,33 @@ app.MapGet("/api/fights/{fightId}", (string fightId, FightCatalogService catalog
     catalog.TryGetFightDetail(fightId, out var detail)
         ? Results.Ok(detail)
         : Results.NotFound());
-app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, ParserImportService service, CancellationToken cancellationToken) =>
+app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, AppPathService paths, ParserImportService service, CancellationToken cancellationToken) =>
 {
-    var result = await service.ImportDirectoryAsync(request, cancellationToken);
+    var effectiveRequest = request with
+    {
+        DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
+    };
+    var result = await service.ImportDirectoryAsync(effectiveRequest, cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
-app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, DirectoryImportJobService service) =>
+app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, AppPathService paths, DirectoryImportJobService service) =>
 {
-    if (service.TryStartJob(request, out var status))
+    var effectiveRequest = request with
+    {
+        DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
+    };
+    if (service.TryStartJob(effectiveRequest, out var status))
     {
         return Results.Accepted($"/api/imports/directory/jobs/{status.JobId}", status);
     }
 
     return Results.Conflict(status);
+}).DisableAntiforgery();
+app.MapPost("/api/imports/log-directory/files", async (HttpRequest request, ConfiguredLogDirectoryUploadService service, CancellationToken cancellationToken) =>
+{
+    var form = await request.ReadFormAsync(cancellationToken);
+    var result = await service.SaveFilesAsync(form.Files.ToArray(), cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
 app.MapGet("/api/imports/directory/jobs/{jobId}", (string jobId, DirectoryImportJobService service) =>
     service.TryGetJob(jobId, out var status)

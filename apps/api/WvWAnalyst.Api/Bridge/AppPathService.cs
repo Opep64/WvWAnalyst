@@ -31,6 +31,11 @@ public sealed class AppPathService
 
     public string CombinerWorkspacePath => ResolveConfiguredPath(_workspaceOptions.CombinerPath);
 
+    public string? ConfiguredLogDirectoryPath =>
+        string.IsNullOrWhiteSpace(_workspaceOptions.LogDirectoryPath)
+            ? null
+            : ResolveConfiguredPath(_workspaceOptions.LogDirectoryPath);
+
     public string? ConfiguredParserCliPath =>
         string.IsNullOrWhiteSpace(_workspaceOptions.ParserCliPath)
             ? null
@@ -52,5 +57,9 @@ public sealed class AppPathService
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         Directory.CreateDirectory(FightsPath);
         Directory.CreateDirectory(CachePath);
+        if (ConfiguredLogDirectoryPath is { } configuredLogDirectoryPath)
+        {
+            Directory.CreateDirectory(configuredLogDirectoryPath);
+        }
     }
 }

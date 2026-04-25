@@ -23,6 +23,9 @@ public sealed record WorkspaceStatusDto(
     bool ParserCliDetected,
     string CombinerPath,
     bool CombinerDetected,
+    string? LogDirectoryPath,
+    bool LogDirectoryConfigured,
+    bool LogDirectoryDetected,
     string Notes);
 
 public sealed record StorageStatusDto(
@@ -110,6 +113,21 @@ public sealed record DirectoryImportJobStatusDto(
     string? StartedAtUtc,
     string? CompletedAtUtc,
     IReadOnlyList<DirectoryImportItemDto> Items);
+
+public sealed record ConfiguredLogDirectoryUploadResultDto(
+    bool Success,
+    string Message,
+    string? DirectoryPath,
+    int UploadedCount,
+    int SavedCount,
+    int SkippedCount,
+    IReadOnlyList<ConfiguredLogDirectoryUploadItemDto> Items);
+
+public sealed record ConfiguredLogDirectoryUploadItemDto(
+    string FileName,
+    string Action,
+    string Message,
+    string? SavedAs);
 
 public sealed record DirectoryImportItemDto(
     string SourceFileName,

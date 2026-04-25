@@ -33,6 +33,7 @@ public sealed class PrototypeDashboardService
         var databasePath = _paths.DatabasePath;
         var fightsPath = _paths.FightsPath;
         var cachePath = _paths.CachePath;
+        var fightBrowserSnapshot = _fightCatalog.GetFightBrowserSnapshot();
 
         var fightDirectories = new DirectoryInfo(fightsPath)
             .EnumerateDirectories()
@@ -62,7 +63,7 @@ public sealed class PrototypeDashboardService
                 FightsPath: fightsPath,
                 CachePath: cachePath,
                 FightFolderCount: fightDirectories.Count,
-                TotalBytes: GetDirectorySize(new DirectoryInfo(rootPath))),
+                TotalBytes: 0),
             TeamFightScorecard: _scorecardFactory.CreateV1(),
             Workstreams:
             [
@@ -77,20 +78,21 @@ public sealed class PrototypeDashboardService
                 new WorkstreamDto(
                     Name: "Parser bridge",
                     Status: "active",
-                    Summary: "The parser bridge now targets analysis.json only for detailed WvW, consumes that payload into compact manifest data, and does not rely on retained HTML or EI raw JSON."),
+                    Summary: "The parser bridge indexes analysis.json for compact fight data while also retaining the generated HTML report for direct fight review."),
                 new WorkstreamDto(
                     Name: "Storage management",
                     Status: "active",
-                    Summary: "The local catalog is intended to keep compact manifest data and parser logs first while treating parser-generated analysis payloads as temporary ingest artifacts.")
+                    Summary: "The local catalog keeps compact manifest data, retained HTML reports, and parser logs while still treating analyst JSON payloads as temporary ingest artifacts.")
             ],
             RecentParses: _fightCatalog.GetRecentParseSummaries(10),
-            FightBrowser: _fightCatalog.GetFightBrowserSnapshot(),
+            FightBrowser: fightBrowserSnapshot,
             RetentionPolicy: new ArtifactRetentionPolicyDto(
-                Summary: "Keep the smallest durable manifest/index data first, treat parser-generated analysis payloads as ingest-only, and avoid retaining large regenerable outputs.",
+                Summary: "Keep the compact index data and retained HTML review artifact, treat parser-generated analysis payloads as ingest-only, and avoid retaining extra regenerable outputs.",
                 KeepAlways:
                 [
                     "Fight metadata index",
                     "Compact execution snapshot",
+                    "Generated HTML fight report",
                     "Parser console log",
                     "Pinned fights"
                 ],
@@ -98,26 +100,11 @@ public sealed class PrototypeDashboardService
                 [
                     "Cache files",
                     "Temporary analysis.json payloads after ingest",
-                    "Regenerable HTML and EI raw JSON outputs",
+                    "EI raw JSON outputs",
                     "Large raw logs after successful analysis retention"
                 ]));
     }
 
     public TeamFightScorecardBlueprintDto GetTeamFightScorecardBlueprint() => _scorecardFactory.CreateV1();
 
-    private static long GetDirectorySize(DirectoryInfo directory)
-    {
-        if (!directory.Exists)
-        {
-            return 0;
-        }
-
-        long totalBytes = 0;
-        foreach (var file in directory.EnumerateFiles("*", SearchOption.AllDirectories))
-        {
-            totalBytes += file.Length;
-        }
-
-        return totalBytes;
-    }
 }

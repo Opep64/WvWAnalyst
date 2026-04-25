@@ -532,8 +532,73 @@ h1 {
     font: inherit;
 }
 
+.browser-field input[readonly] {
+    color: var(--muted);
+    cursor: default;
+}
+
 .browser-field input::placeholder {
     color: #7f90a5;
+}
+
+.log-dropzone {
+    display: grid;
+    gap: 12px;
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px dashed rgba(83, 183, 255, 0.28);
+    background: linear-gradient(180deg, rgba(15, 24, 34, 0.92), rgba(12, 19, 27, 0.96));
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.log-dropzone:hover {
+    transform: translateY(-1px);
+    border-color: rgba(83, 183, 255, 0.4);
+}
+
+.log-dropzone strong {
+    font-size: 1rem;
+}
+
+.log-dropzone p {
+    margin: 0;
+}
+
+.log-dropzone-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.log-dropzone.is-dragging {
+    border-color: rgba(118, 215, 165, 0.46);
+    background: linear-gradient(180deg, rgba(20, 34, 29, 0.96), rgba(12, 24, 21, 0.98));
+}
+
+.log-dropzone.is-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.upload-item-list {
+    list-style: none;
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    max-height: 20rem;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.upload-item-list li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
 }
 
 .class-filter-toolbar {
@@ -734,6 +799,11 @@ h1 {
 
 .import-status p {
     margin: 8px 0 0;
+}
+
+.import-status-scrollable {
+    max-height: 26rem;
+    overflow-y: auto;
 }
 
 .batch-status-grid {

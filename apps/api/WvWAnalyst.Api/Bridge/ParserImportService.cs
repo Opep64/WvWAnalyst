@@ -329,13 +329,13 @@ public sealed class ParserImportService
                 stagedParserConsoleLogPath,
                 cancellationToken);
 
-            var stagedAnalysisArtifactPath = FindArtifactPathByEnding(
-                stagedParserOutputDirectoryPath,
-                ".analysis.json",
-                ".analysis.json.gz");
+                var stagedAnalysisArtifactPath = FindArtifactPathByEnding(
+                    stagedParserOutputDirectoryPath,
+                    ".analysis.json",
+                    ".analysis.json.gz");
 
-            FightIndexSnapshot? fightIndex = null;
-            string? fightFingerprint = null;
+                FightIndexSnapshot? fightIndex = null;
+                string? fightFingerprint = null;
 
             if (!string.IsNullOrWhiteSpace(stagedAnalysisArtifactPath))
             {
@@ -418,6 +418,10 @@ public sealed class ParserImportService
                     fightDirectoryPath,
                     finalParserOutputDirectoryPath,
                     parserRun.ConsoleResult?.GeneratedFiles);
+                var finalHtmlArtifactPath = FindArtifactPathByEnding(finalParserOutputDirectoryPath, ".html");
+                var htmlArtifactRelativePath = string.IsNullOrWhiteSpace(finalHtmlArtifactPath)
+                    ? null
+                    : _fightCatalog.GetRelativePath(fightDirectoryPath, finalHtmlArtifactPath);
 
                 var importedAtUtc = DateTime.UtcNow;
                 var manifest = new FightArtifactManifest(
@@ -439,7 +443,7 @@ public sealed class ParserImportService
                     RawLogRetained: false,
                     RawLogRelativePath: null,
                     AnalysisJsonArtifactRelativePath: null,
-                    HtmlArtifactRelativePath: null,
+                    HtmlArtifactRelativePath: htmlArtifactRelativePath,
                     JsonArtifactRelativePath: null,
                     GeneratedArtifactRelativePaths: generatedArtifactRelativePaths,
                     FightIndex: fightIndex);
@@ -556,7 +560,7 @@ public sealed class ParserImportService
         {
             "SaveAtOut=false",
             $"OutLocation={outputDirectoryPath}",
-            "SaveOutHTML=false",
+            "SaveOutHTML=true",
             "SaveOutJSON=false",
             "SaveOutAnalystJSON=true",
             "SaveOutCSV=false",

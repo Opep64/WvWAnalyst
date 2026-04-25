@@ -1,5 +1,3 @@
-const DIRECTORY_PATH_KEY = "wvw-analyst.last-directory";
-const DIRECTORY_MODE_KEY = "wvw-analyst.last-mode";
 const DIRECTORY_MAX_PARALLELISM_KEY = "wvw-analyst.last-max-parallelism";
 const ACTIVE_BATCH_JOB_KEY = "wvw-analyst.active-batch-job";
 const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
@@ -9,7 +7,9 @@ let currentAnalysisSnapshot = null;
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
+let analysisLoadPromise = null;
 let showFightBrowserTopBursts = false;
+let logFileUploadBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "players";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -170,6 +170,18 @@ function formatSeconds(value, maximumFractionDigits = 1) {
 
 function setInnerHtml(selector, html) {
     document.querySelector(selector).innerHTML = html;
+}
+
+async function readApiPayload(response) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+        return response.json();
+    }
+
+    const text = await response.text();
+    return {
+        message: text || `Request failed with status ${response.status}.`
+    };
 }
 
 function buildTagListHtml(items, fallback = "None recorded.") {
@@ -528,6 +540,14 @@ function getSelectedFightId() {
     return new URL(window.location.href).searchParams.get("fightId");
 }
 
+function getConfiguredLogDirectoryPath() {
+    return currentDashboardSnapshot?.workspace?.logDirectoryPath ?? "";
+}
+
+function isConfiguredLogDirectoryAvailable() {
+    return Boolean(currentDashboardSnapshot?.workspace?.logDirectoryConfigured && getConfiguredLogDirectoryPath());
+}
+
 function normalizeAppTab(value) {
     switch (String(value ?? "").trim().toLowerCase()) {
         case "fight-browser":
@@ -573,7 +593,7 @@ function resolveInitialAppTab() {
 }
 
 function setActiveAppTab(tabKey, options = {}) {
-    const { persist = true } = options;
+    const { persist = true, loadAnalysis = true } = options;
     const normalizedTab = normalizeAppTab(tabKey);
     activeAppTab = normalizedTab;
 
@@ -589,6 +609,10 @@ function setActiveAppTab(tabKey, options = {}) {
 
     if (persist) {
         localStorage.setItem(ACTIVE_APP_TAB_KEY, normalizedTab);
+    }
+
+    if (loadAnalysis && normalizedTab === "analysis") {
+        void ensureAnalysisLoaded();
     }
 }
 
@@ -911,6 +935,60 @@ function renderFightBrowserClassFilters(options, selectedFilters) {
     renderClassFilterGroup("#fight-browser-enemy-lacks", options, selectedFilters?.enemyExcludeClasses ?? []);
 }
 
+function formatDateInputValue(value) {
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "";
+    }
+
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function getFightLocalDateString(fight) {
+    const rawValue = fight.fightIndex?.timeStartStandard ?? fight.fightIndex?.timeStart ?? null;
+    return rawValue ? formatDateInputValue(rawValue) : "";
+}
+
+function renderFightBrowserFilterOptions(fights, preserveSelection = true) {
+    const commanderSelect = document.querySelector("#fight-browser-commander");
+    const startDateInput = document.querySelector("#fight-browser-start-date");
+    const endDateInput = document.querySelector("#fight-browser-end-date");
+
+    const previousCommander = preserveSelection ? commanderSelect.value : "";
+    const previousStartDate = preserveSelection ? startDateInput.value : "";
+    const previousEndDate = preserveSelection ? endDateInput.value : "";
+
+    const commanders = [...new Set(fights
+        .flatMap(fight => fight.fightIndex?.commanderDisplayNames ?? [])
+        .filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+
+    commanderSelect.innerHTML = [
+        `<option value="">All commanders</option>`,
+        ...commanders.map(commander => `
+            <option value="${escapeHtml(commander)}" ${stringEqualsIgnoreCase(commander, previousCommander) ? "selected" : ""}>${escapeHtml(commander)}</option>
+        `)
+    ].join("");
+
+    const fightDates = fights
+        .map(getFightLocalDateString)
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right));
+    const minFightDate = fightDates[0] ?? "";
+    const maxFightDate = fightDates[fightDates.length - 1] ?? "";
+
+    startDateInput.min = minFightDate;
+    startDateInput.max = maxFightDate;
+    endDateInput.min = minFightDate;
+    endDateInput.max = maxFightDate;
+
+    startDateInput.value = previousStartDate;
+    endDateInput.value = previousEndDate;
+}
+
 function renderAnalysisClassFilters(options, selectedFilters) {
     renderClassFilterGroup("#analysis-squad-has", options, selectedFilters?.squadIncludeClasses ?? []);
     renderClassFilterGroup("#analysis-squad-lacks", options, selectedFilters?.squadExcludeClasses ?? []);
@@ -953,39 +1031,6 @@ function matchesFightSideClassFilters(fight, sideKey, requiredClasses, excludedC
     }
 
     return true;
-}
-
-function getFightSearchText(fight) {
-    const fightIndex = fight.fightIndex;
-    return [
-        fight.fightId,
-        fight.sourceFileName,
-        fight.sourceFilePath,
-        fight.status,
-        fight.notes,
-        fightIndex?.fightName,
-        fightIndex?.encounterName,
-        fightIndex?.recordedBy,
-        fightIndex?.recordedAccountBy,
-        fightIndex?.eliteInsightsVersion,
-        fightIndex?.analystSchemaVersion,
-        fightIndex?.indexedFrom,
-        fightIndex?.outcome?.displayLabel,
-        fightIndex?.outcome?.detail,
-        fightIndex?.execution?.grade,
-        fightIndex?.execution?.confidenceLabel,
-        fightIndex?.execution?.summary,
-        fightIndex?.execution?.detail,
-        fightIndex?.execution?.strongestPillarLabel,
-        fightIndex?.execution?.weakestPillarLabel,
-        ...getFightSideClassLabels(fight, "squad").labels,
-        ...getFightSideClassLabels(fight, "enemy").labels,
-        ...(fightIndex?.commanderDisplayNames ?? []),
-        ...(fightIndex?.activeExtensions ?? [])
-    ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
 }
 
 function getFightBrowserSortValue(fight, sortKey) {
@@ -1101,14 +1146,19 @@ function buildStatusClass(value) {
 
 function renderWorkspace(snapshot) {
     document.querySelector("#mode-pill").textContent = snapshot.application.mode;
+    const configuredLogDirectory = snapshot.workspace.logDirectoryPath ?? "Not configured";
+    document.querySelector("#configured-log-directory-input").value = configuredLogDirectory;
     document.querySelector("#batch-note").innerHTML = snapshot.workspace.parserCliDetected
-        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>.`
+        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>. Configured log directory: <code>${escapeHtml(configuredLogDirectory)}</code>.`
         : escapeHtml(snapshot.workspace.notes);
 
     const workspaceCards = document.querySelector("#workspace-cards");
     const parserStatus = snapshot.workspace.parserDetected ? "Detected" : "Missing";
     const parserCliStatus = snapshot.workspace.parserCliDetected ? "Ready" : "Missing";
     const combinerStatus = snapshot.workspace.combinerDetected ? "Detected" : "Missing";
+    const logDirectoryStatus = snapshot.workspace.logDirectoryConfigured
+        ? (snapshot.workspace.logDirectoryDetected ? "Ready" : "Configured")
+        : "Missing";
 
     workspaceCards.innerHTML = `
         <article class="workspace-card">
@@ -1127,11 +1177,18 @@ function renderWorkspace(snapshot) {
             <p class="workspace-note"><code>${escapeHtml(snapshot.workspace.combinerPath)}</code></p>
         </article>
         <article class="workspace-card">
+            <strong>Configured log directory</strong>
+            <div class="${buildStatusClass(logDirectoryStatus)}">${escapeHtml(logDirectoryStatus)}</div>
+            <p class="workspace-note"><code>${escapeHtml(configuredLogDirectory)}</code></p>
+        </article>
+        <article class="workspace-card">
             <strong>Storage root</strong>
             <p class="workspace-note"><code>${escapeHtml(snapshot.storage.rootPath)}</code></p>
-            <p class="workspace-note">${snapshot.storage.fightFolderCount} fight folders, ${formatBytes(snapshot.storage.totalBytes)} bytes</p>
+            <p class="workspace-note">${snapshot.storage.fightFolderCount} fight folders tracked.</p>
         </article>
     `;
+
+    syncManageControls();
 }
 
 function renderWorkstreams(snapshot) {
@@ -1416,11 +1473,6 @@ function buildAnalysisOverviewCards(snapshot) {
             title: "Average sizes",
             value: `${formatNumber(overview.averageSquadSize, 1)} vs ${formatNumber(overview.averageEnemySize, 1)}`,
             detail: "Average squad and enemy player counts."
-        },
-        {
-            title: "Average duration",
-            value: formatSeconds(overview.averageDurationSeconds, 1),
-            detail: "Average filtered fight duration."
         }
     ];
 
@@ -3967,6 +4019,31 @@ function setActiveAnalysisTab(tabKey) {
     });
 }
 
+function renderAnalysisLoading(message = "Loading analysis...") {
+    document.querySelector("#analysis-summary").textContent = message;
+    setInnerHtml("#analysis-overview-cards", "");
+    setInnerHtml("#analysis-chart-grid", "");
+    setInnerHtml("#analysis-scope-list", buildTagListHtml([message]));
+    document.querySelector("#analysis-players-summary").textContent = message;
+    setInnerHtml("#analysis-players-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-player-detail", "");
+    setInnerHtml("#analysis-classes-body", `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-class-detail", "");
+    setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-lane-selection", "");
+    setInnerHtml("#analysis-lane-detail", "");
+    setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-boon-detail", "");
+    document.querySelector("#analysis-comp-helper-summary").textContent = message;
+    setInnerHtml("#analysis-comp-helper-locks", "");
+    setInnerHtml("#analysis-comp-helper-candidates-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-comp-helper-suggestions", "");
+}
+
+function renderAnalysisError(message) {
+    renderAnalysisLoading(message);
+}
+
 function renderAnalysis(snapshot) {
     currentAnalysisSnapshot = snapshot;
 
@@ -4012,6 +4089,32 @@ function renderAnalysis(snapshot) {
     setActiveAnalysisTab(activeAnalysisTab);
 }
 
+async function ensureAnalysisLoaded(force = false) {
+    if (!force && currentAnalysisSnapshot) {
+        return currentAnalysisSnapshot;
+    }
+
+    if (analysisLoadPromise) {
+        return analysisLoadPromise;
+    }
+
+    renderAnalysisLoading(force ? "Refreshing analysis..." : "Loading analysis...");
+    analysisLoadPromise = loadAnalysis(getAnalysisFiltersFromUi())
+        .then(snapshot => {
+            renderAnalysis(snapshot);
+            return snapshot;
+        })
+        .catch(error => {
+            renderAnalysisError(error instanceof Error ? error.message : String(error));
+            throw error;
+        })
+        .finally(() => {
+            analysisLoadPromise = null;
+        });
+
+    return analysisLoadPromise;
+}
+
 function buildRecentParseRow(fight, selectedFightId) {
     const fightIndex = fight.fightIndex;
     const selectedClass = fight.fightId === selectedFightId ? " is-selected" : "";
@@ -4034,7 +4137,8 @@ function buildRecentParseRow(fight, selectedFightId) {
             <td><span class="${buildStatusClass(fight.status)}">${escapeHtml(fight.status)}</span></td>
             <td>
                 <div class="table-actions">
-                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Dossier</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Summary</a>
+                    ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
             </td>
@@ -4062,18 +4166,41 @@ function renderRecentParses(snapshot, selectedFightId) {
 }
 
 function applyFightBrowserFilters(snapshot) {
-    const searchValue = document.querySelector("#fight-browser-search").value.trim().toLowerCase();
+    const commanderValue = document.querySelector("#fight-browser-commander").value || "";
+    const startDateValue = document.querySelector("#fight-browser-start-date").value || "";
+    const endDateValue = document.querySelector("#fight-browser-end-date").value || "";
     const outcomeValue = document.querySelector("#fight-browser-outcome").value;
     const classFilters = getFightBrowserClassFiltersFromUi();
 
     let fights = snapshot.fightBrowser.fights;
 
-    if (searchValue) {
-        fights = fights.filter(fight => getFightSearchText(fight).includes(searchValue));
-    }
-
     if (outcomeValue !== "all") {
         fights = fights.filter(fight => getOutcomeCode(fight) === outcomeValue);
+    }
+
+    if (commanderValue) {
+        fights = fights.filter(fight =>
+            (fight.fightIndex?.commanderDisplayNames ?? [])
+                .some(commander => stringEqualsIgnoreCase(commander, commanderValue)));
+    }
+
+    if (startDateValue || endDateValue) {
+        fights = fights.filter(fight => {
+            const fightDate = getFightLocalDateString(fight);
+            if (!fightDate) {
+                return !startDateValue && !endDateValue;
+            }
+
+            if (startDateValue && fightDate < startDateValue) {
+                return false;
+            }
+
+            if (endDateValue && fightDate > endDateValue) {
+                return false;
+            }
+
+            return true;
+        });
     }
 
     fights = fights
@@ -4106,7 +4233,8 @@ function buildFightBrowserRow(fight, selectedFightId) {
             <td>${escapeHtml(String(enemyCount))}</td>
             <td>
                 <div class="table-actions">
-                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Dossier</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Summary</a>
+                    ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
             </td>
@@ -4128,6 +4256,9 @@ function buildFightBrowserTopBurstRow(entry) {
                 <div class="table-stack">
                     <strong>${escapeHtml(logFile)}</strong>
                     <span class="table-inline-note">${escapeHtml(fight.fightId)}</span>
+                    ${fight.htmlReportUrl
+                        ? `<span class="table-inline-note"><a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a></span>`
+                        : ""}
                 </div>
             </td>
             <td>${escapeHtml(burstTime)}</td>
@@ -4178,6 +4309,7 @@ function renderFightBrowserTopBursts(filteredFights) {
 function renderFightBrowser(snapshot, selectedFightId) {
     const summary = document.querySelector("#fight-browser-summary");
     const body = document.querySelector("#fight-browser-body");
+    renderFightBrowserFilterOptions(snapshot.fightBrowser.fights);
     renderFightBrowserClassFilters(
         collectClassOptionsFromFights(snapshot.fightBrowser.fights),
         getFightBrowserClassFiltersFromUi());
@@ -4437,7 +4569,7 @@ function clearFightDossier() {
 function renderFightDossierError(fightId, error) {
     setActiveAppTab("fight-browser");
     document.querySelector("#fight-dossier-panel").hidden = false;
-    document.querySelector("#dossier-title").textContent = "Fight dossier";
+    document.querySelector("#dossier-title").textContent = "Fight Summary";
     document.querySelector("#dossier-subtitle").textContent = `Could not load ${fightId}.`;
     document.querySelector("#dossier-back-link").setAttribute("href", getDashboardUrl("fight-browser"));
     setInnerHtml("#dossier-context-list", "");
@@ -4563,14 +4695,164 @@ function renderBatchResults(result) {
         .join("");
 }
 
+function syncManageControls() {
+    const hasConfiguredDirectory = isConfiguredLogDirectoryAvailable();
+    const parseButton = document.querySelector("#directory-button");
+    const uploadInput = document.querySelector("#log-file-upload-input");
+    const uploadButton = document.querySelector("#log-file-upload-button");
+    const dropzone = document.querySelector("#log-file-dropzone");
+
+    if (parseButton) {
+        const parseBusy = parseButton.dataset.busy === "true";
+        parseButton.disabled = parseBusy || !hasConfiguredDirectory;
+    }
+
+    if (uploadInput) {
+        uploadInput.disabled = logFileUploadBusy || !hasConfiguredDirectory;
+    }
+
+    if (uploadButton) {
+        uploadButton.disabled = logFileUploadBusy || !hasConfiguredDirectory;
+    }
+
+    if (dropzone) {
+        const isDisabled = logFileUploadBusy || !hasConfiguredDirectory;
+        dropzone.classList.toggle("is-disabled", isDisabled);
+        dropzone.setAttribute("aria-disabled", isDisabled ? "true" : "false");
+    }
+}
+
+function setLogFileUploadBusy(isBusy) {
+    logFileUploadBusy = isBusy;
+    const button = document.querySelector("#log-file-upload-button");
+    if (button) {
+        button.textContent = isBusy ? "Adding files..." : "Select files";
+    }
+
+    syncManageControls();
+}
+
+function renderLogFileUploadResult(result, success) {
+    const container = document.querySelector("#log-file-upload-status");
+    const summary = document.querySelector("#log-file-upload-summary");
+    const items = Array.isArray(result?.items) ? result.items : [];
+    const statusClass = success ? "status status-ok" : "status status-error";
+    const title = success ? "Files added" : "Needs attention";
+
+    if (!result) {
+        container.textContent = "No files have been added to the configured log directory in this browser session yet.";
+        summary.textContent = "No files added in this browser session yet.";
+        return;
+    }
+
+    const counts = [];
+    if (typeof result.uploadedCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.uploadedCount} uploaded`)}</span>`);
+    }
+    if (typeof result.savedCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.savedCount} saved`)}</span>`);
+    }
+    if (typeof result.skippedCount === "number" && result.skippedCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.skippedCount} skipped`)}</span>`);
+    }
+
+    const itemMarkup = items.length
+        ? `
+            <ul class="upload-item-list">
+                ${items.map(item => {
+                    const itemClass = item.action === "failed"
+                        ? "status status-error"
+                        : (item.action === "skipped"
+                            ? "status status-neutral"
+                            : "status status-ok");
+                    const suffix = item.savedAs && item.savedAs !== item.fileName
+                        ? ` (${item.savedAs})`
+                        : "";
+                    return `
+                        <li>
+                            <span class="${itemClass}">${escapeHtml(item.action)}</span>
+                            <span>${escapeHtml(`${item.fileName}${suffix} - ${item.message}`)}</span>
+                        </li>
+                    `;
+                }).join("")}
+            </ul>
+        `
+        : "";
+
+    container.innerHTML = `
+        <div class="batch-status-grid">
+            <div class="batch-status-header">
+                <div class="${statusClass}">${escapeHtml(title)}</div>
+                <div class="batch-progress-row">${counts.join("")}</div>
+            </div>
+            <p>${escapeHtml(result.message ?? "No message returned.")}</p>
+            ${itemMarkup}
+        </div>
+    `;
+
+    summary.textContent = success
+        ? `${formatNumber(result.savedCount ?? 0)} file(s) added to ${result.directoryPath ?? "the configured directory"}.`
+        : (result.message ?? "No files were added.");
+}
+
+async function uploadLogFiles(fileList) {
+    const files = Array.from(fileList ?? []).filter(Boolean);
+    if (files.length === 0) {
+        renderLogFileUploadResult({
+            message: "Select or drop one or more log files first.",
+            uploadedCount: 0,
+            savedCount: 0,
+            skippedCount: 0,
+            items: []
+        }, false);
+        return;
+    }
+
+    if (!isConfiguredLogDirectoryAvailable()) {
+        renderLogFileUploadResult({
+            message: "Workspace:LogDirectoryPath is not configured. Update appsettings.json before adding files.",
+            uploadedCount: files.length,
+            savedCount: 0,
+            skippedCount: files.length,
+            items: []
+        }, false);
+        return;
+    }
+
+    const formData = new FormData();
+    files.forEach(file => formData.append("files", file, file.name));
+
+    setLogFileUploadBusy(true);
+    document.querySelector("#log-file-upload-summary").textContent = `Adding ${files.length} file(s) to ${getConfiguredLogDirectoryPath()}...`;
+
+    try {
+        const response = await fetch("/api/imports/log-directory/files", {
+            method: "POST",
+            body: formData
+        });
+        const result = await readApiPayload(response);
+        renderLogFileUploadResult(result, response.ok);
+    } catch (error) {
+        renderLogFileUploadResult({
+            message: error instanceof Error ? error.message : String(error),
+            uploadedCount: files.length,
+            savedCount: 0,
+            skippedCount: files.length,
+            items: []
+        }, false);
+    } finally {
+        document.querySelector("#log-file-upload-input").value = "";
+        setLogFileUploadBusy(false);
+    }
+}
+
 async function handleBatchSubmit(event) {
     event.preventDefault();
 
-    const directoryInput = document.querySelector("#log-directory-input");
     const modeInput = document.querySelector("#directory-mode");
     const maxParallelismInput = document.querySelector("#directory-max-parallelism");
 
-    const directoryPath = directoryInput.value.trim();
+    const directoryPath = getConfiguredLogDirectoryPath().trim();
     const mode = modeInput.value;
     const rawParallelism = Number.parseInt(maxParallelismInput.value, 10);
     const maxParallelism = Number.isFinite(rawParallelism)
@@ -4579,13 +4861,11 @@ async function handleBatchSubmit(event) {
     maxParallelismInput.value = String(maxParallelism);
 
     if (!directoryPath) {
-        renderBatchStatus({ message: "Enter a directory path before starting a batch parse." }, false);
+        renderBatchStatus({ message: "Configure Workspace:LogDirectoryPath in appsettings.json before starting a batch parse." }, false);
         renderBatchResults(null);
         return;
     }
 
-    localStorage.setItem(DIRECTORY_PATH_KEY, directoryPath);
-    localStorage.setItem(DIRECTORY_MODE_KEY, mode);
     localStorage.setItem(DIRECTORY_MAX_PARALLELISM_KEY, String(maxParallelism));
 
     setBatchButtonBusy(true);
@@ -4652,54 +4932,34 @@ async function refreshAnalysis() {
     button.disabled = true;
 
     try {
-        const snapshot = await loadAnalysis(getAnalysisFiltersFromUi());
-        renderAnalysis(snapshot);
+        await ensureAnalysisLoaded(true);
     } catch (error) {
-        document.querySelector("#analysis-summary").textContent = error instanceof Error ? error.message : String(error);
-        setInnerHtml("#analysis-overview-cards", "");
-        setInnerHtml("#analysis-chart-grid", "");
-        setInnerHtml("#analysis-scope-list", buildTagListHtml(["Analysis data could not be loaded."]));
-        document.querySelector("#analysis-players-summary").textContent = "Analysis data could not be loaded.";
-        setInnerHtml("#analysis-players-body", `<tr><td colspan="6">Analysis data could not be loaded.</td></tr>`);
-        setInnerHtml("#analysis-player-detail", "");
-        setInnerHtml("#analysis-classes-body", `<tr><td colspan="9">Analysis data could not be loaded.</td></tr>`);
-        setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">Analysis data could not be loaded.</td></tr>`);
-        setInnerHtml("#analysis-lane-selection", "");
-        setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">Analysis data could not be loaded.</td></tr>`);
-        setInnerHtml("#analysis-boon-detail", "");
-        document.querySelector("#analysis-comp-helper-summary").textContent = "Analysis data could not be loaded.";
-        setInnerHtml("#analysis-comp-helper-locks", "");
-        setInnerHtml("#analysis-comp-helper-candidates-body", `<tr><td colspan="7">Analysis data could not be loaded.</td></tr>`);
-        setInnerHtml("#analysis-comp-helper-suggestions", "");
+        renderAnalysisError(error instanceof Error ? error.message : String(error));
     } finally {
         button.disabled = false;
     }
 }
 
 function hydrateBatchForm() {
-    const storedDirectory = localStorage.getItem(DIRECTORY_PATH_KEY);
-    const storedMode = localStorage.getItem(DIRECTORY_MODE_KEY);
     const storedMaxParallelism = localStorage.getItem(DIRECTORY_MAX_PARALLELISM_KEY);
-
-    if (storedDirectory) {
-        document.querySelector("#log-directory-input").value = storedDirectory;
-    }
-
-    if (storedMode === "rebuild-all" || storedMode === "new-only") {
-        document.querySelector("#directory-mode").value = storedMode;
-    }
+    localStorage.removeItem("wvw-analyst.last-directory");
+    localStorage.removeItem("wvw-analyst.last-mode");
+    document.querySelector("#directory-mode").value = "new-only";
 
     const parsedParallelism = Number.parseInt(storedMaxParallelism ?? "", 10);
     document.querySelector("#directory-max-parallelism").value = String(
         Number.isFinite(parsedParallelism)
             ? Math.min(16, Math.max(1, parsedParallelism))
             : 4);
+
+    syncManageControls();
 }
 
 function setBatchButtonBusy(isBusy) {
     const button = document.querySelector("#directory-button");
-    button.disabled = isBusy;
+    button.dataset.busy = isBusy ? "true" : "false";
     button.textContent = isBusy ? "Parsing..." : "Start batch parse";
+    syncManageControls();
 }
 
 function stopBatchJobPolling(clearStoredJob = true) {
@@ -4760,14 +5020,11 @@ function resumeBatchJobPollingIfNeeded() {
 
 async function main() {
     const selectedFightId = getSelectedFightId();
+    currentAnalysisSnapshot = null;
 
     try {
-        const [snapshot, analysisSnapshot] = await Promise.all([
-            loadDashboard(),
-            loadAnalysis(getAnalysisFiltersFromUi())
-        ]);
+        const snapshot = await loadDashboard();
         currentDashboardSnapshot = snapshot;
-        currentAnalysisSnapshot = analysisSnapshot;
 
         renderWorkspace(snapshot);
         renderWorkstreams(snapshot);
@@ -4775,7 +5032,7 @@ async function main() {
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
         renderRetention(snapshot);
-        renderAnalysis(analysisSnapshot);
+        renderAnalysisLoading("Open the Analysis tab to load analysis.");
 
         if (selectedFightId) {
             try {
@@ -4790,6 +5047,10 @@ async function main() {
 
         renderBatchResults(lastBatchResult);
         resumeBatchJobPollingIfNeeded();
+
+        if (activeAppTab === "analysis") {
+            await ensureAnalysisLoaded();
+        }
     } catch (error) {
         document.body.innerHTML = `
             <main class="page-shell">
@@ -4804,9 +5065,67 @@ async function main() {
 }
 
 document.querySelector("#batch-form").addEventListener("submit", handleBatchSubmit);
+document.querySelector("#log-file-upload-button").addEventListener("click", () => {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+        return;
+    }
+
+    document.querySelector("#log-file-upload-input").click();
+});
+document.querySelector("#log-file-upload-input").addEventListener("change", event => {
+    void uploadLogFiles(event.target.files);
+});
+document.querySelector("#log-file-dropzone").addEventListener("click", event => {
+    if (event.target.closest("#log-file-upload-button")) {
+        return;
+    }
+
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+        return;
+    }
+
+    document.querySelector("#log-file-upload-input").click();
+});
+document.querySelector("#log-file-dropzone").addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") {
+        return;
+    }
+
+    event.preventDefault();
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+        return;
+    }
+
+    document.querySelector("#log-file-upload-input").click();
+});
+["dragenter", "dragover"].forEach(eventName => {
+    document.querySelector("#log-file-dropzone").addEventListener(eventName, event => {
+        event.preventDefault();
+        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+            return;
+        }
+
+        event.currentTarget.classList.add("is-dragging");
+    });
+});
+["dragleave", "dragend", "drop"].forEach(eventName => {
+    document.querySelector("#log-file-dropzone").addEventListener(eventName, event => {
+        event.preventDefault();
+        event.currentTarget.classList.remove("is-dragging");
+    });
+});
+document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+        return;
+    }
+
+    void uploadLogFiles(event.dataTransfer?.files);
+});
 document.querySelector("#batch-results-show-all").addEventListener("change", () => renderBatchResults(lastBatchResult));
 document.querySelector("#batch-results-show-excluded").addEventListener("change", () => renderBatchResults(lastBatchResult));
-document.querySelector("#fight-browser-search").addEventListener("input", handleFightBrowserChange);
+document.querySelector("#fight-browser-commander").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-start-date").addEventListener("change", handleFightBrowserChange);
+document.querySelector("#fight-browser-end-date").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-outcome").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-class-filters").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-class-filters").addEventListener("click", event => {
@@ -5004,7 +5323,7 @@ document.querySelectorAll("[data-analysis-tab]").forEach(button => {
 
 hydrateBatchForm();
 applyCompHelperProfile("balanced");
-setActiveAppTab(resolveInitialAppTab(), { persist: false });
+setActiveAppTab(resolveInitialAppTab(), { persist: false, loadAnalysis: false });
 main();
 
 function stringEqualsIgnoreCase(left, right) {

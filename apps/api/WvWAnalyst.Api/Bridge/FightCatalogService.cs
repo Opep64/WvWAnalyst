@@ -15,6 +15,9 @@ public sealed class FightCatalogService
 
     private readonly AppPathService _paths;
     private readonly EliteInsightsFightIndexer _fightIndexer;
+    private readonly object _cacheLock = new();
+    private IReadOnlyList<FightArtifactSummaryDto>? _cachedCanonicalSummaries;
+    private FightBrowserSnapshotDto? _cachedFightBrowserSnapshot;
 
     public FightCatalogService(AppPathService paths, EliteInsightsFightIndexer fightIndexer)
     {
@@ -48,6 +51,7 @@ public sealed class FightCatalogService
         var manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
         await using var stream = new FileStream(manifestPath, FileMode.Create, FileAccess.Write, FileShare.None);
         await JsonSerializer.SerializeAsync(stream, manifest, ManifestSerializerOptions, cancellationToken);
+        InvalidateCatalogCache();
     }
 
     public FightArtifactManifest? TryLoadManifest(string fightId)
@@ -89,33 +93,20 @@ public sealed class FightCatalogService
 
     public IReadOnlyList<FightArtifactSummaryDto> GetRecentParseSummaries(int maxCount)
     {
-        _paths.EnsureStorageDirectories();
-
-        return EnumerateCanonicalCatalogItems()
-            .OrderByDescending(item => item.Manifest?.ImportedAtUtc ?? item.Directory.LastWriteTimeUtc)
+        return GetCanonicalSummaries()
+            .OrderByDescending(item => ParseSummaryImportedAtUtc(item))
             .Take(maxCount)
-            .Select(item => BuildSummary(item.Directory, item.Manifest))
             .ToList();
     }
 
     public FightBrowserSnapshotDto GetFightBrowserSnapshot()
     {
-        _paths.EnsureStorageDirectories();
-
-        var allCatalogItems = EnumerateCanonicalCatalogItems()
-            .Select(item => BuildSummary(item.Directory, item.Manifest))
-            .ToList();
-
-        var fights = allCatalogItems
-            .Where(fight => string.Equals(fight.Status, "Imported", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(item => GetFightStartUtc(item))
-            .ToList();
-
-        return new FightBrowserSnapshotDto(
-            TotalCount: fights.Count,
-            ImportedCount: fights.Count,
-            FailedCount: allCatalogItems.Count(fight => string.Equals(fight.Status, "Parser failed", StringComparison.OrdinalIgnoreCase)),
-            Fights: fights);
+        lock (_cacheLock)
+        {
+            _cachedCanonicalSummaries ??= BuildCanonicalSummaries();
+            _cachedFightBrowserSnapshot ??= BuildFightBrowserSnapshot(_cachedCanonicalSummaries);
+            return _cachedFightBrowserSnapshot;
+        }
     }
 
     public FightArtifactManifest? TryFindReplacementFight(string? sourceFileSha256, string? fightFingerprint)
@@ -179,6 +170,8 @@ public sealed class FightCatalogService
         {
             File.Delete(databasePath);
         }
+
+        InvalidateCatalogCache();
     }
 
     public bool TryGetFightDetail(string fightId, out FightDetailDto detail)
@@ -268,10 +261,8 @@ public sealed class FightCatalogService
 
     private FightArtifactSummaryDto BuildSummary(DirectoryInfo directory, FightArtifactManifest? manifest)
     {
-        var artifactCount = directory.Exists
-            ? directory.EnumerateFiles("*", SearchOption.AllDirectories).Count()
-            : 0;
-        var totalBytes = GetDirectorySize(directory);
+        var artifactCount = EstimateArtifactCount(manifest);
+        const long totalBytes = 0;
 
         if (manifest is null)
         {
@@ -424,6 +415,7 @@ public sealed class FightCatalogService
             Directory.CreateDirectory(fightDirectoryPath);
             var manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
             File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestSerializerOptions));
+            InvalidateCatalogCache();
         }
         catch (IOException)
         {
@@ -531,6 +523,80 @@ public sealed class FightCatalogService
         }
 
         return totalBytes;
+    }
+
+    private IReadOnlyList<FightArtifactSummaryDto> GetCanonicalSummaries()
+    {
+        lock (_cacheLock)
+        {
+            _cachedCanonicalSummaries ??= BuildCanonicalSummaries();
+            return _cachedCanonicalSummaries;
+        }
+    }
+
+    private List<FightArtifactSummaryDto> BuildCanonicalSummaries()
+    {
+        _paths.EnsureStorageDirectories();
+
+        return EnumerateCanonicalCatalogItems()
+            .Select(item => BuildSummary(item.Directory, item.Manifest))
+            .ToList();
+    }
+
+    private static FightBrowserSnapshotDto BuildFightBrowserSnapshot(IReadOnlyList<FightArtifactSummaryDto> allCatalogItems)
+    {
+        var fights = allCatalogItems
+            .Where(fight => string.Equals(fight.Status, "Imported", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(GetFightStartUtc)
+            .ToList();
+
+        return new FightBrowserSnapshotDto(
+            TotalCount: fights.Count,
+            ImportedCount: fights.Count,
+            FailedCount: allCatalogItems.Count(fight => string.Equals(fight.Status, "Parser failed", StringComparison.OrdinalIgnoreCase)),
+            Fights: fights);
+    }
+
+    private void InvalidateCatalogCache()
+    {
+        lock (_cacheLock)
+        {
+            _cachedCanonicalSummaries = null;
+            _cachedFightBrowserSnapshot = null;
+        }
+    }
+
+    private static int EstimateArtifactCount(FightArtifactManifest? manifest)
+    {
+        if (manifest is null)
+        {
+            return 0;
+        }
+
+        return new[]
+        {
+            manifest.ParserConfigRelativePath,
+            manifest.ParserConsoleLogRelativePath,
+            manifest.RawLogRelativePath,
+            manifest.AnalysisJsonArtifactRelativePath,
+            manifest.HtmlArtifactRelativePath,
+            manifest.JsonArtifactRelativePath
+        }
+            .Concat(manifest.GeneratedArtifactRelativePaths ?? [])
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+    }
+
+    private static DateTime ParseSummaryImportedAtUtc(FightArtifactSummaryDto summary)
+    {
+        if (!string.IsNullOrWhiteSpace(summary.ImportedAtUtc)
+            && DateTimeOffset.TryParse(summary.ImportedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var importedAt))
+        {
+            return importedAt.UtcDateTime;
+        }
+
+        return DateTime.MinValue;
     }
 
     private static void ValidateFightId(string fightId)

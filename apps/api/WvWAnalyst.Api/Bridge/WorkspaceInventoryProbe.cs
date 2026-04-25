@@ -17,12 +17,19 @@ public sealed class WorkspaceInventoryProbe
     {
         var parserPath = _paths.ParserWorkspacePath;
         var combinerPath = _paths.CombinerWorkspacePath;
+        var logDirectoryPath = _paths.ConfiguredLogDirectoryPath;
         var parserProbe = _parserCliLocator.Probe(parserPath, _paths.ConfiguredParserCliPath);
         var combinerDetected = Directory.Exists(combinerPath);
+        var logDirectoryConfigured = !string.IsNullOrWhiteSpace(logDirectoryPath);
+        var logDirectoryDetected = logDirectoryConfigured && Directory.Exists(logDirectoryPath!);
 
         var notes = parserProbe.ParserCliDetected
             ? $"{parserProbe.Notes} Directory-driven parser ingestion is available in this prototype."
             : $"{parserProbe.Notes} The dashboard can still run, but batch parser ingestion is blocked until the CLI is available.";
+        if (!logDirectoryConfigured)
+        {
+            notes += " Configure Workspace:LogDirectoryPath before using Manage uploads or batch parsing.";
+        }
 
         return new WorkspaceStatusDto(
             ParserPath: parserPath,
@@ -31,6 +38,9 @@ public sealed class WorkspaceInventoryProbe
             ParserCliDetected: parserProbe.ParserCliDetected,
             CombinerPath: combinerPath,
             CombinerDetected: combinerDetected,
+            LogDirectoryPath: logDirectoryPath,
+            LogDirectoryConfigured: logDirectoryConfigured,
+            LogDirectoryDetected: logDirectoryDetected,
             Notes: notes);
     }
 }

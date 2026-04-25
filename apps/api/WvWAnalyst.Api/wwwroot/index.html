@@ -30,15 +30,15 @@
                 <div class="section-heading">
                     <div>
                         <h2>Batch Processing</h2>
-                        <p>Point the app at a log directory and either ingest only new files or wipe the local catalog and rebuild it from scratch.</p>
+                        <p>The app reads from the configured log directory. Add files there from this page, then process only new files or rebuild the catalog from scratch.</p>
                     </div>
                     <p class="workspace-note" id="batch-note"></p>
                 </div>
                 <form class="import-form" id="batch-form">
                     <div class="browser-controls">
                         <label class="browser-field browser-field-wide">
-                            <span>Log directory</span>
-                            <input id="log-directory-input" type="text" placeholder="D:\Logs\GW2" spellcheck="false">
+                            <span>Configured log directory</span>
+                            <input id="configured-log-directory-input" type="text" readonly spellcheck="false">
                         </label>
                         <label class="browser-field">
                             <span>Mode</span>
@@ -56,8 +56,18 @@
                             <button class="primary-button" id="directory-button" type="submit">Start batch parse</button>
                         </div>
                     </div>
+                    <div class="import-status" id="batch-status">No batch parse has been run in this browser session yet.</div>
+                    <input id="log-file-upload-input" type="file" multiple accept=".evtc,.zevtc,.zip" hidden>
+                    <div class="log-dropzone" id="log-file-dropzone" tabindex="0" role="button" aria-controls="log-file-upload-input">
+                        <strong>Drop logs here or select multiple files</strong>
+                        <p class="workspace-note">Accepted file types: <code>.evtc</code>, <code>.zevtc</code>, and <code>.zip</code>.</p>
+                        <div class="log-dropzone-actions">
+                            <button class="action-link action-link-button" id="log-file-upload-button" type="button">Select files</button>
+                            <span class="workspace-note" id="log-file-upload-summary">No files added in this browser session yet.</span>
+                        </div>
+                    </div>
                 </form>
-                <div class="import-status" id="batch-status">No batch parse has been run in this browser session yet.</div>
+                <div class="import-status import-status-scrollable" id="log-file-upload-status">No files have been added to the configured log directory in this browser session yet.</div>
                 <div class="batch-results-toolbar" id="batch-results-toolbar" hidden>
                     <label class="batch-toggle">
                         <input id="batch-results-show-all" type="checkbox">
@@ -87,7 +97,7 @@
             <section class="panel panel-wide dossier-panel" id="fight-dossier-panel" data-app-panel="fight-browser" hidden>
                 <div class="section-heading">
                     <div>
-                        <h2 id="dossier-title">Fight dossier</h2>
+                        <h2 id="dossier-title">Fight Summary</h2>
                         <p id="dossier-subtitle"></p>
                     </div>
                     <a class="action-link" id="dossier-back-link" href="/?tab=fight-browser">Back to dashboard</a>
@@ -216,17 +226,54 @@
                 <div class="section-heading">
                     <div>
                         <h2>Fight Browser</h2>
-                        <p>Browse the stored catalog by fight time, outcome, commander, or parser version.</p>
+                        <p>Browse the stored catalog by fight time, commander, date range, outcome, and class filters.</p>
                     </div>
                     <div class="section-heading-actions">
                         <button class="action-link action-link-button" id="fight-browser-top-bursts-toggle" type="button">Top Bursts</button>
                         <p class="workspace-note" id="fight-browser-summary"></p>
                     </div>
                 </div>
+                <div class="top-bursts-panel" id="fight-browser-top-bursts-panel" hidden>
+                    <div class="section-heading">
+                        <div>
+                            <h3>Top Bursts</h3>
+                            <p>Top squad bursts from the fights currently visible in the Fight Browser filters.</p>
+                        </div>
+                        <p class="workspace-note" id="fight-browser-top-bursts-summary"></p>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-top-bursts">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Fight time</th>
+                                    <th>Log file</th>
+                                    <th>Burst</th>
+                                    <th>Top pressure</th>
+                                    <th>Damage</th>
+                                    <th>Top strips</th>
+                                    <th>Strips</th>
+                                    <th>Downs</th>
+                                    <th>Kills</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fight-browser-top-bursts-body"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div class="browser-controls">
-                    <label class="browser-field browser-field-wide">
-                        <span>Search</span>
-                        <input id="fight-browser-search" type="search" placeholder="Fight, commander, source file, parser version">
+                    <label class="browser-field">
+                        <span>Commander</span>
+                        <select id="fight-browser-commander">
+                            <option value="">All commanders</option>
+                        </select>
+                    </label>
+                    <label class="browser-field">
+                        <span>Start date</span>
+                        <input id="fight-browser-start-date" type="date">
+                    </label>
+                    <label class="browser-field">
+                        <span>End date</span>
+                        <input id="fight-browser-end-date" type="date">
                     </label>
                     <label class="browser-field">
                         <span>Outcome</span>
@@ -325,33 +372,6 @@
                         </thead>
                         <tbody id="fight-browser-body"></tbody>
                     </table>
-                </div>
-                <div class="top-bursts-panel" id="fight-browser-top-bursts-panel" hidden>
-                    <div class="section-heading">
-                        <div>
-                            <h3>Top Bursts</h3>
-                            <p>Top squad bursts from the fights currently visible in the Fight Browser filters.</p>
-                        </div>
-                        <p class="workspace-note" id="fight-browser-top-bursts-summary"></p>
-                    </div>
-                    <div class="table-shell table-shell-scroll table-shell-top-bursts">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Fight time</th>
-                                    <th>Log file</th>
-                                    <th>Burst</th>
-                                    <th>Top pressure</th>
-                                    <th>Damage</th>
-                                    <th>Top strips</th>
-                                    <th>Strips</th>
-                                    <th>Downs</th>
-                                    <th>Kills</th>
-                                </tr>
-                            </thead>
-                            <tbody id="fight-browser-top-bursts-body"></tbody>
-                        </table>
-                    </div>
                 </div>
             </section>
 
