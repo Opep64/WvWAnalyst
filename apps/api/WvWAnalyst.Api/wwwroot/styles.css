@@ -1088,11 +1088,38 @@ h1 {
     min-height: 150px;
 }
 
+.analysis-card--wide {
+    grid-column: 1 / -1;
+}
+
+.analysis-card--table {
+    min-height: 0;
+}
+
 .analysis-card-value {
     font-size: 1.9rem;
     font-weight: 700;
     color: var(--ink);
     margin: 4px 0 8px;
+}
+
+.analysis-mitigation-table-wrap {
+    margin-top: 12px;
+    overflow-x: auto;
+}
+
+.analysis-mitigation-table td,
+.analysis-mitigation-table th {
+    vertical-align: top;
+}
+
+.analysis-mitigation-subrow td:first-child {
+    padding-left: 22px;
+}
+
+.analysis-mitigation-subrow td:first-child::before {
+    content: "↳ ";
+    color: var(--muted);
 }
 
 .analysis-chart {

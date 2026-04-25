@@ -159,6 +159,7 @@ public sealed record FightIndexDto(
     FightSideIndexDto? EnemySide,
     FightCommanderIndexDto? CommanderSummary,
     FightDefenseSaveIndexDto? DefenseSaves,
+    FightMitigationSummaryIndexDto? MitigationSummary,
     FightObliterateIndexDto? Obliterate,
     IReadOnlyList<FightThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightTopBurstIndexDto> TopBursts,
@@ -299,6 +300,42 @@ public sealed record FightDefenseSaveIndexDto(
     double LowestLowestHealthPercent,
     double TotalIncomingDamage,
     double TotalIncomingHealing);
+
+public sealed record FightMitigationSummaryIndexDto(
+    bool HasBarrierData,
+    bool BarrierCoverageMayBeIncomplete,
+    double TotalDamageToSquad,
+    double HealthDamageToSquad,
+    double TotalBarrierAbsorbed,
+    double BarrierAbsorptionPercent,
+    double TotalPetMinionAbsorption,
+    double PetMinionAbsorptionPercent,
+    int SavedCases,
+    int BarrierSavedCases,
+    int DamageReductionSavedCases,
+    int NegatedDamageSavedCases,
+    int BothSavedCases,
+    int MultiSourceSavedCases,
+    double TotalBarrierAbsorbedInSaves,
+    double TotalEstimatedDamageReduction,
+    double TotalEstimatedNegatedDamage,
+    double AverageLowestHealthPercent,
+    double LowestLowestHealthPercent,
+    double TotalIncomingDamage,
+    double TotalIncomingHealing,
+    IReadOnlyList<FightNegatedHitSummaryIndexDto> NegatedHitSummaries);
+
+public sealed record FightNegatedHitSummaryIndexDto(
+    string Key,
+    string Label,
+    int NegatedHitCount,
+    double EstimatedPreventedDamage,
+    int FallbackEstimateCount,
+    IReadOnlyList<FightEffectCountSummaryIndexDto> ContributingEffects);
+
+public sealed record FightEffectCountSummaryIndexDto(
+    string Name,
+    int Count);
 
 public sealed record FightObliterateIndexDto(
     int HitCount,

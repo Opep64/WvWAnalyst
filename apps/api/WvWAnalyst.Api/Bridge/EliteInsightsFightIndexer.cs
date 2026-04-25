@@ -72,6 +72,7 @@ public sealed class EliteInsightsFightIndexer
                 EnemySide: enemySide,
                 CommanderSummary: BuildCommanderSummaryFromAnalystPayload(payload.CommanderSummary),
                 DefenseSaves: BuildDefenseSavesFromAnalystPayload(payload.DefenseSaves),
+                MitigationSummary: BuildMitigationSummaryFromAnalystPayload(payload.MitigationSummary, payload.DefenseSaves),
                 Obliterate: BuildObliterateFromAnalystPayload(payload.Obliterate),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
                 TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
@@ -217,6 +218,7 @@ public sealed class EliteInsightsFightIndexer
             EnemySide: null,
             CommanderSummary: null,
             DefenseSaves: null,
+            MitigationSummary: null,
             Obliterate: null,
             ThreatBoons: Array.Empty<FightThreatBoonIndexDto>(),
             TopBursts: Array.Empty<FightTopBurstIndexDto>(),
@@ -419,6 +421,81 @@ public sealed class EliteInsightsFightIndexer
             LowestLowestHealthPercent: summary.LowestLowestHealthPercent,
             TotalIncomingDamage: summary.TotalIncomingDamage,
             TotalIncomingHealing: summary.TotalIncomingHealing);
+    }
+
+    private static FightMitigationSummaryIndexDto? BuildMitigationSummaryFromAnalystPayload(
+        WvWAnalystMitigationSummaryDto? summary,
+        WvWAnalystDefenseSaveSummaryDto? legacyDefenseSaves)
+    {
+        if (summary is null)
+        {
+            if (legacyDefenseSaves is null)
+            {
+                return null;
+            }
+
+            return new FightMitigationSummaryIndexDto(
+                HasBarrierData: true,
+                BarrierCoverageMayBeIncomplete: false,
+                TotalDamageToSquad: 0,
+                HealthDamageToSquad: 0,
+                TotalBarrierAbsorbed: legacyDefenseSaves.TotalBarrierAbsorbed,
+                BarrierAbsorptionPercent: 0,
+                TotalPetMinionAbsorption: 0,
+                PetMinionAbsorptionPercent: 0,
+                SavedCases: legacyDefenseSaves.SavedCases,
+                BarrierSavedCases: legacyDefenseSaves.BarrierSavedCases,
+                DamageReductionSavedCases: legacyDefenseSaves.DamageReductionSavedCases,
+                NegatedDamageSavedCases: 0,
+                BothSavedCases: legacyDefenseSaves.BothSavedCases,
+                MultiSourceSavedCases: 0,
+                TotalBarrierAbsorbedInSaves: legacyDefenseSaves.TotalBarrierAbsorbed,
+                TotalEstimatedDamageReduction: legacyDefenseSaves.TotalEstimatedDamageReduction,
+                TotalEstimatedNegatedDamage: 0,
+                AverageLowestHealthPercent: legacyDefenseSaves.AverageLowestHealthPercent,
+                LowestLowestHealthPercent: legacyDefenseSaves.LowestLowestHealthPercent,
+                TotalIncomingDamage: legacyDefenseSaves.TotalIncomingDamage,
+                TotalIncomingHealing: legacyDefenseSaves.TotalIncomingHealing,
+                NegatedHitSummaries: Array.Empty<FightNegatedHitSummaryIndexDto>());
+        }
+
+        return new FightMitigationSummaryIndexDto(
+            HasBarrierData: summary.HasBarrierData,
+            BarrierCoverageMayBeIncomplete: summary.BarrierCoverageMayBeIncomplete,
+            TotalDamageToSquad: summary.TotalDamageToSquad,
+            HealthDamageToSquad: summary.HealthDamageToSquad,
+            TotalBarrierAbsorbed: summary.TotalBarrierAbsorbed,
+            BarrierAbsorptionPercent: summary.BarrierAbsorptionPercent,
+            TotalPetMinionAbsorption: summary.TotalPetMinionAbsorption,
+            PetMinionAbsorptionPercent: summary.PetMinionAbsorptionPercent,
+            SavedCases: summary.SavedCases,
+            BarrierSavedCases: summary.BarrierSavedCases,
+            DamageReductionSavedCases: summary.DamageReductionSavedCases,
+            NegatedDamageSavedCases: summary.NegatedDamageSavedCases,
+            BothSavedCases: summary.BothSavedCases,
+            MultiSourceSavedCases: summary.MultiSourceSavedCases,
+            TotalBarrierAbsorbedInSaves: summary.TotalBarrierAbsorbedInSaves,
+            TotalEstimatedDamageReduction: summary.TotalEstimatedDamageReduction,
+            TotalEstimatedNegatedDamage: summary.TotalEstimatedNegatedDamage,
+            AverageLowestHealthPercent: summary.AverageLowestHealthPercent,
+            LowestLowestHealthPercent: summary.LowestLowestHealthPercent,
+            TotalIncomingDamage: summary.TotalIncomingDamage,
+            TotalIncomingHealing: summary.TotalIncomingHealing,
+            NegatedHitSummaries: summary.NegatedHitSummaries?
+                .Select(negation => new FightNegatedHitSummaryIndexDto(
+                    Key: NullIfWhiteSpace(negation.Key) ?? string.Empty,
+                    Label: NullIfWhiteSpace(negation.Label) ?? "Unknown",
+                    NegatedHitCount: negation.NegatedHitCount,
+                    EstimatedPreventedDamage: negation.EstimatedPreventedDamage,
+                    FallbackEstimateCount: negation.FallbackEstimateCount,
+                    ContributingEffects: negation.ContributingEffects?
+                        .Select(effect => new FightEffectCountSummaryIndexDto(
+                            Name: NullIfWhiteSpace(effect.Name) ?? "Unknown",
+                            Count: effect.Count))
+                        .ToArray()
+                        ?? Array.Empty<FightEffectCountSummaryIndexDto>()))
+                .ToArray()
+                ?? Array.Empty<FightNegatedHitSummaryIndexDto>());
     }
 
     private static FightObliterateIndexDto? BuildObliterateFromAnalystPayload(WvWAnalystObliterateSummaryDto? summary)

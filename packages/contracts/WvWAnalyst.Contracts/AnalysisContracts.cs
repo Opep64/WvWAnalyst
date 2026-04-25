@@ -45,21 +45,41 @@ public sealed record FightAnalysisOverviewDto(
     double AverageSquadSize,
     double AverageEnemySize,
     double AverageDurationSeconds,
-    FightAnalysisSaveSummaryDto? SavesSummary,
+    FightAnalysisMitigationSummaryDto? MitigationSummary,
     FightAnalysisObliterateSummaryDto? ObliterateSummary);
 
-public sealed record FightAnalysisSaveSummaryDto(
+public sealed record FightAnalysisMitigationSummaryDto(
     int AvailableFightCount,
+    bool HasBarrierCoverageWarnings,
     int TotalSaves,
     int TotalBarrierSaves,
     int TotalDamageReductionSaves,
+    int TotalNegatedDamageSaves,
     int TotalBothSaves,
-    int TotalSquadDowns,
-    double? SavesPerDown,
-    double? BarrierSavesPerDown,
-    double? DamageReductionSavesPerDown,
+    int TotalMultiSourceSaves,
+    double TotalDamageToSquad,
+    double TotalHealthDamageToSquad,
     double TotalBarrierAbsorbed,
-    double TotalEstimatedDamageReduction);
+    double TotalPetMinionAbsorption,
+    double TotalEstimatedDamageReduction,
+    double TotalEstimatedNegatedDamage,
+    double TotalIncomingDamage,
+    double TotalIncomingHealing,
+    double? AverageLowestHealthPercent,
+    double? LowestLowestHealthPercent,
+    IReadOnlyList<FightAnalysisNegatedHitSummaryDto> NegatedHitSummaries);
+
+public sealed record FightAnalysisNegatedHitSummaryDto(
+    string Key,
+    string Label,
+    int NegatedHitCount,
+    double EstimatedPreventedDamage,
+    int FallbackEstimateCount,
+    IReadOnlyList<FightAnalysisEffectCountDto> ContributingEffects);
+
+public sealed record FightAnalysisEffectCountDto(
+    string Name,
+    int Count);
 
 public sealed record FightAnalysisObliterateSummaryDto(
     int AvailableFightCount,

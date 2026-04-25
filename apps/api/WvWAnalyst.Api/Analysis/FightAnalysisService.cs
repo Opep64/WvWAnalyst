@@ -147,7 +147,7 @@ public sealed class FightAnalysisService
         double averageDurationSeconds = fights.Count == 0
             ? 0.0
             : Math.Round(fights.Average(fight => (fight.FightIndex?.DurationMilliseconds ?? 0) / 1000.0), 1);
-        var savesSummary = BuildSavesSummary(fights);
+        var mitigationSummary = BuildMitigationSummary(fights);
         var obliterateSummary = BuildObliterateSummary(fights);
 
         return new FightAnalysisOverviewDto(
@@ -160,50 +160,105 @@ public sealed class FightAnalysisService
             AverageSquadSize: averageSquadSize,
             AverageEnemySize: averageEnemySize,
             AverageDurationSeconds: averageDurationSeconds,
-            SavesSummary: savesSummary,
+            MitigationSummary: mitigationSummary,
             ObliterateSummary: obliterateSummary);
     }
 
-    private static FightAnalysisSaveSummaryDto? BuildSavesSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
+    private static FightAnalysisMitigationSummaryDto? BuildMitigationSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
     {
-        var saveSamples = fights
+        var mitigationSamples = fights
             .Select(fight => new
             {
+                Mitigation = fight.FightIndex?.MitigationSummary,
                 DefenseSaves = fight.FightIndex?.DefenseSaves,
-                SquadDowns = fight.FightIndex?.Execution?.Outcome?.SquadDowns
             })
-            .Where(sample => sample.DefenseSaves is not null)
+            .Where(sample => sample.Mitigation is not null || sample.DefenseSaves is not null)
             .ToArray();
 
-        if (saveSamples.Length == 0)
+        if (mitigationSamples.Length == 0)
         {
             return null;
         }
 
-        int totalSaves = saveSamples.Sum(sample => sample.DefenseSaves!.SavedCases);
-        int totalBarrierSaves = saveSamples.Sum(sample => sample.DefenseSaves!.BarrierSavedCases);
-        int totalDamageReductionSaves = saveSamples.Sum(sample => sample.DefenseSaves!.DamageReductionSavedCases);
-        int totalBothSaves = saveSamples.Sum(sample => sample.DefenseSaves!.BothSavedCases);
-        int totalSquadDowns = saveSamples.Sum(sample => Math.Max(0, sample.SquadDowns ?? 0));
-        double totalBarrierAbsorbed = Math.Round(saveSamples.Sum(sample => sample.DefenseSaves!.TotalBarrierAbsorbed), 1);
-        double totalEstimatedDamageReduction = Math.Round(saveSamples.Sum(sample => sample.DefenseSaves!.TotalEstimatedDamageReduction), 0);
+        int totalSaves = mitigationSamples.Sum(sample => sample.Mitigation?.SavedCases ?? sample.DefenseSaves?.SavedCases ?? 0);
+        int totalBarrierSaves = mitigationSamples.Sum(sample => sample.Mitigation?.BarrierSavedCases ?? sample.DefenseSaves?.BarrierSavedCases ?? 0);
+        int totalDamageReductionSaves = mitigationSamples.Sum(sample => sample.Mitigation?.DamageReductionSavedCases ?? sample.DefenseSaves?.DamageReductionSavedCases ?? 0);
+        int totalNegatedDamageSaves = mitigationSamples.Sum(sample => sample.Mitigation?.NegatedDamageSavedCases ?? 0);
+        int totalBothSaves = mitigationSamples.Sum(sample => sample.Mitigation?.BothSavedCases ?? sample.DefenseSaves?.BothSavedCases ?? 0);
+        int totalMultiSourceSaves = mitigationSamples.Sum(sample => sample.Mitigation?.MultiSourceSavedCases ?? 0);
+        double totalDamageToSquad = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalDamageToSquad ?? 0), 0);
+        double totalHealthDamageToSquad = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.HealthDamageToSquad ?? 0), 0);
+        double totalBarrierAbsorbed = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalBarrierAbsorbed ?? sample.DefenseSaves?.TotalBarrierAbsorbed ?? 0), 0);
+        double totalPetMinionAbsorption = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalPetMinionAbsorption ?? 0), 0);
+        double totalEstimatedDamageReduction = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalEstimatedDamageReduction ?? sample.DefenseSaves?.TotalEstimatedDamageReduction ?? 0), 0);
+        double totalEstimatedNegatedDamage = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalEstimatedNegatedDamage ?? 0), 0);
+        double totalIncomingDamage = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalIncomingDamage ?? sample.DefenseSaves?.TotalIncomingDamage ?? 0), 0);
+        double totalIncomingHealing = Math.Round(mitigationSamples.Sum(sample => sample.Mitigation?.TotalIncomingHealing ?? sample.DefenseSaves?.TotalIncomingHealing ?? 0), 0);
+        int weightedHealthSampleCount = mitigationSamples.Sum(sample => Math.Max(0, sample.Mitigation?.SavedCases ?? sample.DefenseSaves?.SavedCases ?? 0));
+        double? averageLowestHealthPercent = weightedHealthSampleCount > 0
+            ? Math.Round(
+                mitigationSamples.Sum(sample =>
+                    (sample.Mitigation?.AverageLowestHealthPercent ?? sample.DefenseSaves?.AverageLowestHealthPercent ?? 0)
+                    * Math.Max(0, sample.Mitigation?.SavedCases ?? sample.DefenseSaves?.SavedCases ?? 0))
+                / weightedHealthSampleCount,
+                1)
+            : null;
+        double? lowestLowestHealthPercent = mitigationSamples
+            .Select(sample =>
+            {
+                int savedCases = Math.Max(0, sample.Mitigation?.SavedCases ?? sample.DefenseSaves?.SavedCases ?? 0);
+                return savedCases > 0
+                    ? (double?)(sample.Mitigation?.LowestLowestHealthPercent ?? sample.DefenseSaves?.LowestLowestHealthPercent ?? 0)
+                    : null;
+            })
+            .Where(value => value is not null)
+            .DefaultIfEmpty(null)
+            .Min();
+        bool hasBarrierCoverageWarnings = mitigationSamples.Any(sample => sample.Mitigation?.BarrierCoverageMayBeIncomplete ?? false);
 
-        double? savesPerDown = totalSquadDowns > 0 ? Math.Round(totalSaves / (double)totalSquadDowns, 2) : null;
-        double? barrierSavesPerDown = totalSquadDowns > 0 ? Math.Round(totalBarrierSaves / (double)totalSquadDowns, 2) : null;
-        double? damageReductionSavesPerDown = totalSquadDowns > 0 ? Math.Round(totalDamageReductionSaves / (double)totalSquadDowns, 2) : null;
+        var negatedHitSummaries = mitigationSamples
+            .SelectMany(sample => sample.Mitigation?.NegatedHitSummaries ?? Array.Empty<FightNegatedHitSummaryIndexDto>())
+            .GroupBy(summary => summary.Key ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FightAnalysisNegatedHitSummaryDto(
+                Key: group.First().Key,
+                Label: string.IsNullOrWhiteSpace(group.First().Label) ? "Unknown" : group.First().Label,
+                NegatedHitCount: group.Sum(summary => Math.Max(0, summary.NegatedHitCount)),
+                EstimatedPreventedDamage: Math.Round(group.Sum(summary => Math.Max(0, summary.EstimatedPreventedDamage)), 0),
+                FallbackEstimateCount: group.Sum(summary => Math.Max(0, summary.FallbackEstimateCount)),
+                ContributingEffects: group
+                    .SelectMany(summary => summary.ContributingEffects ?? Array.Empty<FightEffectCountSummaryIndexDto>())
+                    .GroupBy(effect => effect.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .Select(effectGroup => new FightAnalysisEffectCountDto(
+                        Name: effectGroup.First().Name,
+                        Count: effectGroup.Sum(effect => Math.Max(0, effect.Count))))
+                    .OrderByDescending(effect => effect.Count)
+                    .ThenBy(effect => effect.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray()))
+            .OrderByDescending(summary => summary.EstimatedPreventedDamage)
+            .ThenByDescending(summary => summary.NegatedHitCount)
+            .ThenBy(summary => summary.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-        return new FightAnalysisSaveSummaryDto(
-            AvailableFightCount: saveSamples.Length,
+        return new FightAnalysisMitigationSummaryDto(
+            AvailableFightCount: mitigationSamples.Length,
+            HasBarrierCoverageWarnings: hasBarrierCoverageWarnings,
             TotalSaves: totalSaves,
             TotalBarrierSaves: totalBarrierSaves,
             TotalDamageReductionSaves: totalDamageReductionSaves,
+            TotalNegatedDamageSaves: totalNegatedDamageSaves,
             TotalBothSaves: totalBothSaves,
-            TotalSquadDowns: totalSquadDowns,
-            SavesPerDown: savesPerDown,
-            BarrierSavesPerDown: barrierSavesPerDown,
-            DamageReductionSavesPerDown: damageReductionSavesPerDown,
+            TotalMultiSourceSaves: totalMultiSourceSaves,
+            TotalDamageToSquad: totalDamageToSquad,
+            TotalHealthDamageToSquad: totalHealthDamageToSquad,
             TotalBarrierAbsorbed: totalBarrierAbsorbed,
-            TotalEstimatedDamageReduction: totalEstimatedDamageReduction);
+            TotalPetMinionAbsorption: totalPetMinionAbsorption,
+            TotalEstimatedDamageReduction: totalEstimatedDamageReduction,
+            TotalEstimatedNegatedDamage: totalEstimatedNegatedDamage,
+            TotalIncomingDamage: totalIncomingDamage,
+            TotalIncomingHealing: totalIncomingHealing,
+            AverageLowestHealthPercent: averageLowestHealthPercent,
+            LowestLowestHealthPercent: lowestLowestHealthPercent,
+            NegatedHitSummaries: negatedHitSummaries);
     }
 
     private static FightAnalysisObliterateSummaryDto? BuildObliterateSummary(IReadOnlyList<FightArtifactSummaryDto> fights)

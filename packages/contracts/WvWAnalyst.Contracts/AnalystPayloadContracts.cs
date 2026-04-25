@@ -20,6 +20,8 @@ public sealed class WvWAnalystFightPayloadDto
 
     public WvWAnalystDefenseSaveSummaryDto? DefenseSaves { get; set; }
 
+    public WvWAnalystMitigationSummaryDto? MitigationSummary { get; set; }
+
     public WvWAnalystObliterateSummaryDto? Obliterate { get; set; }
 
     public IReadOnlyList<WvWAnalystThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystThreatBoonSummaryDto>();
@@ -368,6 +370,75 @@ public sealed class WvWAnalystDefenseSaveSummaryDto
     public double TotalIncomingDamage { get; set; }
 
     public double TotalIncomingHealing { get; set; }
+}
+
+public sealed class WvWAnalystMitigationSummaryDto
+{
+    public bool HasBarrierData { get; set; }
+
+    public bool BarrierCoverageMayBeIncomplete { get; set; }
+
+    public double TotalDamageToSquad { get; set; }
+
+    public double HealthDamageToSquad { get; set; }
+
+    public double TotalBarrierAbsorbed { get; set; }
+
+    public double BarrierAbsorptionPercent { get; set; }
+
+    public double TotalPetMinionAbsorption { get; set; }
+
+    public double PetMinionAbsorptionPercent { get; set; }
+
+    public int SavedCases { get; set; }
+
+    public int BarrierSavedCases { get; set; }
+
+    public int DamageReductionSavedCases { get; set; }
+
+    public int NegatedDamageSavedCases { get; set; }
+
+    public int BothSavedCases { get; set; }
+
+    public int MultiSourceSavedCases { get; set; }
+
+    public double TotalBarrierAbsorbedInSaves { get; set; }
+
+    public double TotalEstimatedDamageReduction { get; set; }
+
+    public double TotalEstimatedNegatedDamage { get; set; }
+
+    public double AverageLowestHealthPercent { get; set; }
+
+    public double LowestLowestHealthPercent { get; set; }
+
+    public double TotalIncomingDamage { get; set; }
+
+    public double TotalIncomingHealing { get; set; }
+
+    public IReadOnlyList<WvWAnalystNegatedHitSummaryDto> NegatedHitSummaries { get; set; } = Array.Empty<WvWAnalystNegatedHitSummaryDto>();
+}
+
+public sealed class WvWAnalystNegatedHitSummaryDto
+{
+    public string Key { get; set; } = string.Empty;
+
+    public string Label { get; set; } = string.Empty;
+
+    public int NegatedHitCount { get; set; }
+
+    public double EstimatedPreventedDamage { get; set; }
+
+    public int FallbackEstimateCount { get; set; }
+
+    public IReadOnlyList<WvWAnalystEffectCountSummaryDto> ContributingEffects { get; set; } = Array.Empty<WvWAnalystEffectCountSummaryDto>();
+}
+
+public sealed class WvWAnalystEffectCountSummaryDto
+{
+    public string Name { get; set; } = string.Empty;
+
+    public int Count { get; set; }
 }
 
 public sealed class WvWAnalystObliterateSummaryDto

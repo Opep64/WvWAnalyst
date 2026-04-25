@@ -61,6 +61,7 @@ const COMP_HELPER_LANE_TARGETS = [
     { key: "pressure", label: "Pressure", floor: 85, target: 125, weight: 1.30 },
     { key: "boonsupport", label: "Boon Support", floor: 80, target: 120, weight: 1.25 },
     { key: "recovery", label: "Recovery", floor: 70, target: 105, weight: 1.15 },
+    { key: "prevention", label: "Prevention", floor: 60, target: 95, weight: 1.05 },
     { key: "conversion", label: "Conversion", floor: 60, target: 95, weight: 1.00 },
     { key: "strip", label: "Strip", floor: 55, target: 85, weight: 0.95 },
     { key: "control", label: "Control", floor: 50, target: 80, weight: 0.90 },
@@ -90,7 +91,7 @@ const COMP_HELPER_PROFILE_FAVORITES = {
         packages: ["pressure-package", "might", "strip-package", "fury", "quickness", "cc"]
     },
     defense: {
-        lanes: ["boonsupport", "recovery", "rez"],
+        lanes: ["boonsupport", "recovery", "prevention", "rez"],
         packages: ["stability", "healing", "cleanse", "protection", "barrier", "resistance"]
     },
     custom: {
@@ -1241,9 +1242,147 @@ function renderAnalysisFilterOptions(snapshot, preserveSelection = true) {
     });
 }
 
+function buildAnalysisOverviewStandardCard(card) {
+    return `
+        <article class="analysis-card">
+            <strong>${escapeHtml(card.title)}</strong>
+            <div class="analysis-card-value">${escapeHtml(card.value)}</div>
+            <div class="table-inline-note">${escapeHtml(card.detail)}</div>
+            ${card.lines?.length
+                ? `<div class="table-stack">${card.lines.map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}</div>`
+                : ""}
+        </article>
+    `;
+}
+
+function formatMitigationEffectCounts(effectCounts, limit = 4) {
+    if (!Array.isArray(effectCounts) || effectCounts.length === 0) {
+        return "No effect detail retained.";
+    }
+
+    const visible = effectCounts
+        .filter(effect => effect && effect.name)
+        .slice(0, limit)
+        .map(effect => `${effect.name} (${formatNumber(effect.count)})`);
+    const remaining = effectCounts.length - visible.length;
+    return remaining > 0
+        ? `${visible.join(", ")} + ${formatNumber(remaining)} more`
+        : visible.join(", ");
+}
+
+function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
+    const negatedSummaries = Array.isArray(summary.negatedHitSummaries) ? summary.negatedHitSummaries : [];
+    const negatedHitCount = negatedSummaries.reduce((total, entry) => total + Number(entry.negatedHitCount ?? 0), 0);
+    const fallbackCount = negatedSummaries.reduce((total, entry) => total + Number(entry.fallbackEstimateCount ?? 0), 0);
+    const totalPrevention = Number(summary.totalBarrierAbsorbed ?? 0)
+        + Number(summary.totalEstimatedDamageReduction ?? 0)
+        + Number(summary.totalEstimatedNegatedDamage ?? 0)
+        + Number(summary.totalPetMinionAbsorption ?? 0);
+    const availabilityDetail = summary.availableFightCount === filteredFightCount
+        ? "Aggregated across all filtered fights."
+        : `Available in ${formatNumber(summary.availableFightCount)} of ${formatNumber(filteredFightCount)} filtered fights.`;
+    const headerLines = [
+        availabilityDetail,
+        summary.totalDamageToSquad > 0
+            ? `${formatNumber(summary.totalDamageToSquad, 0)} player-targeted damage | ${formatNumber(summary.totalHealthDamageToSquad, 0)} health-only after barrier`
+            : null,
+        summary.totalIncomingDamage > 0 || summary.totalIncomingHealing > 0
+            ? `${formatNumber(summary.totalIncomingDamage, 0)} incoming damage and ${formatNumber(summary.totalIncomingHealing, 0)} incoming healing inside saved-player samples`
+            : null,
+        summary.hasBarrierCoverageWarnings
+            ? "Barrier coverage was incomplete in at least one sampled fight."
+            : null
+    ].filter(Boolean);
+
+    const rows = [
+        {
+            label: "Total prevention",
+            value: formatNumber(totalPrevention, 0),
+            meta: `${formatNumber(summary.totalSaves)} saves`,
+            notes: "Barrier, reduction, negated hits, and pet/minion absorption combined."
+        },
+        {
+            label: "Barrier absorbed",
+            value: formatNumber(summary.totalBarrierAbsorbed, 0),
+            meta: `${formatNumber(summary.totalBarrierSaves)} barrier saves`,
+            notes: summary.totalDamageToSquad > 0
+                ? `${formatPercent(summary.totalBarrierAbsorbed * 100 / summary.totalDamageToSquad)} of player-targeted damage`
+                : "Barrier absorbed on squad players."
+        },
+        {
+            label: "Damage reduction",
+            value: formatNumber(summary.totalEstimatedDamageReduction, 0),
+            meta: `${formatNumber(summary.totalDamageReductionSaves)} reduction saves`,
+            notes: "Estimated prevented damage from reduction-style effects."
+        },
+        {
+            label: "Negated damage",
+            value: formatNumber(summary.totalEstimatedNegatedDamage, 0),
+            meta: `${formatNumber(summary.totalNegatedDamageSaves)} negation saves | ${formatNumber(negatedHitCount)} hits`,
+            notes: fallbackCount > 0
+                ? `${formatNumber(fallbackCount)} fallback negation estimates were used.`
+                : "All negated hits used tracked skill-based estimates."
+        },
+        {
+            label: "Pet / minion absorption",
+            value: formatNumber(summary.totalPetMinionAbsorption, 0),
+            meta: "Absorption on owned entities",
+            notes: summary.totalDamageToSquad + summary.totalPetMinionAbsorption > 0
+                ? `${formatPercent(summary.totalPetMinionAbsorption * 100 / (summary.totalDamageToSquad + summary.totalPetMinionAbsorption))} of combined incoming player + pet/minion damage`
+                : "Damage absorbed away from squad players."
+        },
+        {
+            label: "Saved cases",
+            value: formatNumber(summary.totalSaves),
+            meta: `${formatNumber(summary.totalBothSaves)} both | ${formatNumber(summary.totalMultiSourceSaves)} multi-source`,
+            notes: summary.averageLowestHealthPercent != null && summary.lowestLowestHealthPercent != null
+                ? `${formatPercent(summary.averageLowestHealthPercent)} average lowest health | ${formatPercent(summary.lowestLowestHealthPercent)} lowest observed`
+                : "No saved-player low-health detail retained."
+        },
+        ...negatedSummaries.map(entry => ({
+            label: entry.label,
+            value: formatNumber(entry.estimatedPreventedDamage, 0),
+            meta: `${formatNumber(entry.negatedHitCount)} hits`,
+            notes: `${formatNumber(entry.fallbackEstimateCount)} fallbacks | Effects: ${formatMitigationEffectCounts(entry.contributingEffects)}`,
+            isSubrow: true
+        }))
+    ];
+
+    return `
+        <article class="analysis-card analysis-card--wide analysis-card--table">
+            <strong>Mitigation</strong>
+            <div class="table-stack">
+                ${headerLines.map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}
+            </div>
+            <div class="analysis-mitigation-table-wrap">
+                <table class="data-table data-table-compact analysis-mitigation-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Total</th>
+                            <th>Cases / Hits</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr class="${row.isSubrow ? "analysis-mitigation-subrow" : ""}">
+                                <td>${escapeHtml(row.label)}</td>
+                                <td>${escapeHtml(row.value)}</td>
+                                <td>${escapeHtml(row.meta)}</td>
+                                <td>${escapeHtml(row.notes)}</td>
+                            </tr>
+                        `).join("")}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    `;
+}
+
 function buildAnalysisOverviewCards(snapshot) {
     const overview = snapshot.overview ?? {};
-    const savesSummary = overview.savesSummary ?? null;
+    const mitigationSummary = overview.mitigationSummary ?? null;
     const obliterateSummary = overview.obliterateSummary ?? null;
     const cards = [
         {
@@ -1285,25 +1424,9 @@ function buildAnalysisOverviewCards(snapshot) {
         }
     ];
 
-    if (savesSummary) {
+    if (mitigationSummary) {
         const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
-        const availabilityDetail = savesSummary.availableFightCount === filteredFightCount
-            ? "Aggregated across all filtered fights."
-            : `Available in ${formatNumber(savesSummary.availableFightCount)} of ${formatNumber(filteredFightCount)} filtered fights.`;
-        const perDownLabel = savesSummary.savesPerDown != null
-            ? `${formatNumber(savesSummary.savesPerDown, 2)} / down`
-            : `${formatNumber(savesSummary.totalSaves)} saves`;
-
-        cards.push({
-            title: "Saves",
-            value: perDownLabel,
-            detail: availabilityDetail,
-            lines: [
-                `${formatNumber(savesSummary.totalSaves)} saves across ${formatNumber(savesSummary.totalSquadDowns)} squad downs`,
-                `${formatNumber(savesSummary.totalBarrierSaves)} barrier | ${formatNumber(savesSummary.totalDamageReductionSaves)} reduction | ${formatNumber(savesSummary.totalBothSaves)} both`,
-                `${formatNumber(savesSummary.totalBarrierAbsorbed, 0)} barrier absorbed | ${formatNumber(savesSummary.totalEstimatedDamageReduction, 0)} estimated damage reduction`
-            ]
-        });
+        cards.push(buildAnalysisMitigationOverviewCard(mitigationSummary, filteredFightCount));
     }
 
     if (obliterateSummary) {
@@ -1326,16 +1449,7 @@ function buildAnalysisOverviewCards(snapshot) {
         });
     }
 
-    return cards.map(card => `
-        <article class="analysis-card">
-            <strong>${escapeHtml(card.title)}</strong>
-            <div class="analysis-card-value">${escapeHtml(card.value)}</div>
-            <div class="table-inline-note">${escapeHtml(card.detail)}</div>
-            ${card.lines?.length
-                ? `<div class="table-stack">${card.lines.map(line => `<span class="table-inline-note">${escapeHtml(line)}</span>`).join("")}</div>`
-                : ""}
-        </article>
-    `).join("");
+    return cards.map(card => typeof card === "string" ? card : buildAnalysisOverviewStandardCard(card)).join("");
 }
 
 function renderAnalysisCharts(snapshot) {
@@ -3128,7 +3242,9 @@ function buildCharacterLaneMetricCopy(lane, totalFights) {
         case "boonsupport":
             return `${formatCharacterLaneMetricPerFight(lane, "totalBoonSupport", totalFights)} total boon-seconds per filtered fight, split between ${formatCharacterLaneMetricPerFight(lane, "defensiveBoonSupport", totalFights)} defensive and ${formatCharacterLaneMetricPerFight(lane, "offensiveBoonSupport", totalFights)} offensive coverage.`;
         case "recovery":
-            return `${formatCharacterLaneMetricPerFight(lane, "cleansesTotal", totalFights)} cleanses, ${formatCharacterLaneMetricPerFight(lane, "healingTotal", totalFights)} healing, and ${formatCharacterLaneMetricPerFight(lane, "barrierTotal", totalFights)} barrier per filtered fight.`;
+            return `${formatCharacterLaneMetricPerFight(lane, "cleansesTotal", totalFights)} cleanses and ${formatCharacterLaneMetricPerFight(lane, "healingTotal", totalFights)} healing per filtered fight.`;
+        case "prevention":
+            return `${formatCharacterLaneMetricPerFight(lane, "barrierTotal", totalFights)} barrier, ${formatCharacterLaneMetricPerFight(lane, "negatedDamageTotal", totalFights)} estimated negated damage, and ${formatCharacterLaneMetricPerFight(lane, "petAbsorptionTotal", totalFights)} pet/minion absorption per filtered fight.`;
         case "rez":
             return `${formatCharacterLaneMetricPerFight(lane, "squadRecoveryWindowsHelped", totalFights)} recoveries helped, ${formatCharacterLaneMetricPerFight(lane, "rezTimeOnRecoveries", totalFights)} rez time, and ${formatCharacterLaneMetricPerFight(lane, "downedHealingOnRecoveries", totalFights)} downed healing per filtered fight.`;
         default:
