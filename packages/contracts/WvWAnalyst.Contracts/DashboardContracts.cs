@@ -8,6 +8,7 @@ public sealed record DashboardSnapshotDto(
     IReadOnlyList<WorkstreamDto> Workstreams,
     IReadOnlyList<FightArtifactSummaryDto> RecentParses,
     FightBrowserSnapshotDto FightBrowser,
+    ManageActivityStatusDto ManageActivity,
     ArtifactRetentionPolicyDto RetentionPolicy);
 
 public sealed record ApplicationInfoDto(
@@ -114,6 +115,13 @@ public sealed record DirectoryImportJobStatusDto(
     string? CompletedAtUtc,
     IReadOnlyList<DirectoryImportItemDto> Items);
 
+public sealed record ManageActivityStatusDto(
+    bool ParseRunning,
+    bool UploadRunning,
+    int ActiveUploadCount,
+    string Summary,
+    DirectoryImportJobStatusDto? ActiveBatchJob);
+
 public sealed record ConfiguredLogDirectoryUploadResultDto(
     bool Success,
     string Message,
@@ -128,6 +136,15 @@ public sealed record ConfiguredLogDirectoryUploadItemDto(
     string Action,
     string Message,
     string? SavedAs);
+
+public sealed record WorkspaceResetResultDto(
+    bool Success,
+    string Message,
+    string? DirectoryPath,
+    int DeletedLogFileCount,
+    int DeletedFightCount,
+    int DeletedHtmlReportCount,
+    bool DeletedDatabase);
 
 public sealed record DirectoryImportItemDto(
     string SourceFileName,

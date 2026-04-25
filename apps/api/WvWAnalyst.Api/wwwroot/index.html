@@ -68,6 +68,17 @@
                     </div>
                 </form>
                 <div class="import-status import-status-scrollable" id="log-file-upload-status">No files have been added to the configured log directory in this browser session yet.</div>
+                <div class="browser-controls manage-danger-toolbar">
+                    <div class="browser-field browser-field-wide">
+                        <span>Reset stored state</span>
+                        <p class="workspace-note">Delete every supported log from the configured log directory and clear the stored fight catalog, including retained HTML reports.</p>
+                    </div>
+                    <div class="browser-field button-field">
+                        <span>Danger zone</span>
+                        <button class="action-link action-link-button danger-button" id="manage-reset-button" type="button">Delete logs and reset state</button>
+                    </div>
+                </div>
+                <div class="import-status" id="manage-reset-status">No reset has been run in this browser session yet.</div>
                 <div class="batch-results-toolbar" id="batch-results-toolbar" hidden>
                     <label class="batch-toggle">
                         <input id="batch-results-show-all" type="checkbox">
@@ -483,6 +494,30 @@
                     </details>
                 </div>
                 <div class="stats-grid" id="analysis-overview-cards"></div>
+                <div class="browser-controls analysis-trend-toolbar">
+                    <label class="browser-field">
+                        <span>Trend mode</span>
+                        <select id="analysis-trend-mode">
+                            <option value="fight">Per fight</option>
+                            <option value="week">Weekly median</option>
+                            <option value="month">Monthly median</option>
+                        </select>
+                    </label>
+                    <label class="browser-field">
+                        <span>Smoothing</span>
+                        <select id="analysis-trend-smoothing">
+                            <option value="0">Off</option>
+                            <option value="3">3 points</option>
+                            <option value="5">5 points</option>
+                            <option value="8">8 points</option>
+                        </select>
+                    </label>
+                    <div class="browser-field browser-field-wide">
+                        <span>Trend summary</span>
+                        <div class="analysis-trend-summary" id="analysis-trend-summary">Per-fight points in date order.</div>
+                    </div>
+                </div>
+                <div class="stats-grid analysis-trend-delta-grid" id="analysis-trend-delta-grid"></div>
                 <div class="pillar-grid" id="analysis-chart-grid"></div>
                 <div class="stats-grid analysis-mitigation-grid" id="analysis-mitigation-card"></div>
                 <div class="tag-block">
@@ -659,56 +694,6 @@
                 </div>
             </section>
 
-            <section class="panel" data-app-panel="analysis">
-                <div class="section-heading">
-                    <h2>Workspace</h2>
-                    <p>Neighbor repos and local storage roots detected by the prototype.</p>
-                </div>
-                <div class="stats-grid" id="workspace-cards"></div>
-            </section>
-
-            <section class="panel" data-app-panel="analysis">
-                <div class="section-heading">
-                    <h2>Workstreams</h2>
-                    <p>Current prototype lanes.</p>
-                </div>
-                <div class="workstreams" id="workstreams-list"></div>
-            </section>
-
-            <section class="panel panel-wide" data-app-panel="analysis">
-                <div class="section-heading">
-                    <h2>Fight Execution Score v1</h2>
-                    <p id="scorecard-summary"></p>
-                </div>
-                <div class="tag-block">
-                    <div>
-                        <h3>Non-scored context</h3>
-                        <ul class="tag-list" id="context-list"></ul>
-                    </div>
-                    <div>
-                        <h3>Outcome headline</h3>
-                        <ul class="tag-list" id="outcome-list"></ul>
-                    </div>
-                </div>
-                <div class="pillar-grid" id="pillar-grid"></div>
-            </section>
-
-            <section class="panel" data-app-panel="analysis">
-                <div class="section-heading">
-                    <h2>Retention posture</h2>
-                    <p>Keep compact catalog data and treat parser payloads as temporary ingest artifacts.</p>
-                </div>
-                <div class="tag-block">
-                    <div>
-                        <h3>Keep always</h3>
-                        <ul class="tag-list" id="keep-list"></ul>
-                    </div>
-                    <div>
-                        <h3>Purge first</h3>
-                        <ul class="tag-list" id="purge-list"></ul>
-                    </div>
-                </div>
-            </section>
         </main>
     </div>
 

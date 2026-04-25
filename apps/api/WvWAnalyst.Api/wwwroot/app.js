@@ -1,15 +1,20 @@
 const DIRECTORY_MAX_PARALLELISM_KEY = "wvw-analyst.last-max-parallelism";
 const ACTIVE_BATCH_JOB_KEY = "wvw-analyst.active-batch-job";
 const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
+const ANALYSIS_TREND_MODE_KEY = "wvw-analyst.analysis-trend-mode";
+const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
+const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
+let manageActivityRefreshHandle = null;
 let analysisLoadPromise = null;
 let showFightBrowserTopBursts = false;
 let logFileUploadBusy = false;
+let manageResetBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "players";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -29,7 +34,46 @@ let activeAnalysisLaneDetailTab = "players";
 const MINIMUM_LANE_FILTER_APPEARANCES = 20;
 const MINIMUM_PLAYER_TABLE_FIGHTS = 40;
 const ANALYSIS_TREND_ROLLING_WINDOW = 5;
+let analysisTrendMode = "fight";
+let analysisTrendSmoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW;
 const SHOW_ANALYSIS_OBLITERATE_CARD = false;
+const ANALYSIS_TREND_MODE_OPTIONS = {
+    fight: {
+        key: "fight",
+        label: "Per fight",
+        description: "Raw fight scores in fight-date order.",
+        unitSingular: "fight",
+        unitPlural: "fights",
+        recentWindow: 10,
+        usesMedianBuckets: false
+    },
+    week: {
+        key: "week",
+        label: "Weekly median",
+        description: "Median score per local calendar week.",
+        unitSingular: "week",
+        unitPlural: "weeks",
+        recentWindow: 4,
+        usesMedianBuckets: true
+    },
+    month: {
+        key: "month",
+        label: "Monthly median",
+        description: "Median score per local calendar month.",
+        unitSingular: "month",
+        unitPlural: "months",
+        recentWindow: 3,
+        usesMedianBuckets: true
+    }
+};
+const ANALYSIS_TREND_SMOOTHING_OPTIONS = [0, 3, 5, 8];
+const ANALYSIS_TREND_METRICS = [
+    { key: "overallScore", title: "Overall trend", averageKey: "averageOverallScore", fallbackValue: "n/a", detail: "Execution score across the selected trend buckets.", comparisonLabel: "Overall" },
+    { key: "cohesionScore", title: "Cohesion trend", averageKey: "averageCohesionScore", fallbackValue: "n/a", detail: "Cohesion & positioning pillar.", comparisonLabel: "Cohesion" },
+    { key: "pressureScore", title: "Pressure trend", averageKey: "averagePressureScore", fallbackValue: "n/a", detail: "Pressure & burst pillar.", comparisonLabel: "Pressure" },
+    { key: "downstateScore", title: "Downstate trend", averageKey: "averageDownstateScore", fallbackValue: "n/a", detail: "Downstate control pillar.", comparisonLabel: "Downstate" },
+    { key: "resilienceScore", title: "Resilience trend", averageKey: "averageResilienceScore", fallbackValue: "n/a", detail: "Resilience & stabilization pillar.", comparisonLabel: "Resilience" }
+];
 const COMP_HELPER_TEAM_SIZE = 5;
 const COMP_HELPER_MAX_LOCKED_CARDS = 5;
 const COMP_HELPER_MIN_TOTAL_FIGHTS = 20;
@@ -322,6 +366,37 @@ function buildPillarCard(pillar) {
     `;
 }
 
+function normalizeAnalysisTrendMode(value) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return ANALYSIS_TREND_MODE_OPTIONS[normalized]
+        ? normalized
+        : "fight";
+}
+
+function normalizeAnalysisTrendSmoothingWindow(value) {
+    const parsed = Number.parseInt(value, 10);
+    return ANALYSIS_TREND_SMOOTHING_OPTIONS.includes(parsed)
+        ? parsed
+        : ANALYSIS_TREND_ROLLING_WINDOW;
+}
+
+function formatSignedNumber(value, maximumFractionDigits = 1) {
+    if (value == null) {
+        return "n/a";
+    }
+
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+        return String(value);
+    }
+
+    if (numeric === 0) {
+        return formatNumber(0, maximumFractionDigits);
+    }
+
+    return `${numeric > 0 ? "+" : "-"}${formatNumber(Math.abs(numeric), maximumFractionDigits)}`;
+}
+
 function buildAnalysisLinePath(values, minValue = 0, maxValue = 100) {
     const width = 320;
     const height = 118;
@@ -360,6 +435,40 @@ function buildAnalysisLinePath(values, minValue = 0, maxValue = 100) {
         .join(" ");
 }
 
+function buildAnalysisPointMarkup(values, minValue = 0, maxValue = 100) {
+    const width = 320;
+    const height = 118;
+    const normalizedValues = values.map(value => {
+        if (value == null) {
+            return null;
+        }
+
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? null : numeric;
+    });
+
+    if (!normalizedValues.some(value => value != null)) {
+        return "";
+    }
+
+    const xStep = normalizedValues.length <= 1 ? width / 2 : width / (normalizedValues.length - 1);
+    const range = Math.max(1, maxValue - minValue);
+
+    return normalizedValues
+        .map((value, index) => {
+            if (value == null) {
+                return "";
+            }
+
+            const x = Math.round(index * xStep * 100) / 100;
+            const clampedValue = Math.max(minValue, Math.min(maxValue, value));
+            const y = Math.round((height - ((clampedValue - minValue) / range) * height) * 100) / 100;
+            return `<circle class="point" cx="${x}" cy="${y}" r="2.7"></circle>`;
+        })
+        .filter(Boolean)
+        .join("");
+}
+
 function buildRollingAverage(values, windowSize = ANALYSIS_TREND_ROLLING_WINDOW) {
     const normalizedValues = values.map(value => {
         if (value == null) {
@@ -369,6 +478,10 @@ function buildRollingAverage(values, windowSize = ANALYSIS_TREND_ROLLING_WINDOW)
         const numeric = Number(value);
         return Number.isNaN(numeric) ? null : numeric;
     });
+    if (windowSize <= 1) {
+        return normalizedValues;
+    }
+
     const effectiveWindow = Math.max(1, Math.min(windowSize, normalizedValues.filter(value => value != null).length));
 
     return normalizedValues.map((value, index) => {
@@ -392,15 +505,270 @@ function buildRollingAverage(values, windowSize = ANALYSIS_TREND_ROLLING_WINDOW)
     });
 }
 
-function buildAnalysisChartCard(title, valueLabel, values, detail) {
-    const rawPath = buildAnalysisLinePath(values);
-    const smoothedValues = buildRollingAverage(values);
+function getAnalysisTrendPointDate(point, fallbackIndex) {
+    const candidates = [
+        point?.fightDateUtc,
+        point?.fightDateLabel
+    ];
+
+    for (const candidate of candidates) {
+        if (!candidate) {
+            continue;
+        }
+
+        const parsed = new Date(candidate);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed;
+        }
+    }
+
+    return Number.isFinite(fallbackIndex)
+        ? new Date((fallbackIndex + 1) * 60000)
+        : null;
+}
+
+function buildAnalysisTrendBucketStart(date, mode) {
+    const normalizedMode = normalizeAnalysisTrendMode(mode);
+    const bucketStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    if (normalizedMode === "month") {
+        bucketStart.setDate(1);
+        return bucketStart;
+    }
+
+    const dayOffset = (bucketStart.getDay() + 6) % 7;
+    bucketStart.setDate(bucketStart.getDate() - dayOffset);
+    return bucketStart;
+}
+
+function buildAnalysisTrendBucketKey(bucketStart, mode) {
+    const normalizedMode = normalizeAnalysisTrendMode(mode);
+    if (normalizedMode === "month") {
+        return `${bucketStart.getFullYear()}-${String(bucketStart.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    return `${bucketStart.getFullYear()}-${String(bucketStart.getMonth() + 1).padStart(2, "0")}-${String(bucketStart.getDate()).padStart(2, "0")}`;
+}
+
+function formatAnalysisTrendBucketLabel(bucketStart, mode) {
+    const normalizedMode = normalizeAnalysisTrendMode(mode);
+    if (normalizedMode === "month") {
+        return bucketStart.toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short"
+        });
+    }
+
+    const bucketEnd = new Date(bucketStart.getFullYear(), bucketStart.getMonth(), bucketStart.getDate() + 6);
+    return `${bucketStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${bucketEnd.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+function calculateMedian(values) {
+    const normalizedValues = values
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value))
+        .sort((left, right) => left - right);
+
+    if (normalizedValues.length === 0) {
+        return null;
+    }
+
+    const middleIndex = Math.floor(normalizedValues.length / 2);
+    if (normalizedValues.length % 2 === 1) {
+        return normalizedValues[middleIndex];
+    }
+
+    return (normalizedValues[middleIndex - 1] + normalizedValues[middleIndex]) / 2;
+}
+
+function buildAggregatedTrendPoints(points, mode) {
+    const normalizedMode = normalizeAnalysisTrendMode(mode);
+    if (normalizedMode === "fight") {
+        return points.map((point, index) => ({
+            ...point,
+            bucketKey: point.fightId ?? `fight-${index}`,
+            bucketLabel: point.fightDateLabel ?? `Fight ${index + 1}`,
+            fightCount: 1
+        }));
+    }
+
+    const bucketMap = new Map();
+    points.forEach((point, index) => {
+        const pointDate = getAnalysisTrendPointDate(point, index);
+        if (!pointDate) {
+            return;
+        }
+
+        const bucketStart = buildAnalysisTrendBucketStart(pointDate, normalizedMode);
+        const bucketKey = buildAnalysisTrendBucketKey(bucketStart, normalizedMode);
+        if (!bucketMap.has(bucketKey)) {
+            bucketMap.set(bucketKey, {
+                bucketKey,
+                bucketStart,
+                points: []
+            });
+        }
+
+        bucketMap.get(bucketKey).points.push(point);
+    });
+
+    return Array.from(bucketMap.values())
+        .sort((left, right) => left.bucketStart.getTime() - right.bucketStart.getTime())
+        .map(bucket => ({
+            bucketKey: bucket.bucketKey,
+            bucketLabel: formatAnalysisTrendBucketLabel(bucket.bucketStart, normalizedMode),
+            fightCount: bucket.points.length,
+            overallScore: calculateMedian(bucket.points.map(point => point.overallScore)),
+            cohesionScore: calculateMedian(bucket.points.map(point => point.cohesionScore)),
+            pressureScore: calculateMedian(bucket.points.map(point => point.pressureScore)),
+            downstateScore: calculateMedian(bucket.points.map(point => point.downstateScore)),
+            resilienceScore: calculateMedian(bucket.points.map(point => point.resilienceScore))
+        }));
+}
+
+function buildAnalysisTrendSummary(rawPoints, aggregatedPoints, mode, smoothingWindow) {
+    const modeOption = ANALYSIS_TREND_MODE_OPTIONS[normalizeAnalysisTrendMode(mode)];
+    if (rawPoints.length === 0) {
+        return "No fights matched the current filters.";
+    }
+
+    const sourceSummary = modeOption.usesMedianBuckets
+        ? `${aggregatedPoints.length} ${aggregatedPoints.length === 1 ? modeOption.unitSingular : modeOption.unitPlural} from ${rawPoints.length} fights. Bucket values use medians.`
+        : `${rawPoints.length} fights in date order.`;
+    const smoothingSummary = smoothingWindow > 1
+        ? ` ${smoothingWindow}-${modeOption.usesMedianBuckets ? "bucket" : "fight"} trailing average is overlaid.`
+        : " Raw values are shown without smoothing.";
+
+    return `${modeOption.description} ${sourceSummary}${smoothingSummary}`;
+}
+
+function startOfLocalDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addLocalDays(date, dayOffset) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayOffset);
+}
+
+function getAnalysisTrendComparisonWindow(mode, pointCount) {
+    const modeOption = ANALYSIS_TREND_MODE_OPTIONS[normalizeAnalysisTrendMode(mode)];
+    if (pointCount < 2) {
+        return 0;
+    }
+
+    return Math.max(1, Math.min(modeOption.recentWindow, Math.floor(pointCount / 2)));
+}
+
+function buildPerFightTrendComparison(points, metricKey) {
+    const datedPoints = points
+        .map((point, index) => ({
+            date: getAnalysisTrendPointDate(point, index),
+            value: Number(point?.[metricKey])
+        }))
+        .filter(point => point.date && Number.isFinite(point.value))
+        .sort((left, right) => left.date.getTime() - right.date.getTime());
+
+    if (datedPoints.length < 2) {
+        return null;
+    }
+
+    const latestDay = startOfLocalDay(datedPoints[datedPoints.length - 1].date);
+    const recentStart = addLocalDays(latestDay, -9);
+    const priorStart = addLocalDays(recentStart, -10);
+    const recentValues = datedPoints
+        .filter(point => point.date >= recentStart)
+        .map(point => point.value);
+    const priorValues = datedPoints
+        .filter(point => point.date >= priorStart && point.date < recentStart)
+        .map(point => point.value);
+
+    return {
+        recentValues,
+        priorValues,
+        comparisonLabel: `Last 10 days (${recentValues.length} fights) vs previous 10 days (${priorValues.length} fights).`,
+        insufficientMessage: "Need at least one scored fight in both the last 10 days and the previous 10 days."
+    };
+}
+
+function buildBucketTrendComparison(points, mode, metricKey) {
+    const numericPoints = points
+        .map(point => Number(point?.[metricKey]))
+        .filter(value => Number.isFinite(value));
+    const comparisonWindow = getAnalysisTrendComparisonWindow(mode, numericPoints.length);
+    const modeOption = ANALYSIS_TREND_MODE_OPTIONS[normalizeAnalysisTrendMode(mode)];
+
+    if (comparisonWindow <= 0) {
+        return null;
+    }
+
+    const unitLabel = comparisonWindow === 1 ? modeOption.unitSingular : modeOption.unitPlural;
+
+    return {
+        recentValues: numericPoints.slice(-comparisonWindow),
+        priorValues: numericPoints.slice(-comparisonWindow * 2, -comparisonWindow),
+        comparisonLabel: `Last ${comparisonWindow} ${unitLabel} vs previous ${comparisonWindow} ${unitLabel}.`,
+        insufficientMessage: `Need at least two comparable ${modeOption.unitPlural} to compare direction.`
+    };
+}
+
+function buildAnalysisTrendDeltaCard(metric, aggregatedPoints, mode) {
+    const modeOption = ANALYSIS_TREND_MODE_OPTIONS[normalizeAnalysisTrendMode(mode)];
+    const comparison = mode === "fight"
+        ? buildPerFightTrendComparison(aggregatedPoints, metric.key)
+        : buildBucketTrendComparison(aggregatedPoints, mode, metric.key);
+
+    if (!comparison || comparison.recentValues.length === 0 || comparison.priorValues.length === 0) {
+        return `
+            <article class="analysis-card analysis-delta-card">
+                <strong>${escapeHtml(metric.comparisonLabel)}</strong>
+                <div class="analysis-delta-direction is-flat">Not enough data</div>
+                <div class="table-inline-note">${escapeHtml(comparison?.insufficientMessage ?? `Need at least two comparable ${modeOption.unitPlural} to compare direction.`)}</div>
+            </article>
+        `;
+    }
+
+    const { recentValues, priorValues } = comparison;
+    const recentAverage = recentValues.reduce((total, value) => total + value, 0) / recentValues.length;
+    const priorAverage = priorValues.reduce((total, value) => total + value, 0) / priorValues.length;
+    const delta = recentAverage - priorAverage;
+    const directionClass = Math.abs(delta) < 0.75
+        ? "is-flat"
+        : delta > 0
+            ? "is-up"
+            : "is-down";
+    const directionLabel = Math.abs(delta) < 0.75
+        ? "Flat"
+        : delta > 0
+            ? "Up"
+            : "Down";
+
+    return `
+        <article class="analysis-card analysis-delta-card">
+            <strong>${escapeHtml(metric.comparisonLabel)}</strong>
+            <div class="analysis-delta-direction ${directionClass}">${escapeHtml(directionLabel)}</div>
+            <div class="analysis-delta-metric">${escapeHtml(formatSignedNumber(delta, 1))}</div>
+            <div class="table-inline-note">${escapeHtml(comparison.comparisonLabel)}</div>
+            <div class="analysis-delta-pair">
+                <span>Recent ${escapeHtml(formatNumber(recentAverage, 1))}</span>
+                <span>Prior ${escapeHtml(formatNumber(priorAverage, 1))}</span>
+            </div>
+        </article>
+    `;
+}
+
+function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW, showPoints = false) {
+    const normalizedSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(smoothingWindow);
+    const rawPath = normalizedSmoothingWindow > 1 ? buildAnalysisLinePath(values) : "";
+    const smoothedValues = buildRollingAverage(values, normalizedSmoothingWindow);
     const smoothPath = buildAnalysisLinePath(smoothedValues);
+    const pointMarkup = showPoints ? buildAnalysisPointMarkup(values) : "";
     const empty = !rawPath && !smoothPath;
     const numericCount = values.filter(value => value != null && !Number.isNaN(Number(value))).length;
-    const effectiveWindow = Math.max(1, Math.min(ANALYSIS_TREND_ROLLING_WINDOW, numericCount));
-    const smoothingDetail = effectiveWindow >= 2
-        ? `${effectiveWindow}-fight trailing average`
+    const effectiveWindow = normalizedSmoothingWindow > 1
+        ? Math.max(1, Math.min(normalizedSmoothingWindow, numericCount))
+        : 1;
+    const smoothingDetail = normalizedSmoothingWindow > 1 && effectiveWindow >= 2
+        ? `${effectiveWindow}-point trailing average`
         : null;
 
     return `
@@ -415,6 +783,7 @@ function buildAnalysisChartCard(title, valueLabel, values, detail) {
                 <line class="grid-line" x1="0" y1="88.5" x2="320" y2="88.5"></line>
                 ${rawPath ? `<path class="raw-line" d="${escapeHtml(rawPath)}"></path>` : ""}
                 ${smoothPath ? `<path class="trend-line" d="${escapeHtml(smoothPath)}"></path>` : ""}
+                ${pointMarkup}
             </svg>
             ${empty ? `<div class="table-inline-note">No score points available for this selection.</div>` : ""}
         </article>
@@ -1149,105 +1518,14 @@ function renderWorkspace(snapshot) {
     document.querySelector("#mode-pill").textContent = snapshot.application.mode;
     const configuredLogDirectory = snapshot.workspace.logDirectoryPath ?? "Not configured";
     document.querySelector("#configured-log-directory-input").value = configuredLogDirectory;
+    const manageSummary = snapshot.manageActivity && (snapshot.manageActivity.parseRunning || snapshot.manageActivity.uploadRunning)
+        ? ` ${escapeHtml(snapshot.manageActivity.summary)}`
+        : "";
     document.querySelector("#batch-note").innerHTML = snapshot.workspace.parserCliDetected
-        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>. Configured log directory: <code>${escapeHtml(configuredLogDirectory)}</code>.`
-        : escapeHtml(snapshot.workspace.notes);
-
-    const workspaceCards = document.querySelector("#workspace-cards");
-    const parserStatus = snapshot.workspace.parserDetected ? "Detected" : "Missing";
-    const parserCliStatus = snapshot.workspace.parserCliDetected ? "Ready" : "Missing";
-    const combinerStatus = snapshot.workspace.combinerDetected ? "Detected" : "Missing";
-    const logDirectoryStatus = snapshot.workspace.logDirectoryConfigured
-        ? (snapshot.workspace.logDirectoryDetected ? "Ready" : "Configured")
-        : "Missing";
-
-    workspaceCards.innerHTML = `
-        <article class="workspace-card">
-            <strong>Parser workspace</strong>
-            <div class="${buildStatusClass(parserStatus)}">${escapeHtml(parserStatus)}</div>
-            <p class="workspace-note"><code>${escapeHtml(snapshot.workspace.parserPath)}</code></p>
-        </article>
-        <article class="workspace-card">
-            <strong>Parser CLI</strong>
-            <div class="${buildStatusClass(parserCliStatus)}">${escapeHtml(parserCliStatus)}</div>
-            <p class="workspace-note"><code>${escapeHtml(snapshot.workspace.parserCliPath ?? "Not found")}</code></p>
-        </article>
-        <article class="workspace-card">
-            <strong>Combiner workspace</strong>
-            <div class="${buildStatusClass(combinerStatus)}">${escapeHtml(combinerStatus)}</div>
-            <p class="workspace-note"><code>${escapeHtml(snapshot.workspace.combinerPath)}</code></p>
-        </article>
-        <article class="workspace-card">
-            <strong>Configured log directory</strong>
-            <div class="${buildStatusClass(logDirectoryStatus)}">${escapeHtml(logDirectoryStatus)}</div>
-            <p class="workspace-note"><code>${escapeHtml(configuredLogDirectory)}</code></p>
-        </article>
-        <article class="workspace-card">
-            <strong>Storage root</strong>
-            <p class="workspace-note"><code>${escapeHtml(snapshot.storage.rootPath)}</code></p>
-            <p class="workspace-note">${snapshot.storage.fightFolderCount} fight folders tracked.</p>
-        </article>
-    `;
+        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>. Configured log directory: <code>${escapeHtml(configuredLogDirectory)}</code>.${manageSummary}`
+        : `${escapeHtml(snapshot.workspace.notes)}${manageSummary}`;
 
     syncManageControls();
-}
-
-function renderWorkstreams(snapshot) {
-    document.querySelector("#workstreams-list").innerHTML = snapshot.workstreams
-        .map(item => `
-            <article class="workstream">
-                <div class="${buildStatusClass(item.status)}">${escapeHtml(item.status)}</div>
-                <h3>${escapeHtml(item.name)}</h3>
-                <p>${escapeHtml(item.summary)}</p>
-            </article>
-        `)
-        .join("");
-}
-
-function renderScorecard(snapshot) {
-    document.querySelector("#scorecard-summary").textContent = snapshot.teamFightScorecard.summary;
-
-    setInnerHtml(
-        "#context-list",
-        snapshot.teamFightScorecard.nonScoredContext
-            .map(item => `<li>${escapeHtml(item)}</li>`)
-            .join(""));
-
-    setInnerHtml(
-        "#outcome-list",
-        snapshot.teamFightScorecard.nonScoredOutcomeHeadline
-            .map(item => `<li>${escapeHtml(item)}</li>`)
-            .join(""));
-
-    setInnerHtml(
-        "#pillar-grid",
-        snapshot.teamFightScorecard.primaryPillars
-            .map(pillar => `
-                <article class="pillar-card">
-                    <header>
-                        <div>
-                            <strong>${escapeHtml(pillar.name)}</strong>
-                            <p class="workspace-note">${escapeHtml(pillar.summary)}</p>
-                        </div>
-                        <span class="weight">${pillar.weightPercent}%</span>
-                    </header>
-                    <ul class="metric-list">
-                        ${pillar.metrics.map(metric => `
-                            <li>
-                                <strong>${escapeHtml(metric.name)}</strong>
-                                <div class="metric-meta">${escapeHtml(metric.direction)} is better | normalized by ${escapeHtml(metric.normalization)}</div>
-                                <div class="metric-meta">single fight: ${metric.strongForSingleFight ? "strong" : "weak"} | trend: ${metric.strongForTrend ? "strong" : "weak"}</div>
-                            </li>
-                        `).join("")}
-                    </ul>
-                </article>
-            `)
-            .join(""));
-}
-
-function renderRetention(snapshot) {
-    setInnerHtml("#keep-list", snapshot.retentionPolicy.keepAlways.map(item => `<li>${escapeHtml(item)}</li>`).join(""));
-    setInnerHtml("#purge-list", snapshot.retentionPolicy.purgeFirst.map(item => `<li>${escapeHtml(item)}</li>`).join(""));
 }
 
 function getAnalysisFiltersFromUi() {
@@ -1518,19 +1796,31 @@ function renderAnalysisMitigation(snapshot) {
 
 function renderAnalysisCharts(snapshot) {
     const trends = snapshot.trends ?? [];
-    const overallValues = trends.map(point => point.overallScore);
-    const cohesionValues = trends.map(point => point.cohesionScore);
-    const pressureValues = trends.map(point => point.pressureScore);
-    const downstateValues = trends.map(point => point.downstateScore);
-    const resilienceValues = trends.map(point => point.resilienceScore);
+    const aggregatedPoints = buildAggregatedTrendPoints(trends, analysisTrendMode);
+    const showPoints = analysisTrendMode !== "fight" || aggregatedPoints.length <= 24;
 
-    const cards = [
-        buildAnalysisChartCard("Overall trend", snapshot.overview?.averageOverallScore != null ? formatNumber(snapshot.overview.averageOverallScore, 1) : "n/a", overallValues, `${trends.length} fights in date order.`),
-        buildAnalysisChartCard("Cohesion trend", snapshot.overview?.averageCohesionScore != null ? formatNumber(snapshot.overview.averageCohesionScore, 1) : "n/a", cohesionValues, "Cohesion & positioning pillar."),
-        buildAnalysisChartCard("Pressure trend", snapshot.overview?.averagePressureScore != null ? formatNumber(snapshot.overview.averagePressureScore, 1) : "n/a", pressureValues, "Pressure & burst pillar."),
-        buildAnalysisChartCard("Downstate trend", snapshot.overview?.averageDownstateScore != null ? formatNumber(snapshot.overview.averageDownstateScore, 1) : "n/a", downstateValues, "Downstate control pillar."),
-        buildAnalysisChartCard("Resilience trend", snapshot.overview?.averageResilienceScore != null ? formatNumber(snapshot.overview.averageResilienceScore, 1) : "n/a", resilienceValues, "Resilience & stabilization pillar.")
-    ];
+    document.querySelector("#analysis-trend-summary").textContent =
+        buildAnalysisTrendSummary(trends, aggregatedPoints, analysisTrendMode, analysisTrendSmoothingWindow);
+
+    const comparisonCards = ANALYSIS_TREND_METRICS
+        .map(metric => buildAnalysisTrendDeltaCard(metric, aggregatedPoints, analysisTrendMode));
+    setInnerHtml("#analysis-trend-delta-grid", comparisonCards.join(""));
+
+    const cards = ANALYSIS_TREND_METRICS.map(metric => {
+        const values = aggregatedPoints.map(point => point?.[metric.key] ?? null);
+        const averageValue = snapshot.overview?.[metric.averageKey];
+        const detail = analysisTrendMode === "fight"
+            ? `${metric.detail} ${trends.length} fights in date order.`
+            : `${metric.detail} ${aggregatedPoints.length} ${aggregatedPoints.length === 1 ? ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitSingular : ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitPlural} from ${trends.length} fights.`;
+
+        return buildAnalysisChartCard(
+            metric.title,
+            averageValue != null ? formatNumber(averageValue, 1) : metric.fallbackValue,
+            values,
+            detail,
+            analysisTrendSmoothingWindow,
+            showPoints);
+    });
 
     setInnerHtml("#analysis-chart-grid", cards.join(""));
 }
@@ -4034,6 +4324,8 @@ function setActiveAnalysisTab(tabKey) {
 function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-summary").textContent = message;
     setInnerHtml("#analysis-overview-cards", "");
+    document.querySelector("#analysis-trend-summary").textContent = message;
+    setInnerHtml("#analysis-trend-delta-grid", "");
     setInnerHtml("#analysis-chart-grid", "");
     setInnerHtml("#analysis-mitigation-card", "");
     setInnerHtml("#analysis-scope-list", buildTagListHtml([message]));
@@ -4608,20 +4900,27 @@ function renderBatchStatus(result, success) {
     const container = document.querySelector("#batch-status");
     const state = String(result?.state ?? "").toLowerCase();
     const isRunning = state === "running";
+    const isBlocked = state === "blocked";
+    const isCatalogRebuild = Boolean(result?.resetCatalog);
     const totalCount = Number(result?.discoveredCount ?? 0);
     const completedCount = Number(result?.completedCount ?? 0);
     const maxParallelism = Number(result?.maxParallelism ?? 0);
     const title = isRunning
-        ? `Parsing ${completedCount} / ${totalCount || "?"} logs`
-        : success
-            ? "Batch complete"
-            : "Needs attention";
-    const statusClass = isRunning
+        ? `${isCatalogRebuild ? "Rebuilding catalog" : "Parsing"} ${completedCount} / ${totalCount || "?"} logs`
+        : isBlocked
+            ? "Manage busy"
+            : success
+                ? (isCatalogRebuild ? "Catalog rebuild complete" : "Batch complete")
+                : "Needs attention";
+    const statusClass = isRunning || isBlocked
         ? "status status-neutral"
         : success
             ? "status status-ok"
             : "status status-error";
     const progressBits = [];
+    if (isCatalogRebuild) {
+        progressBits.push(`<span class="pill">catalog rebuild</span>`);
+    }
     if (totalCount > 0 || isRunning) {
         progressBits.push(`<span class="pill">${escapeHtml(`${completedCount} / ${totalCount || "?"} processed`)}</span>`);
     }
@@ -4709,30 +5008,102 @@ function renderBatchResults(result) {
         .join("");
 }
 
+function stopManageActivityRefresh() {
+    if (manageActivityRefreshHandle) {
+        window.clearTimeout(manageActivityRefreshHandle);
+        manageActivityRefreshHandle = null;
+    }
+}
+
+function scheduleManageActivityRefresh(snapshot) {
+    stopManageActivityRefresh();
+
+    if (snapshot?.manageActivity?.uploadRunning && !snapshot.manageActivity.parseRunning) {
+        manageActivityRefreshHandle = window.setTimeout(() => {
+            if (!activeBatchJobId && !batchStatusPollHandle) {
+                void main();
+            }
+        }, 1500);
+    }
+}
+
+function syncSharedManageState(snapshot) {
+    const manageActivity = snapshot?.manageActivity;
+    if (!manageActivity) {
+        return;
+    }
+
+    if (manageActivity.parseRunning && manageActivity.activeBatchJob?.jobId) {
+        lastBatchResult = manageActivity.activeBatchJob;
+        renderBatchStatus(lastBatchResult, true);
+        renderBatchResults(lastBatchResult);
+
+        if (!activeBatchJobId && !batchStatusPollHandle) {
+            startBatchJobPolling(manageActivity.activeBatchJob.jobId);
+        }
+
+        return;
+    }
+
+    if (manageActivity.uploadRunning) {
+        if (!activeBatchJobId && !batchStatusPollHandle) {
+            renderBatchStatus(
+                {
+                    state: "blocked",
+                    message: manageActivity.summary,
+                    resetCatalog: false,
+                    maxParallelism: 0,
+                    discoveredCount: 0,
+                    completedCount: 0,
+                    importedCount: 0,
+                    skippedCount: 0,
+                    excludedCount: 0,
+                    failedCount: 0
+                },
+                true);
+        }
+        return;
+    }
+
+    if (!lastBatchResult && !activeBatchJobId && !batchStatusPollHandle) {
+        document.querySelector("#batch-status").textContent = DEFAULT_BATCH_STATUS_MESSAGE;
+        renderBatchResults(null);
+    }
+}
+
 function syncManageControls() {
     const hasConfiguredDirectory = isConfiguredLogDirectoryAvailable();
     const parseButton = document.querySelector("#directory-button");
     const uploadInput = document.querySelector("#log-file-upload-input");
     const uploadButton = document.querySelector("#log-file-upload-button");
     const dropzone = document.querySelector("#log-file-dropzone");
+    const resetButton = document.querySelector("#manage-reset-button");
+    const sharedManageActivity = currentDashboardSnapshot?.manageActivity ?? null;
+    const sharedParseRunning = Boolean(sharedManageActivity?.parseRunning);
+    const sharedUploadRunning = Boolean(sharedManageActivity?.uploadRunning);
+    const parseBusy = parseButton?.dataset.busy === "true";
+    const disableManageActions = parseBusy || logFileUploadBusy || manageResetBusy;
 
     if (parseButton) {
-        const parseBusy = parseButton.dataset.busy === "true";
-        parseButton.disabled = parseBusy || !hasConfiguredDirectory;
+        parseButton.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning || !hasConfiguredDirectory;
     }
 
     if (uploadInput) {
-        uploadInput.disabled = logFileUploadBusy || !hasConfiguredDirectory;
+        uploadInput.disabled = disableManageActions || !hasConfiguredDirectory;
     }
 
     if (uploadButton) {
-        uploadButton.disabled = logFileUploadBusy || !hasConfiguredDirectory;
+        uploadButton.disabled = disableManageActions || !hasConfiguredDirectory;
     }
 
     if (dropzone) {
-        const isDisabled = logFileUploadBusy || !hasConfiguredDirectory;
+        const isDisabled = disableManageActions || !hasConfiguredDirectory;
         dropzone.classList.toggle("is-disabled", isDisabled);
         dropzone.setAttribute("aria-disabled", isDisabled ? "true" : "false");
+    }
+
+    if (resetButton) {
+        resetButton.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
     }
 }
 
@@ -4741,6 +5112,16 @@ function setLogFileUploadBusy(isBusy) {
     const button = document.querySelector("#log-file-upload-button");
     if (button) {
         button.textContent = isBusy ? "Adding files..." : "Select files";
+    }
+
+    syncManageControls();
+}
+
+function setManageResetBusy(isBusy) {
+    manageResetBusy = isBusy;
+    const button = document.querySelector("#manage-reset-button");
+    if (button) {
+        button.textContent = isBusy ? "Resetting..." : "Delete logs and reset state";
     }
 
     syncManageControls();
@@ -4809,6 +5190,57 @@ function renderLogFileUploadResult(result, success) {
         : (result.message ?? "No files were added.");
 }
 
+function renderManageResetResult(result, success) {
+    const container = document.querySelector("#manage-reset-status");
+    if (!result) {
+        container.textContent = "No reset has been run in this browser session yet.";
+        return;
+    }
+
+    const counts = [];
+    if (typeof result.deletedLogFileCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedLogFileCount} logs deleted`)}</span>`);
+    }
+    if (typeof result.deletedFightCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedFightCount} fights cleared`)}</span>`);
+    }
+    if (typeof result.deletedHtmlReportCount === "number" && result.deletedHtmlReportCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedHtmlReportCount} HTML removed`)}</span>`);
+    }
+    if (result.deletedDatabase) {
+        counts.push(`<span class="pill">database cleared</span>`);
+    }
+
+    container.innerHTML = `
+        <div class="batch-status-grid">
+            <div class="batch-status-header">
+                <div class="${success ? "status status-ok" : "status status-error"}">${escapeHtml(success ? "Reset complete" : "Needs attention")}</div>
+                <div class="batch-progress-row">${counts.join("")}</div>
+            </div>
+            <p>${escapeHtml(result.message ?? "No message returned.")}</p>
+        </div>
+    `;
+}
+
+function buildRebuildAllConfirmationMessage(directoryPath) {
+    return [
+        "Are you sure you want to process all logs and rebuild the catalog?",
+        `This will clear the current stored fight catalog and reparse every supported log under:\n${directoryPath}`,
+        "Uploaded logs in the configured directory will stay in place, but all stored fight artifacts will be regenerated."
+    ].join("\n\n");
+}
+
+function buildManageResetConfirmationMessage() {
+    const directoryPath = getConfiguredLogDirectoryPath().trim();
+    return [
+        "Are you sure you want to delete all logs and reset the stored state?",
+        directoryPath
+            ? `This deletes every .evtc, .zevtc, and .zip file under:\n${directoryPath}`
+            : "No configured log directory is set, so this will only clear the stored fight catalog.",
+        "Retained HTML reports, parser logs, and catalog entries will also be removed. This cannot be undone."
+    ].join("\n\n");
+}
+
 async function uploadLogFiles(fileList) {
     const files = Array.from(fileList ?? []).filter(Boolean);
     if (files.length === 0) {
@@ -4860,6 +5292,47 @@ async function uploadLogFiles(fileList) {
     }
 }
 
+async function handleManageReset() {
+    if (manageResetBusy) {
+        return;
+    }
+
+    if (!window.confirm(buildManageResetConfirmationMessage())) {
+        return;
+    }
+
+    setManageResetBusy(true);
+    document.querySelector("#manage-reset-status").textContent = "Deleting logs and clearing stored fight artifacts...";
+
+    try {
+        const response = await fetch("/api/manage/reset", {
+            method: "POST"
+        });
+        const result = await readApiPayload(response);
+        renderManageResetResult(result, response.ok);
+
+        if (response.ok) {
+            lastBatchResult = null;
+            stopBatchJobPolling();
+            setBatchButtonBusy(false);
+            document.querySelector("#batch-status").textContent = DEFAULT_BATCH_STATUS_MESSAGE;
+            renderBatchResults(null);
+            renderLogFileUploadResult(null);
+            await main();
+        }
+    } catch (error) {
+        renderManageResetResult({
+            message: error instanceof Error ? error.message : String(error),
+            deletedLogFileCount: 0,
+            deletedFightCount: 0,
+            deletedHtmlReportCount: 0,
+            deletedDatabase: false
+        }, false);
+    } finally {
+        setManageResetBusy(false);
+    }
+}
+
 async function handleBatchSubmit(event) {
     event.preventDefault();
 
@@ -4877,6 +5350,10 @@ async function handleBatchSubmit(event) {
     if (!directoryPath) {
         renderBatchStatus({ message: "Configure Workspace:LogDirectoryPath in appsettings.json before starting a batch parse." }, false);
         renderBatchResults(null);
+        return;
+    }
+
+    if (mode === "rebuild-all" && !window.confirm(buildRebuildAllConfirmationMessage(directoryPath))) {
         return;
     }
 
@@ -4916,6 +5393,20 @@ async function handleBatchSubmit(event) {
         renderBatchStatus(status, response.ok || response.status === 409);
         renderBatchResults(status);
 
+        if (response.status === 409 && String(status?.state ?? "").toLowerCase() === "blocked") {
+            if (currentDashboardSnapshot?.manageActivity) {
+                currentDashboardSnapshot.manageActivity = {
+                    ...currentDashboardSnapshot.manageActivity,
+                    parseRunning: false,
+                    uploadRunning: true,
+                    summary: status.message ?? currentDashboardSnapshot.manageActivity.summary,
+                    activeBatchJob: null
+                };
+                renderWorkspace(currentDashboardSnapshot);
+                scheduleManageActivityRefresh(currentDashboardSnapshot);
+            }
+        }
+
         if (status?.jobId && (response.ok || response.status === 409)) {
             startBatchJobPolling(status.jobId);
             return;
@@ -4954,6 +5445,21 @@ async function refreshAnalysis() {
     }
 }
 
+function updateAnalysisTrendControls(mode, smoothingWindow) {
+    analysisTrendMode = normalizeAnalysisTrendMode(mode);
+    analysisTrendSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(smoothingWindow);
+
+    localStorage.setItem(ANALYSIS_TREND_MODE_KEY, analysisTrendMode);
+    localStorage.setItem(ANALYSIS_TREND_SMOOTHING_KEY, String(analysisTrendSmoothingWindow));
+
+    document.querySelector("#analysis-trend-mode").value = analysisTrendMode;
+    document.querySelector("#analysis-trend-smoothing").value = String(analysisTrendSmoothingWindow);
+
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCharts(currentAnalysisSnapshot);
+    }
+}
+
 function hydrateBatchForm() {
     const storedMaxParallelism = localStorage.getItem(DIRECTORY_MAX_PARALLELISM_KEY);
     localStorage.removeItem("wvw-analyst.last-directory");
@@ -4967,6 +5473,14 @@ function hydrateBatchForm() {
             : 4);
 
     syncManageControls();
+}
+
+function hydrateAnalysisTrendControls() {
+    analysisTrendMode = normalizeAnalysisTrendMode(localStorage.getItem(ANALYSIS_TREND_MODE_KEY));
+    analysisTrendSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(localStorage.getItem(ANALYSIS_TREND_SMOOTHING_KEY));
+
+    document.querySelector("#analysis-trend-mode").value = analysisTrendMode;
+    document.querySelector("#analysis-trend-smoothing").value = String(analysisTrendSmoothingWindow);
 }
 
 function setBatchButtonBusy(isBusy) {
@@ -5012,6 +5526,7 @@ async function pollBatchJob(jobId) {
 
 function startBatchJobPolling(jobId) {
     stopBatchJobPolling(false);
+    stopManageActivityRefresh();
     activeBatchJobId = jobId;
     localStorage.setItem(ACTIVE_BATCH_JOB_KEY, jobId);
     setBatchButtonBusy(true);
@@ -5041,11 +5556,8 @@ async function main() {
         currentDashboardSnapshot = snapshot;
 
         renderWorkspace(snapshot);
-        renderWorkstreams(snapshot);
-        renderScorecard(snapshot);
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
-        renderRetention(snapshot);
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
 
         if (selectedFightId) {
@@ -5059,8 +5571,10 @@ async function main() {
             clearFightDossier();
         }
 
-        renderBatchResults(lastBatchResult);
+        syncSharedManageState(snapshot);
         resumeBatchJobPollingIfNeeded();
+        scheduleManageActivityRefresh(snapshot);
+        renderBatchResults(lastBatchResult);
 
         if (activeAppTab === "analysis") {
             await ensureAnalysisLoaded();
@@ -5079,8 +5593,11 @@ async function main() {
 }
 
 document.querySelector("#batch-form").addEventListener("submit", handleBatchSubmit);
+document.querySelector("#manage-reset-button").addEventListener("click", () => {
+    void handleManageReset();
+});
 document.querySelector("#log-file-upload-button").addEventListener("click", () => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
         return;
     }
 
@@ -5094,7 +5611,7 @@ document.querySelector("#log-file-dropzone").addEventListener("click", event => 
         return;
     }
 
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
         return;
     }
 
@@ -5106,7 +5623,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     }
 
     event.preventDefault();
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
         return;
     }
 
@@ -5115,7 +5632,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
 ["dragenter", "dragover"].forEach(eventName => {
     document.querySelector("#log-file-dropzone").addEventListener(eventName, event => {
         event.preventDefault();
-        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
             return;
         }
 
@@ -5129,7 +5646,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     });
 });
 document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
         return;
     }
 
@@ -5184,6 +5701,12 @@ document.querySelector("#analysis-player-lane-filter").addEventListener("change"
     if (currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
     }
+});
+document.querySelector("#analysis-trend-mode").addEventListener("change", event => {
+    updateAnalysisTrendControls(event.target.value, analysisTrendSmoothingWindow);
+});
+document.querySelector("#analysis-trend-smoothing").addEventListener("change", event => {
+    updateAnalysisTrendControls(analysisTrendMode, event.target.value);
 });
 document.querySelector("#analysis-comp-helper-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
@@ -5336,6 +5859,7 @@ document.querySelectorAll("[data-analysis-tab]").forEach(button => {
 });
 
 hydrateBatchForm();
+hydrateAnalysisTrendControls();
 applyCompHelperProfile("balanced");
 setActiveAppTab(resolveInitialAppTab(), { persist: false, loadAnalysis: false });
 main();

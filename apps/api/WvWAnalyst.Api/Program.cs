@@ -33,6 +33,7 @@ builder.Services.AddSingleton<FightCatalogService>();
 builder.Services.AddSingleton<ParserImportService>();
 builder.Services.AddSingleton<DirectoryImportJobService>();
 builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
+builder.Services.AddSingleton<WorkspaceResetService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 
@@ -73,8 +74,17 @@ app.MapGet("/api/fights/{fightId}", (string fightId, FightCatalogService catalog
     catalog.TryGetFightDetail(fightId, out var detail)
         ? Results.Ok(detail)
         : Results.NotFound());
-app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, AppPathService paths, ParserImportService service, CancellationToken cancellationToken) =>
+app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, AppPathService paths, ConfiguredLogDirectoryUploadService uploadService, ParserImportService service, CancellationToken cancellationToken) =>
 {
+    if (uploadService.HasActiveUpload())
+    {
+        return Results.Conflict(new
+        {
+            message = "A log upload is in progress. Wait for uploads to finish before starting a batch parse.",
+            activeUploadCount = uploadService.GetActiveUploadCount()
+        });
+    }
+
     var effectiveRequest = request with
     {
         DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
@@ -82,8 +92,31 @@ app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, 
     var result = await service.ImportDirectoryAsync(effectiveRequest, cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
-app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, AppPathService paths, DirectoryImportJobService service) =>
+app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, AppPathService paths, ConfiguredLogDirectoryUploadService uploadService, DirectoryImportJobService service) =>
 {
+    if (uploadService.HasActiveUpload())
+    {
+        return Results.Conflict(new DirectoryImportJobStatusDto(
+            JobId: string.Empty,
+            State: "blocked",
+            Message: "A log upload is in progress. Wait for uploads to finish before starting a batch parse.",
+            DirectoryPath: paths.ConfiguredLogDirectoryPath ?? string.Empty,
+            Mode: string.Equals(request.Mode, "rebuild-all", StringComparison.OrdinalIgnoreCase) ? "rebuild-all" : "new-only",
+            MaxParallelism: request.MaxParallelism is > 0 ? Math.Min(16, request.MaxParallelism.Value) : 4,
+            ResetCatalog: false,
+            DiscoveredCount: 0,
+            CompletedCount: 0,
+            ImportedCount: 0,
+            SkippedCount: 0,
+            ExcludedCount: 0,
+            FailedCount: 0,
+            CurrentFileName: null,
+            CurrentFilePath: null,
+            StartedAtUtc: null,
+            CompletedAtUtc: null,
+            Items: []));
+    }
+
     var effectiveRequest = request with
     {
         DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
@@ -99,6 +132,35 @@ app.MapPost("/api/imports/log-directory/files", async (HttpRequest request, Conf
 {
     var form = await request.ReadFormAsync(cancellationToken);
     var result = await service.SaveFilesAsync(form.Files.ToArray(), cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+}).DisableAntiforgery();
+app.MapPost("/api/manage/reset", (AppPathService paths, DirectoryImportJobService jobService, ConfiguredLogDirectoryUploadService uploadService, WorkspaceResetService resetService, CancellationToken cancellationToken) =>
+{
+    if (jobService.HasRunningJob())
+    {
+        return Results.Conflict(new WorkspaceResetResultDto(
+            Success: false,
+            Message: "Wait for the active batch parse to finish before resetting stored logs and fight artifacts.",
+            DirectoryPath: paths.ConfiguredLogDirectoryPath,
+            DeletedLogFileCount: 0,
+            DeletedFightCount: 0,
+            DeletedHtmlReportCount: 0,
+            DeletedDatabase: false));
+    }
+
+    if (uploadService.HasActiveUpload())
+    {
+        return Results.Conflict(new WorkspaceResetResultDto(
+            Success: false,
+            Message: "Wait for active uploads to finish before resetting stored logs and fight artifacts.",
+            DirectoryPath: paths.ConfiguredLogDirectoryPath,
+            DeletedLogFileCount: 0,
+            DeletedFightCount: 0,
+            DeletedHtmlReportCount: 0,
+            DeletedDatabase: false));
+    }
+
+    var result = resetService.Reset(cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
 app.MapGet("/api/imports/directory/jobs/{jobId}", (string jobId, DirectoryImportJobService service) =>

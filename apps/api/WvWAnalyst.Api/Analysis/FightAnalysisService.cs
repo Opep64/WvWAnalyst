@@ -297,10 +297,12 @@ public sealed class FightAnalysisService
             .Select(fight =>
             {
                 var pillars = BuildPillarMap(fight.FightIndex?.Execution?.Pillars);
+                var fightTimestamp = GetFightDateTimeOffset(fight);
                 return new FightAnalysisTrendPointDto(
                     FightId: fight.FightId,
                     FightName: fight.FightIndex?.FightName ?? fight.SourceFileName ?? fight.FightId,
                     FightDateLabel: FormatFightDateLabel(fight),
+                    FightDateUtc: fightTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
                     Commander: fight.FightIndex?.CommanderDisplayNames?.FirstOrDefault(),
                     OutcomeLabel: fight.FightIndex?.Outcome.DisplayLabel ?? "Unavailable",
                     OverallScore: fight.FightIndex?.Execution?.OverallScore,

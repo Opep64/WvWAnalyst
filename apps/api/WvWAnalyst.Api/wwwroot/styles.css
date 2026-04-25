@@ -552,6 +552,11 @@ h1 {
     transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
+.manage-danger-toolbar {
+    margin-top: 14px;
+    margin-bottom: 12px;
+}
+
 .log-dropzone:hover {
     transform: translateY(-1px);
     border-color: rgba(83, 183, 255, 0.4);
@@ -781,6 +786,22 @@ h1 {
 .action-link-button {
     font: inherit;
     cursor: pointer;
+}
+
+.danger-button {
+    border-color: rgba(255, 143, 143, 0.28);
+    background: rgba(255, 143, 143, 0.10);
+    color: var(--danger);
+}
+
+.danger-button:hover:not(:disabled) {
+    box-shadow: 0 12px 24px rgba(130, 38, 38, 0.16);
+}
+
+.danger-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    box-shadow: none;
 }
 
 .fight-actions {
@@ -1156,6 +1177,79 @@ h1 {
 
 .analysis-card {
     min-height: 150px;
+}
+
+.analysis-trend-toolbar {
+    margin-top: 12px;
+    margin-bottom: 12px;
+}
+
+.analysis-trend-summary {
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--line-strong);
+    background: rgba(12, 19, 27, 0.92);
+    color: var(--muted);
+    line-height: 1.35;
+}
+
+.analysis-trend-delta-grid {
+    margin-bottom: 12px;
+}
+
+.analysis-delta-card {
+    min-height: 0;
+}
+
+.analysis-delta-direction {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 5px 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+    background: rgba(159, 176, 195, 0.08);
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.analysis-delta-direction.is-up {
+    color: var(--success);
+    border-color: rgba(118, 215, 165, 0.28);
+    background: rgba(118, 215, 165, 0.10);
+}
+
+.analysis-delta-direction.is-down {
+    color: var(--danger);
+    border-color: rgba(255, 143, 143, 0.28);
+    background: rgba(255, 143, 143, 0.10);
+}
+
+.analysis-delta-direction.is-flat {
+    color: var(--warning);
+    border-color: rgba(255, 207, 115, 0.28);
+    background: rgba(255, 207, 115, 0.10);
+}
+
+.analysis-delta-metric {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 2px 0 8px;
+}
+
+.analysis-delta-pair {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 10px;
+}
+
+.analysis-delta-pair span {
+    color: var(--muted);
+    font-size: 0.84rem;
 }
 
 .analysis-card--wide {

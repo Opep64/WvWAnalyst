@@ -76,6 +76,24 @@ public sealed class DirectoryImportJobService
         return false;
     }
 
+    public bool HasRunningJob()
+    {
+        return _jobs.Values.Any(job => string.Equals(job.State, "running", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool TryGetRunningJob(out DirectoryImportJobStatusDto status)
+    {
+        var runningJob = _jobs.Values.FirstOrDefault(job => string.Equals(job.State, "running", StringComparison.OrdinalIgnoreCase));
+        if (runningJob is not null)
+        {
+            status = runningJob.ToDto();
+            return true;
+        }
+
+        status = default!;
+        return false;
+    }
+
     private static string NormalizeMode(string? mode)
     {
         return string.Equals(mode, "rebuild-all", StringComparison.OrdinalIgnoreCase)

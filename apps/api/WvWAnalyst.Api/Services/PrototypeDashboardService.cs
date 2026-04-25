@@ -12,17 +12,23 @@ public sealed class PrototypeDashboardService
     private readonly FightTeamScorecardBlueprintFactory _scorecardFactory;
     private readonly WorkspaceInventoryProbe _workspaceProbe;
     private readonly FightCatalogService _fightCatalog;
+    private readonly DirectoryImportJobService _directoryImportJobs;
+    private readonly ConfiguredLogDirectoryUploadService _uploadService;
 
     public PrototypeDashboardService(
         AppPathService paths,
         FightTeamScorecardBlueprintFactory scorecardFactory,
         WorkspaceInventoryProbe workspaceProbe,
-        FightCatalogService fightCatalog)
+        FightCatalogService fightCatalog,
+        DirectoryImportJobService directoryImportJobs,
+        ConfiguredLogDirectoryUploadService uploadService)
     {
         _paths = paths;
         _scorecardFactory = scorecardFactory;
         _workspaceProbe = workspaceProbe;
         _fightCatalog = fightCatalog;
+        _directoryImportJobs = directoryImportJobs;
+        _uploadService = uploadService;
     }
 
     public DashboardSnapshotDto BuildSnapshot()
@@ -34,6 +40,8 @@ public sealed class PrototypeDashboardService
         var fightsPath = _paths.FightsPath;
         var cachePath = _paths.CachePath;
         var fightBrowserSnapshot = _fightCatalog.GetFightBrowserSnapshot();
+        var hasRunningJob = _directoryImportJobs.TryGetRunningJob(out var activeBatchJob);
+        var activeUploadCount = _uploadService.GetActiveUploadCount();
 
         var fightDirectories = new DirectoryInfo(fightsPath)
             .EnumerateDirectories()
@@ -86,6 +94,7 @@ public sealed class PrototypeDashboardService
             ],
             RecentParses: _fightCatalog.GetRecentParseSummaries(10),
             FightBrowser: fightBrowserSnapshot,
+            ManageActivity: BuildManageActivity(hasRunningJob ? activeBatchJob : null, activeUploadCount),
             RetentionPolicy: new ArtifactRetentionPolicyDto(
                 Summary: "Keep the compact index data and retained HTML review artifact, treat parser-generated analysis payloads as ingest-only, and avoid retaining extra regenerable outputs.",
                 KeepAlways:
@@ -106,5 +115,27 @@ public sealed class PrototypeDashboardService
     }
 
     public TeamFightScorecardBlueprintDto GetTeamFightScorecardBlueprint() => _scorecardFactory.CreateV1();
+
+    private static ManageActivityStatusDto BuildManageActivity(DirectoryImportJobStatusDto? activeBatchJob, int activeUploadCount)
+    {
+        var parseRunning = activeBatchJob is not null && string.Equals(activeBatchJob.State, "running", StringComparison.OrdinalIgnoreCase);
+        var uploadRunning = activeUploadCount > 0;
+        var summary = parseRunning
+            ? activeBatchJob!.ResetCatalog
+                ? "A full catalog rebuild is in progress. Starting another parse is disabled until it finishes."
+                : "A batch parse is in progress. Starting another parse is disabled until it finishes."
+            : uploadRunning
+                ? activeUploadCount == 1
+                    ? "A log upload is in progress. Starting a batch parse is temporarily disabled."
+                    : $"{activeUploadCount} log uploads are in progress. Starting a batch parse is temporarily disabled."
+                : "No shared Manage operation is active.";
+
+        return new ManageActivityStatusDto(
+            ParseRunning: parseRunning,
+            UploadRunning: uploadRunning,
+            ActiveUploadCount: activeUploadCount,
+            Summary: summary,
+            ActiveBatchJob: parseRunning ? activeBatchJob : null);
+    }
 
 }

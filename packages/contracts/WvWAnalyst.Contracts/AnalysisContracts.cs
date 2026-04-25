@@ -93,6 +93,7 @@ public sealed record FightAnalysisTrendPointDto(
     string FightId,
     string FightName,
     string FightDateLabel,
+    string? FightDateUtc,
     string? Commander,
     string OutcomeLabel,
     int? OverallScore,
