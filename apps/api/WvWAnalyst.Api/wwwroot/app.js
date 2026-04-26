@@ -917,11 +917,31 @@ function getSelectedFightId() {
 }
 
 function getConfiguredLogDirectoryPath() {
-    return currentDashboardSnapshot?.workspace?.logDirectoryPath ?? "";
+    return currentDashboardSnapshot?.workspace?.pendingDirectoryPath ?? "";
 }
 
 function isConfiguredLogDirectoryAvailable() {
-    return Boolean(currentDashboardSnapshot?.workspace?.logDirectoryConfigured && getConfiguredLogDirectoryPath());
+    return Boolean(currentDashboardSnapshot?.workspace?.pendingDirectoryConfigured && getConfiguredLogDirectoryPath());
+}
+
+function getArchiveLogDirectoryPath() {
+    return currentDashboardSnapshot?.workspace?.archiveLogDirectoryPath ?? "";
+}
+
+function isArchiveLogDirectoryAvailable() {
+    return Boolean(currentDashboardSnapshot?.workspace?.archiveLogDirectoryConfigured && getArchiveLogDirectoryPath());
+}
+
+function getBatchDirectoryPath(mode) {
+    return mode === "rebuild-all"
+        ? getArchiveLogDirectoryPath()
+        : getConfiguredLogDirectoryPath();
+}
+
+function isBatchDirectoryAvailable(mode) {
+    return mode === "rebuild-all"
+        ? isArchiveLogDirectoryAvailable()
+        : isConfiguredLogDirectoryAvailable();
 }
 
 function normalizeAppTab(value) {
@@ -1810,13 +1830,15 @@ function renderPatchMetadataStatus(message, success = true) {
 function renderWorkspace(snapshot) {
     document.querySelector("#mode-pill").textContent = snapshot.application.mode;
     renderPatchMetadata(snapshot.patchMetadata);
-    const configuredLogDirectory = snapshot.workspace.logDirectoryPath ?? "Not configured";
-    document.querySelector("#configured-log-directory-input").value = configuredLogDirectory;
+    const pendingDirectory = snapshot.workspace.pendingDirectoryPath ?? "Not configured";
+    const archiveDirectory = snapshot.workspace.archiveLogDirectoryPath ?? "Not configured";
+    document.querySelector("#configured-log-directory-input").value = pendingDirectory;
+    document.querySelector("#archive-log-directory-input").value = archiveDirectory;
     const manageSummary = snapshot.manageActivity && (snapshot.manageActivity.parseRunning || snapshot.manageActivity.uploadRunning)
         ? ` ${escapeHtml(snapshot.manageActivity.summary)}`
         : "";
     document.querySelector("#batch-note").innerHTML = snapshot.workspace.parserCliDetected
-        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>. Configured log directory: <code>${escapeHtml(configuredLogDirectory)}</code>.${manageSummary}`
+        ? `Ready to call the EI CLI at <code>${escapeHtml(snapshot.workspace.parserCliPath)}</code>. Pending queue: <code>${escapeHtml(pendingDirectory)}</code>. Archived logs: <code>${escapeHtml(archiveDirectory)}</code>.${manageSummary}`
         : `${escapeHtml(snapshot.workspace.notes)}${manageSummary}`;
 
     syncManageControls();
@@ -5459,7 +5481,9 @@ function syncSharedManageState(snapshot) {
 }
 
 function syncManageControls() {
-    const hasConfiguredDirectory = isConfiguredLogDirectoryAvailable();
+    const selectedMode = document.querySelector("#directory-mode")?.value || "new-only";
+    const hasConfiguredDirectory = isBatchDirectoryAvailable(selectedMode);
+    const hasPendingDirectory = isConfiguredLogDirectoryAvailable();
     const parseButton = document.querySelector("#directory-button");
     const uploadInput = document.querySelector("#log-file-upload-input");
     const uploadButton = document.querySelector("#log-file-upload-button");
@@ -5476,15 +5500,15 @@ function syncManageControls() {
     }
 
     if (uploadInput) {
-        uploadInput.disabled = disableManageActions || !hasConfiguredDirectory;
+        uploadInput.disabled = disableManageActions || !hasPendingDirectory;
     }
 
     if (uploadButton) {
-        uploadButton.disabled = disableManageActions || !hasConfiguredDirectory;
+        uploadButton.disabled = disableManageActions || !hasPendingDirectory;
     }
 
     if (dropzone) {
-        const isDisabled = disableManageActions || !hasConfiguredDirectory;
+        const isDisabled = disableManageActions || !hasPendingDirectory;
         dropzone.classList.toggle("is-disabled", isDisabled);
         dropzone.setAttribute("aria-disabled", isDisabled ? "true" : "false");
     }
@@ -5522,7 +5546,7 @@ function renderLogFileUploadResult(result, success) {
     const title = success ? "Files added" : "Needs attention";
 
     if (!result) {
-        container.textContent = "No files have been added to the configured log directory in this browser session yet.";
+        container.textContent = "No files have been added to the pending upload directory in this browser session yet.";
         summary.textContent = "No files added in this browser session yet.";
         return;
     }
@@ -5576,7 +5600,7 @@ function renderLogFileUploadResult(result, success) {
     `;
 
     summary.textContent = success
-        ? `${formatNumber(result.savedCount ?? 0)} file(s) added to ${result.directoryPath ?? "the configured directory"}.`
+        ? `${formatNumber(result.savedCount ?? 0)} file(s) added to ${result.directoryPath ?? "the pending upload directory"}.`
         : (result.message ?? "No files were added.");
 }
 
@@ -5643,7 +5667,7 @@ function mergeLogFileUploadResult(aggregate, batchResult) {
 }
 
 function buildLogFileUploadCompletionMessage(result, totalCount, stoppedMessage = null) {
-    const directoryPath = result.directoryPath ?? getConfiguredLogDirectoryPath() ?? "the configured directory";
+    const directoryPath = result.directoryPath ?? getConfiguredLogDirectoryPath() ?? "the pending upload directory";
     const messageParts = [];
 
     if (stoppedMessage) {
@@ -5698,19 +5722,20 @@ function renderManageResetResult(result, success) {
 
 function buildRebuildAllConfirmationMessage(directoryPath) {
     return [
-        "Are you sure you want to process all logs and rebuild the catalog?",
+        "Are you sure you want to rebuild the catalog from the archived logs?",
         `This will clear the current stored fight catalog and reparse every supported log under:\n${directoryPath}`,
-        "Uploaded logs in the configured directory will stay in place, but all stored fight artifacts will be regenerated."
+        "Pending uploads are not part of this archive walk. All stored fight artifacts will be regenerated from the archived log store."
     ].join("\n\n");
 }
 
 function buildManageResetConfirmationMessage() {
-    const directoryPath = getConfiguredLogDirectoryPath().trim();
+    const pendingDirectoryPath = getConfiguredLogDirectoryPath().trim();
+    const archiveDirectoryPath = getArchiveLogDirectoryPath().trim();
     return [
         "Are you sure you want to delete all logs and reset the stored state?",
-        directoryPath
-            ? `This deletes every .evtc, .zevtc, and .zip file under:\n${directoryPath}`
-            : "No configured log directory is set, so this will only clear the stored fight catalog.",
+        pendingDirectoryPath || archiveDirectoryPath
+            ? `This deletes every .evtc, .zevtc, and .zip file under:\n${pendingDirectoryPath || "(pending queue not configured)"}\n\nand\n\n${archiveDirectoryPath || "(archive log store not configured)"}`
+            : "No configured pending or archive log directory is set, so this will only clear the stored fight catalog.",
         "Retained HTML reports, parser logs, and catalog entries will also be removed. This cannot be undone."
     ].join("\n\n");
 }
@@ -5730,7 +5755,7 @@ async function uploadLogFiles(fileList) {
 
     if (!isConfiguredLogDirectoryAvailable()) {
         renderLogFileUploadResult({
-            message: "Workspace:LogDirectoryPath is not configured. Update appsettings.json before adding files.",
+            message: "Workspace:PendingDirectoryPath is not configured. Update appsettings.json before adding files.",
             uploadedCount: files.length,
             savedCount: 0,
             skippedCount: files.length,
@@ -5904,9 +5929,8 @@ async function handleBatchSubmit(event) {
 
     const modeInput = document.querySelector("#directory-mode");
     const maxParallelismInput = document.querySelector("#directory-max-parallelism");
-
-    const directoryPath = getConfiguredLogDirectoryPath().trim();
     const mode = modeInput.value;
+    const directoryPath = getBatchDirectoryPath(mode).trim();
     const rawParallelism = Number.parseInt(maxParallelismInput.value, 10);
     const maxParallelism = Number.isFinite(rawParallelism)
         ? Math.min(16, Math.max(1, rawParallelism))
@@ -5914,7 +5938,13 @@ async function handleBatchSubmit(event) {
     maxParallelismInput.value = String(maxParallelism);
 
     if (!directoryPath) {
-        renderBatchStatus({ message: "Configure Workspace:LogDirectoryPath in appsettings.json before starting a batch parse." }, false);
+        const requiredSetting = mode === "rebuild-all"
+            ? "Workspace:ArchiveLogDirectoryPath"
+            : "Workspace:PendingDirectoryPath";
+        const requiredLabel = mode === "rebuild-all"
+            ? "a rebuild-all parse"
+            : "a new-only parse";
+        renderBatchStatus({ message: `Configure ${requiredSetting} in appsettings.json before starting ${requiredLabel}.` }, false);
         renderBatchResults(null);
         return;
     }
@@ -5929,7 +5959,9 @@ async function handleBatchSubmit(event) {
     renderBatchStatus(
         {
             state: "running",
-            message: "Scanning the directory, hashing files, and queuing parser work. Large batches can take a while.",
+            message: mode === "rebuild-all"
+                ? "Scanning the archived log store, hashing files, and queuing parser work. Full rebuilds can take a while."
+                : "Scanning the pending queue, hashing files, and queuing parser work. New-only batches finish after the queue is drained.",
             maxParallelism,
             discoveredCount: 0,
             completedCount: 0,
@@ -6159,6 +6191,9 @@ async function main() {
 }
 
 document.querySelector("#batch-form").addEventListener("submit", handleBatchSubmit);
+document.querySelector("#directory-mode").addEventListener("change", () => {
+    syncManageControls();
+});
 document.querySelector("#manage-reset-button").addEventListener("click", () => {
     void handleManageReset();
 });

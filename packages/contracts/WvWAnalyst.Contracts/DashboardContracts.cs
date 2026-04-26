@@ -26,9 +26,12 @@ public sealed record WorkspaceStatusDto(
     bool ParserCliDetected,
     string CombinerPath,
     bool CombinerDetected,
-    string? LogDirectoryPath,
-    bool LogDirectoryConfigured,
-    bool LogDirectoryDetected,
+    string? PendingDirectoryPath,
+    bool PendingDirectoryConfigured,
+    bool PendingDirectoryDetected,
+    string? ArchiveLogDirectoryPath,
+    bool ArchiveLogDirectoryConfigured,
+    bool ArchiveLogDirectoryDetected,
     string Notes);
 
 public sealed record StorageStatusDto(
@@ -74,6 +77,7 @@ public sealed record FightImportResultDto(
     string? ReasonCode,
     string Message,
     FightArtifactSummaryDto? Fight,
+    string? FinalSourceFilePath,
     string? ParserExecutablePath,
     string? ParserStatus,
     long? ParserElapsedMilliseconds,

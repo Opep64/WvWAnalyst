@@ -28,12 +28,14 @@ public sealed class WorkspaceResetService
 
     public WorkspaceResetResultDto Reset(CancellationToken cancellationToken)
     {
-        var logDirectoryPath = _paths.ConfiguredLogDirectoryPath;
+        var pendingDirectoryPath = _paths.ConfiguredPendingDirectoryPath;
+        var archiveLogDirectoryPath = _paths.ConfiguredArchiveLogDirectoryPath;
         try
         {
             _paths.EnsureStorageDirectories();
 
-            var deletedLogFileCount = DeleteConfiguredLogFiles(logDirectoryPath, cancellationToken);
+            var deletedLogFileCount = DeleteConfiguredLogFiles(pendingDirectoryPath, cancellationToken) +
+                DeleteConfiguredLogFiles(archiveLogDirectoryPath, cancellationToken);
             var deletedFightCount = CountFightDirectories();
             var deletedHtmlReportCount = CountStoredHtmlReports();
             var deletedDatabase = File.Exists(_paths.DatabasePath);
@@ -41,7 +43,8 @@ public sealed class WorkspaceResetService
             _fightCatalog.ResetCatalog();
 
             var message = BuildResetMessage(
-                logDirectoryPath,
+                pendingDirectoryPath,
+                archiveLogDirectoryPath,
                 deletedLogFileCount,
                 deletedFightCount,
                 deletedHtmlReportCount,
@@ -50,7 +53,7 @@ public sealed class WorkspaceResetService
             return new WorkspaceResetResultDto(
                 Success: true,
                 Message: message,
-                DirectoryPath: logDirectoryPath,
+                DirectoryPath: archiveLogDirectoryPath ?? pendingDirectoryPath,
                 DeletedLogFileCount: deletedLogFileCount,
                 DeletedFightCount: deletedFightCount,
                 DeletedHtmlReportCount: deletedHtmlReportCount,
@@ -66,7 +69,7 @@ public sealed class WorkspaceResetService
             return new WorkspaceResetResultDto(
                 Success: false,
                 Message: exception.Message,
-                DirectoryPath: logDirectoryPath,
+                DirectoryPath: archiveLogDirectoryPath ?? pendingDirectoryPath,
                 DeletedLogFileCount: 0,
                 DeletedFightCount: 0,
                 DeletedHtmlReportCount: 0,
@@ -113,20 +116,29 @@ public sealed class WorkspaceResetService
     }
 
     private static string BuildResetMessage(
-        string? directoryPath,
+        string? pendingDirectoryPath,
+        string? archiveLogDirectoryPath,
         int deletedLogFileCount,
         int deletedFightCount,
         int deletedHtmlReportCount,
         bool deletedDatabase)
     {
         var summaryParts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(directoryPath))
+        if (!string.IsNullOrWhiteSpace(pendingDirectoryPath) && !string.IsNullOrWhiteSpace(archiveLogDirectoryPath))
         {
-            summaryParts.Add($"Deleted {deletedLogFileCount} supported log file(s) from {directoryPath}.");
+            summaryParts.Add($"Deleted {deletedLogFileCount} supported log file(s) from the pending queue at {pendingDirectoryPath} and the archived log store at {archiveLogDirectoryPath}.");
+        }
+        else if (!string.IsNullOrWhiteSpace(pendingDirectoryPath))
+        {
+            summaryParts.Add($"Deleted {deletedLogFileCount} supported log file(s) from {pendingDirectoryPath}.");
+        }
+        else if (!string.IsNullOrWhiteSpace(archiveLogDirectoryPath))
+        {
+            summaryParts.Add($"Deleted {deletedLogFileCount} supported log file(s) from {archiveLogDirectoryPath}.");
         }
         else
         {
-            summaryParts.Add("No configured log directory was set, so no uploaded log files were removed.");
+            summaryParts.Add("No configured pending or archive log directory was set, so no uploaded log files were removed.");
         }
 
         summaryParts.Add($"Cleared {deletedFightCount} stored fight folder(s).");

@@ -151,7 +151,7 @@ app.MapPost("/api/imports/directory", async (DirectoryImportRequestDto request, 
 
     var effectiveRequest = request with
     {
-        DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
+        DirectoryPath = ResolveImportDirectoryPath(request.Mode, paths)
     };
     var result = await service.ImportDirectoryAsync(effectiveRequest, cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
@@ -164,7 +164,7 @@ app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, A
             JobId: string.Empty,
             State: "blocked",
             Message: "A log upload is in progress. Wait for uploads to finish before starting a batch parse.",
-            DirectoryPath: paths.ConfiguredLogDirectoryPath ?? string.Empty,
+            DirectoryPath: ResolveImportDirectoryPath(request.Mode, paths),
             Mode: string.Equals(request.Mode, "rebuild-all", StringComparison.OrdinalIgnoreCase) ? "rebuild-all" : "new-only",
             MaxParallelism: request.MaxParallelism is > 0 ? Math.Min(16, request.MaxParallelism.Value) : 4,
             ResetCatalog: false,
@@ -183,7 +183,7 @@ app.MapPost("/api/imports/directory/jobs", (DirectoryImportRequestDto request, A
 
     var effectiveRequest = request with
     {
-        DirectoryPath = paths.ConfiguredLogDirectoryPath ?? string.Empty
+        DirectoryPath = ResolveImportDirectoryPath(request.Mode, paths)
     };
     if (service.TryStartJob(effectiveRequest, out var status))
     {
@@ -204,8 +204,8 @@ app.MapPost("/api/manage/reset", (AppPathService paths, DirectoryImportJobServic
     {
         return Results.Conflict(new WorkspaceResetResultDto(
             Success: false,
-            Message: "Wait for the active batch parse to finish before resetting stored logs and fight artifacts.",
-            DirectoryPath: paths.ConfiguredLogDirectoryPath,
+            Message: "Wait for the active batch parse to finish before resetting pending uploads, archived logs, and fight artifacts.",
+            DirectoryPath: paths.ConfiguredArchiveLogDirectoryPath ?? paths.ConfiguredPendingDirectoryPath,
             DeletedLogFileCount: 0,
             DeletedFightCount: 0,
             DeletedHtmlReportCount: 0,
@@ -216,8 +216,8 @@ app.MapPost("/api/manage/reset", (AppPathService paths, DirectoryImportJobServic
     {
         return Results.Conflict(new WorkspaceResetResultDto(
             Success: false,
-            Message: "Wait for active uploads to finish before resetting stored logs and fight artifacts.",
-            DirectoryPath: paths.ConfiguredLogDirectoryPath,
+            Message: "Wait for active uploads to finish before resetting pending uploads, archived logs, and fight artifacts.",
+            DirectoryPath: paths.ConfiguredArchiveLogDirectoryPath ?? paths.ConfiguredPendingDirectoryPath,
             DeletedLogFileCount: 0,
             DeletedFightCount: 0,
             DeletedHtmlReportCount: 0,
@@ -283,4 +283,11 @@ static void ApplyImmutableAssetHeaders(HttpResponse response)
     response.Headers["Cache-Control"] = ImmutableAssetCacheControl;
     response.Headers.Remove("Pragma");
     response.Headers.Remove("Expires");
+}
+
+static string ResolveImportDirectoryPath(string? mode, AppPathService paths)
+{
+    return string.Equals(mode, "rebuild-all", StringComparison.OrdinalIgnoreCase)
+        ? paths.ConfiguredArchiveLogDirectoryPath ?? string.Empty
+        : paths.ConfiguredPendingDirectoryPath ?? string.Empty;
 }

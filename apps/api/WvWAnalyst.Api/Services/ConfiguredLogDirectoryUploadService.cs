@@ -26,12 +26,12 @@ public sealed class ConfiguredLogDirectoryUploadService
 
     public async Task<ConfiguredLogDirectoryUploadResultDto> SaveFilesAsync(IReadOnlyList<IFormFile> files, CancellationToken cancellationToken)
     {
-        var directoryPath = _paths.ConfiguredLogDirectoryPath;
+        var directoryPath = _paths.ConfiguredPendingDirectoryPath;
         if (string.IsNullOrWhiteSpace(directoryPath))
         {
             return new ConfiguredLogDirectoryUploadResultDto(
                 Success: false,
-                Message: "Workspace:LogDirectoryPath is not configured.",
+                Message: "Workspace:PendingDirectoryPath is not configured.",
                 DirectoryPath: null,
                 UploadedCount: 0,
                 SavedCount: 0,
@@ -98,7 +98,7 @@ public sealed class ConfiguredLogDirectoryUploadService
                     items.Add(new ConfiguredLogDirectoryUploadItemDto(
                         FileName: fileName,
                         Action: "skipped",
-                        Message: "Skipped because a file with the same name already exists in the configured log directory.",
+                        Message: "Skipped because a file with the same name already exists in the pending upload directory.",
                         SavedAs: null));
                     continue;
                 }
@@ -111,7 +111,7 @@ public sealed class ConfiguredLogDirectoryUploadService
                     items.Add(new ConfiguredLogDirectoryUploadItemDto(
                         FileName: fileName,
                         Action: "saved",
-                        Message: "Saved to the configured log directory.",
+                        Message: "Saved to the pending upload directory.",
                         SavedAs: Path.GetFileName(destinationPath)));
                 }
                 catch (Exception exception)

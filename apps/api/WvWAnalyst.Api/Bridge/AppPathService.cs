@@ -31,10 +31,15 @@ public sealed class AppPathService
 
     public string CombinerWorkspacePath => ResolveConfiguredPath(_workspaceOptions.CombinerPath);
 
-    public string? ConfiguredLogDirectoryPath =>
-        string.IsNullOrWhiteSpace(_workspaceOptions.LogDirectoryPath)
+    public string? ConfiguredPendingDirectoryPath =>
+        string.IsNullOrWhiteSpace(_workspaceOptions.PendingDirectoryPath)
             ? null
-            : ResolveConfiguredPath(_workspaceOptions.LogDirectoryPath);
+            : ResolveConfiguredPath(_workspaceOptions.PendingDirectoryPath);
+
+    public string? ConfiguredArchiveLogDirectoryPath =>
+        string.IsNullOrWhiteSpace(_workspaceOptions.ArchiveLogDirectoryPath)
+            ? null
+            : ResolveConfiguredPath(_workspaceOptions.ArchiveLogDirectoryPath);
 
     public string? ConfiguredParserCliPath =>
         string.IsNullOrWhiteSpace(_workspaceOptions.ParserCliPath)
@@ -57,9 +62,14 @@ public sealed class AppPathService
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         Directory.CreateDirectory(FightsPath);
         Directory.CreateDirectory(CachePath);
-        if (ConfiguredLogDirectoryPath is { } configuredLogDirectoryPath)
+        if (ConfiguredPendingDirectoryPath is { } configuredPendingDirectoryPath)
         {
-            Directory.CreateDirectory(configuredLogDirectoryPath);
+            Directory.CreateDirectory(configuredPendingDirectoryPath);
+        }
+
+        if (ConfiguredArchiveLogDirectoryPath is { } configuredArchiveLogDirectoryPath)
+        {
+            Directory.CreateDirectory(configuredArchiveLogDirectoryPath);
         }
     }
 }

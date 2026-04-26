@@ -62,7 +62,7 @@ public sealed class PrototypeDashboardService
                 Capabilities:
                 [
                     "Prototype dashboard shell",
-                    "Directory-driven parser orchestration",
+                    "Incoming-queue and archive-driven parser orchestration",
                     "Process-new and rebuild-all batch modes",
                     "Manifest-backed fight indexing",
                     "analysis.json consumption with compact persisted summaries",
@@ -84,7 +84,7 @@ public sealed class PrototypeDashboardService
                 new WorkstreamDto(
                     Name: "Batch ingest",
                     Status: "active",
-                    Summary: "The prototype now scans log directories, hashes files, skips already-successful imports in new-only mode, and can rebuild the full local catalog from scratch."),
+                    Summary: "The prototype now uploads into a pending queue, archives handled logs after new-only parses, and can rebuild the full local catalog from the archived log store."),
                 new WorkstreamDto(
                     Name: "Fight browser",
                     Status: "active",

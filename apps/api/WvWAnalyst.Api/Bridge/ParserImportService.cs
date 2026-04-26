@@ -33,6 +33,7 @@ public sealed class ParserImportService
     private readonly EliteInsightsFightIndexer _fightIndexer;
     private readonly ILogger<ParserImportService> _logger;
     private readonly SemaphoreSlim _catalogCommitGate = new(1, 1);
+    private readonly SemaphoreSlim _archiveMoveGate = new(1, 1);
 
     public ParserImportService(
         AppPathService paths,
@@ -128,6 +129,7 @@ public sealed class ParserImportService
                 Items: []);
         }
 
+        var archiveHandledLogs = ShouldArchiveHandledLogs(mode, fullDirectoryPath);
         var resetCatalog = string.Equals(mode, "rebuild-all", StringComparison.Ordinal);
         if (resetCatalog)
         {
@@ -196,6 +198,11 @@ public sealed class ParserImportService
                 DirectoryImportItemDto item;
                 if (!reservedHashes.TryAdd(sourceHash, 0))
                 {
+                    if (archiveHandledLogs)
+                    {
+                        await DiscardPendingDuplicateAsync(filePath);
+                    }
+
                     Interlocked.Increment(ref skippedCount);
                     item = new DirectoryImportItemDto(
                         SourceFileName: sourceFileName,
@@ -211,13 +218,13 @@ public sealed class ParserImportService
                 }
                 else
                 {
-                    var result = await ImportLogFileAsync(filePath, sourceHash, parserProbe.ParserCliPath, parallelCancellationToken);
+                    var result = await ImportLogFileAsync(filePath, sourceHash, parserProbe.ParserCliPath, archiveHandledLogs, parallelCancellationToken);
                     if (string.Equals(result.Action, "imported", StringComparison.OrdinalIgnoreCase))
                     {
                         Interlocked.Increment(ref importedCount);
                         item = new DirectoryImportItemDto(
                             SourceFileName: sourceFileName,
-                            SourceFilePath: filePath,
+                            SourceFilePath: result.FinalSourceFilePath ?? result.Fight?.SourceFilePath ?? filePath,
                             Action: "imported",
                             ReasonCode: null,
                             Message: result.Message,
@@ -230,7 +237,7 @@ public sealed class ParserImportService
                         Interlocked.Increment(ref excludedCount);
                         item = new DirectoryImportItemDto(
                             SourceFileName: sourceFileName,
-                            SourceFilePath: filePath,
+                            SourceFilePath: result.FinalSourceFilePath ?? filePath,
                             Action: "excluded",
                             ReasonCode: result.ReasonCode,
                             Message: result.Message,
@@ -243,7 +250,7 @@ public sealed class ParserImportService
                         Interlocked.Increment(ref failedCount);
                         item = new DirectoryImportItemDto(
                             SourceFileName: sourceFileName,
-                            SourceFilePath: filePath,
+                            SourceFilePath: result.FinalSourceFilePath ?? result.Fight?.SourceFilePath ?? filePath,
                             Action: "failed",
                             ReasonCode: null,
                             Message: result.Message,
@@ -290,6 +297,7 @@ public sealed class ParserImportService
         string logFilePath,
         string sourceFileSha256,
         string parserExecutablePath,
+        bool archiveHandledLog,
         CancellationToken cancellationToken)
     {
         var sourceFileName = Path.GetFileName(logFilePath);
@@ -302,12 +310,14 @@ public sealed class ParserImportService
                 ReasonCode: null,
                 Message: $"File not found: {logFilePath}",
                 Fight: null,
+                FinalSourceFilePath: logFilePath,
                 ParserExecutablePath: parserExecutablePath,
                 ParserStatus: "Input file missing.",
                 ParserElapsedMilliseconds: null,
                 GeneratedFiles: [],
                 OutputExcerpt: []);
         }
+        var sourceFileBytes = sourceFileInfo.Length;
 
         var operationId = $"{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}";
         var importCacheDirectoryPath = Path.Combine(_paths.CachePath, "imports", operationId);
@@ -362,12 +372,17 @@ public sealed class ParserImportService
 
                 if (exclusionDecision is not null)
                 {
+                    var excludedSourceFilePath = archiveHandledLog
+                        ? await FinalizePendingLogFileAsync(logFilePath, sourceFileSha256, cancellationToken)
+                        : logFilePath;
+
                     return new FightImportResultDto(
                         Success: false,
                         Action: "excluded",
                         ReasonCode: exclusionDecision.ReasonCode,
                         Message: $"Excluded {sourceFileName} because {exclusionDecision.Detail}",
                         Fight: null,
+                        FinalSourceFilePath: excludedSourceFilePath,
                         ParserExecutablePath: parserExecutablePath,
                         ParserStatus: parserStatus,
                         ParserElapsedMilliseconds: parserRun.ConsoleResult?.Elapsed ?? parserRun.DurationMilliseconds,
@@ -377,6 +392,10 @@ public sealed class ParserImportService
 
                 if (!parseSucceeded && existingManifest is not null)
                 {
+                    var retainedSourceFilePath = archiveHandledLog
+                        ? await FinalizePendingLogFileAsync(logFilePath, sourceFileSha256, cancellationToken)
+                        : logFilePath;
+
                     _logger.LogWarning(
                         "Reparse failed for {SourceFileName}; keeping existing artifacts for fight {FightId}",
                         sourceFileName,
@@ -390,6 +409,7 @@ public sealed class ParserImportService
                         ReasonCode: null,
                         Message: $"Reparse failed for {sourceFileName}. Kept the existing stored artifacts for fight {existingManifest.FightId}.",
                         Fight: existingSummary,
+                        FinalSourceFilePath: retainedSourceFilePath,
                         ParserExecutablePath: parserExecutablePath,
                         ParserStatus: parserStatus,
                         ParserElapsedMilliseconds: parserRun.ConsoleResult?.Elapsed ?? parserRun.DurationMilliseconds,
@@ -407,6 +427,9 @@ public sealed class ParserImportService
                     File.Delete(stagedParserConsoleLogPath);
                 }
 
+                var finalSourceFilePath = archiveHandledLog
+                    ? await FinalizePendingLogFileAsync(logFilePath, sourceFileSha256, cancellationToken)
+                    : logFilePath;
                 var fightId = existingManifest?.FightId ?? _fightCatalog.CreateFightId(sourceFileName);
                 var fightDirectoryPath = _fightCatalog.GetFightDirectoryPath(fightId);
                 var finalParserOutputDirectoryPath = Path.Combine(fightDirectoryPath, "parser");
@@ -427,8 +450,8 @@ public sealed class ParserImportService
                 var manifest = new FightArtifactManifest(
                     FightId: fightId,
                     SourceFileName: sourceFileName,
-                    SourceFilePath: logFilePath,
-                    SourceFileBytes: sourceFileInfo.Length,
+                    SourceFilePath: finalSourceFilePath,
+                    SourceFileBytes: sourceFileBytes,
                     SourceFileSha256: sourceFileSha256,
                     FightFingerprint: fightFingerprint,
                     ImportedAtUtc: importedAtUtc,
@@ -465,6 +488,7 @@ public sealed class ParserImportService
                     ReasonCode: null,
                     Message: message,
                     Fight: summary,
+                    FinalSourceFilePath: finalSourceFilePath,
                     ParserExecutablePath: parserExecutablePath,
                     ParserStatus: manifest.ParserStatus,
                     ParserElapsedMilliseconds: manifest.ParserElapsedMilliseconds,
@@ -479,6 +503,19 @@ public sealed class ParserImportService
         catch (Exception exception)
         {
             _logger.LogError(exception, "Parser import failed for {SourceFileName}", sourceFileName);
+            var finalSourceFilePath = logFilePath;
+
+            if (archiveHandledLog)
+            {
+                try
+                {
+                    finalSourceFilePath = await FinalizePendingLogFileAsync(logFilePath, sourceFileSha256, cancellationToken);
+                }
+                catch (Exception archiveException)
+                {
+                    _logger.LogWarning(archiveException, "Failed to archive handled pending log {SourceFileName}", sourceFileName);
+                }
+            }
 
             var outputExcerpt = File.Exists(stagedParserConsoleLogPath)
                 ? (await File.ReadAllLinesAsync(stagedParserConsoleLogPath, cancellationToken)).TakeLast(OutputExcerptLineCount).ToArray()
@@ -490,6 +527,7 @@ public sealed class ParserImportService
                 ReasonCode: null,
                 Message: exception.Message,
                 Fight: null,
+                FinalSourceFilePath: finalSourceFilePath,
                 ParserExecutablePath: parserExecutablePath,
                 ParserStatus: "Import failed before parser completion.",
                 ParserElapsedMilliseconds: null,
@@ -552,6 +590,188 @@ public sealed class ParserImportService
 
         sha256.TransformFinalBlock([], 0, 0);
         return Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
+    }
+
+    private bool ShouldArchiveHandledLogs(string mode, string directoryPath)
+    {
+        if (!string.Equals(mode, "new-only", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var pendingDirectoryPath = _paths.ConfiguredPendingDirectoryPath;
+        if (string.IsNullOrWhiteSpace(pendingDirectoryPath))
+        {
+            return false;
+        }
+
+        return IsSameDirectory(directoryPath, pendingDirectoryPath);
+    }
+
+    private async Task<string> FinalizePendingLogFileAsync(string sourceFilePath, string sourceFileSha256, CancellationToken cancellationToken)
+    {
+        var pendingDirectoryPath = _paths.ConfiguredPendingDirectoryPath;
+        var archiveDirectoryPath = _paths.ConfiguredArchiveLogDirectoryPath;
+        if (string.IsNullOrWhiteSpace(pendingDirectoryPath) ||
+            string.IsNullOrWhiteSpace(archiveDirectoryPath) ||
+            !File.Exists(sourceFilePath))
+        {
+            return sourceFilePath;
+        }
+
+        var fullSourcePath = Path.GetFullPath(sourceFilePath);
+        if (!IsPathInsideDirectory(fullSourcePath, pendingDirectoryPath))
+        {
+            return fullSourcePath;
+        }
+
+        await _archiveMoveGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(fullSourcePath))
+            {
+                return fullSourcePath;
+            }
+
+            Directory.CreateDirectory(archiveDirectoryPath);
+
+            var existingManifest = _fightCatalog.TryFindReplacementFight(sourceFileSha256, fightFingerprint: null);
+            if (!string.IsNullOrWhiteSpace(existingManifest?.SourceFilePath) && File.Exists(existingManifest.SourceFilePath))
+            {
+                File.Delete(fullSourcePath);
+                DeleteEmptyDirectoriesUpTo(Path.GetDirectoryName(fullSourcePath), pendingDirectoryPath);
+                return existingManifest.SourceFilePath!;
+            }
+
+            var sourceFileName = Path.GetFileName(fullSourcePath);
+            var preferredDestinationPath = Path.Combine(archiveDirectoryPath, sourceFileName);
+            if (File.Exists(preferredDestinationPath))
+            {
+                var existingHash = await ComputeFileSha256Async(preferredDestinationPath, cancellationToken);
+                if (string.Equals(existingHash, sourceFileSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(fullSourcePath);
+                    DeleteEmptyDirectoriesUpTo(Path.GetDirectoryName(fullSourcePath), pendingDirectoryPath);
+                    return preferredDestinationPath;
+                }
+            }
+
+            var destinationPath = BuildUniqueArchiveLogPath(archiveDirectoryPath, sourceFileName, sourceFileSha256);
+            File.Move(fullSourcePath, destinationPath);
+            DeleteEmptyDirectoriesUpTo(Path.GetDirectoryName(fullSourcePath), pendingDirectoryPath);
+            return destinationPath;
+        }
+        finally
+        {
+            _archiveMoveGate.Release();
+        }
+    }
+
+    private async Task DiscardPendingDuplicateAsync(string sourceFilePath)
+    {
+        var pendingDirectoryPath = _paths.ConfiguredPendingDirectoryPath;
+        if (string.IsNullOrWhiteSpace(pendingDirectoryPath) || !File.Exists(sourceFilePath))
+        {
+            return;
+        }
+
+        var fullSourcePath = Path.GetFullPath(sourceFilePath);
+        if (!IsPathInsideDirectory(fullSourcePath, pendingDirectoryPath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(fullSourcePath);
+            DeleteEmptyDirectoriesUpTo(Path.GetDirectoryName(fullSourcePath), pendingDirectoryPath);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private static string BuildUniqueArchiveLogPath(string archiveDirectoryPath, string sourceFileName, string sourceFileSha256)
+    {
+        var directPath = Path.Combine(archiveDirectoryPath, sourceFileName);
+        if (!File.Exists(directPath))
+        {
+            return directPath;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(sourceFileName);
+        var extension = Path.GetExtension(sourceFileName);
+        var suffix = sourceFileSha256.Length >= 8
+            ? sourceFileSha256[..8]
+            : sourceFileSha256;
+        var candidatePath = Path.Combine(archiveDirectoryPath, $"{stem}-{suffix}{extension}");
+        if (!File.Exists(candidatePath))
+        {
+            return candidatePath;
+        }
+
+        for (var attempt = 2; ; attempt++)
+        {
+            candidatePath = Path.Combine(archiveDirectoryPath, $"{stem}-{suffix}-{attempt}{extension}");
+            if (!File.Exists(candidatePath))
+            {
+                return candidatePath;
+            }
+        }
+    }
+
+    private static bool IsSameDirectory(string leftPath, string rightPath) =>
+        string.Equals(
+            Path.GetFullPath(leftPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(rightPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPathInsideDirectory(string candidatePath, string directoryPath)
+    {
+        var normalizedDirectoryPath = Path.GetFullPath(directoryPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+            Path.DirectorySeparatorChar;
+        var normalizedCandidatePath = Path.GetFullPath(candidatePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return normalizedCandidatePath.StartsWith(normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void DeleteEmptyDirectoriesUpTo(string? startDirectoryPath, string rootDirectoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(startDirectoryPath))
+        {
+            return;
+        }
+
+        var normalizedRootDirectoryPath = Path.GetFullPath(rootDirectoryPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var currentDirectoryPath = Path.GetFullPath(startDirectoryPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        while (currentDirectoryPath.Length >= normalizedRootDirectoryPath.Length &&
+            currentDirectoryPath.StartsWith(normalizedRootDirectoryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(currentDirectoryPath, normalizedRootDirectoryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            if (Directory.Exists(currentDirectoryPath) &&
+                !Directory.EnumerateFileSystemEntries(currentDirectoryPath).Any())
+            {
+                Directory.Delete(currentDirectoryPath);
+                currentDirectoryPath = Path.GetDirectoryName(currentDirectoryPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? string.Empty;
+                continue;
+            }
+
+            break;
+        }
     }
 
     private static string BuildParserConfig(string outputDirectoryPath)

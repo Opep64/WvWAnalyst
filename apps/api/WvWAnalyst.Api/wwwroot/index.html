@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260425d">
+    <link rel="stylesheet" href="/styles.css?v=20260425e">
 </head>
 <body>
     <div class="page-shell">
@@ -30,15 +30,19 @@
                 <div class="section-heading">
                     <div>
                         <h2>Batch Processing</h2>
-                        <p>The app reads from the configured log directory. Add files there from this page, then process only new files or rebuild the catalog from scratch.</p>
+                        <p>Uploads land in the pending queue. Process only new files consumes pending uploads, while rebuild-all walks the archived log store from scratch.</p>
                     </div>
                     <p class="workspace-note" id="batch-note"></p>
                 </div>
                 <form class="import-form" id="batch-form">
                     <div class="browser-controls">
                         <label class="browser-field browser-field-wide">
-                            <span>Configured log directory</span>
+                            <span>Pending upload directory</span>
                             <input id="configured-log-directory-input" type="text" readonly spellcheck="false">
+                        </label>
+                        <label class="browser-field browser-field-wide">
+                            <span>Archived logs directory</span>
+                            <input id="archive-log-directory-input" type="text" readonly spellcheck="false">
                         </label>
                         <label class="browser-field">
                             <span>Mode</span>
@@ -60,18 +64,18 @@
                     <input id="log-file-upload-input" type="file" multiple accept=".evtc,.zevtc,.zip" hidden>
                     <div class="log-dropzone" id="log-file-dropzone" tabindex="0" role="button" aria-controls="log-file-upload-input">
                         <strong>Drop logs here or select multiple files</strong>
-                        <p class="workspace-note">Accepted file types: <code>.evtc</code>, <code>.zevtc</code>, and <code>.zip</code>.</p>
+                        <p class="workspace-note">Accepted file types: <code>.evtc</code>, <code>.zevtc</code>, and <code>.zip</code>. Handled files move from the pending queue into the archived log store.</p>
                         <div class="log-dropzone-actions">
                             <button class="action-link action-link-button" id="log-file-upload-button" type="button">Select files</button>
                             <span class="workspace-note" id="log-file-upload-summary">No files added in this browser session yet.</span>
                         </div>
                     </div>
                 </form>
-                <div class="import-status import-status-scrollable" id="log-file-upload-status">No files have been added to the configured log directory in this browser session yet.</div>
+                <div class="import-status import-status-scrollable" id="log-file-upload-status">No files have been added to the pending upload directory in this browser session yet.</div>
                 <div class="browser-controls manage-danger-toolbar">
                     <div class="browser-field browser-field-wide">
                         <span>Reset stored state</span>
-                        <p class="workspace-note">Delete every supported log from the configured log directory and clear the stored fight catalog, including retained HTML reports.</p>
+                        <p class="workspace-note">Delete every supported log from the pending queue and archived log store, then clear the stored fight catalog, including retained HTML reports.</p>
                     </div>
                     <div class="browser-field button-field">
                         <span>Danger zone</span>
@@ -769,6 +773,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260425b" defer></script>
+    <script src="/app.js?v=20260425e" defer></script>
 </body>
 </html>
