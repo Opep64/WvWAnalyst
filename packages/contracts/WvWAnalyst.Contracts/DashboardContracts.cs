@@ -277,6 +277,17 @@ public sealed record FightExecutionContextIndexDto(
     string? PhaseDurationLabel,
     string? EnemyFormationStyleLabel,
     string? EnemyFormationStyleDetail,
+    int? EnemyMovementScore,
+    string? EnemyMovementScoreLabel,
+    string? EnemyMovementScoreDetail,
+    double? EnemyMovementCenterTightShare,
+    double? EnemyMovementAverageDistanceToCenter,
+    int EnemyMovementSampleCount,
+    bool ThreeWayDetected,
+    string? ThreeWayLabel,
+    string? ThreeWayDetail,
+    long? ThreeWayStartTimeMs,
+    int ThreeWaySecondEnemyPeakCount,
     string? DataConfidenceLabel,
     string? DataConfidenceDetail);
 

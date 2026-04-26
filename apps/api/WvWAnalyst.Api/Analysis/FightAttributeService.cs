@@ -23,6 +23,9 @@ public sealed class FightAttributeService
         new("fast-collapse", "Fast Collapse", "Fight Shape", "Short fight where the squad lost players quickly."),
         new("cleanup", "Cleanup", "Fight Shape", "Squad-favored fight with strong kill control and limited squad losses."),
         new("no-decision", "No Decision", "Fight Shape", "Fight ended without a decisive down, kill, or winner signal."),
+        new("three-way", "3-Way", "Fight Shape", "Two distinct enemy teams were detected in the same fight."),
+        new("elite-tight-enemy", "Elite Tight Enemy", "Fight Shape", "Enemy movement tightness scored in the elite range."),
+        new("tight-enemy", "Tight Enemy", "Fight Shape", "Enemy movement tightness scored in the tight range."),
         new("cloudy-fight", "Cloudy Fight", "Fight Shape", "Enemy formation was detected as loose or cloud-like."),
         new("stack-clash", "Stack Clash", "Fight Shape", "Enemy formation was detected as stack-like or ball-like."),
         new("low-confidence", "Low Confidence", "Data Quality", "Important fight signals were missing or exported with low confidence.")
@@ -212,6 +215,26 @@ public sealed class FightAttributeService
             && totalKills <= 2)
         {
             attributes.Add(Create("no-decision", 0.82, 1, "No decisive winner and very low kill volume."));
+        }
+
+        var context = fightIndex.Execution?.Context;
+        if (context?.ThreeWayDetected == true)
+        {
+            attributes.Add(Create("three-way", 0.86, 1, context.ThreeWayDetail ?? "Two distinct enemy teams were detected in the same fight."));
+        }
+
+        if (context?.EnemyMovementScore is int enemyMovementScore)
+        {
+            string enemyMovementDetail = context.EnemyMovementScoreDetail
+                ?? $"Enemy movement scored {enemyMovementScore}/100.";
+            if (enemyMovementScore >= 92)
+            {
+                attributes.Add(Create("elite-tight-enemy", 0.9, 2, enemyMovementDetail));
+            }
+            else if (enemyMovementScore >= 84)
+            {
+                attributes.Add(Create("tight-enemy", 0.86, 1, enemyMovementDetail));
+            }
         }
 
         var formation = fightIndex.Execution?.Context?.EnemyFormationStyleLabel ?? string.Empty;

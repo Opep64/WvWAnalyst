@@ -312,6 +312,28 @@ public sealed class WvWAnalystExecutionContextDto
 
     public string EnemyFormationStyleDetail { get; set; } = string.Empty;
 
+    public int? EnemyMovementScore { get; set; }
+
+    public string EnemyMovementScoreLabel { get; set; } = string.Empty;
+
+    public string EnemyMovementScoreDetail { get; set; } = string.Empty;
+
+    public double? EnemyMovementCenterTightShare { get; set; }
+
+    public double? EnemyMovementAverageDistanceToCenter { get; set; }
+
+    public int EnemyMovementSampleCount { get; set; }
+
+    public bool ThreeWayDetected { get; set; }
+
+    public string ThreeWayLabel { get; set; } = string.Empty;
+
+    public string ThreeWayDetail { get; set; } = string.Empty;
+
+    public long? ThreeWayStartTimeMs { get; set; }
+
+    public int ThreeWaySecondEnemyPeakCount { get; set; }
+
     public string DataConfidenceLabel { get; set; } = string.Empty;
 
     public string DataConfidenceDetail { get; set; } = string.Empty;

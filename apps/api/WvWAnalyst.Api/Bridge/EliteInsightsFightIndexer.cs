@@ -854,6 +854,17 @@ public sealed class EliteInsightsFightIndexer
             PhaseDurationLabel: NullIfWhiteSpace(context.PhaseDurationLabel),
             EnemyFormationStyleLabel: NullIfWhiteSpace(context.EnemyFormationStyleLabel),
             EnemyFormationStyleDetail: NullIfWhiteSpace(context.EnemyFormationStyleDetail),
+            EnemyMovementScore: context.EnemyMovementScore,
+            EnemyMovementScoreLabel: NullIfWhiteSpace(context.EnemyMovementScoreLabel),
+            EnemyMovementScoreDetail: NullIfWhiteSpace(context.EnemyMovementScoreDetail),
+            EnemyMovementCenterTightShare: context.EnemyMovementCenterTightShare,
+            EnemyMovementAverageDistanceToCenter: context.EnemyMovementAverageDistanceToCenter,
+            EnemyMovementSampleCount: context.EnemyMovementSampleCount,
+            ThreeWayDetected: context.ThreeWayDetected,
+            ThreeWayLabel: NullIfWhiteSpace(context.ThreeWayLabel),
+            ThreeWayDetail: NullIfWhiteSpace(context.ThreeWayDetail),
+            ThreeWayStartTimeMs: context.ThreeWayStartTimeMs,
+            ThreeWaySecondEnemyPeakCount: context.ThreeWaySecondEnemyPeakCount,
             DataConfidenceLabel: NullIfWhiteSpace(context.DataConfidenceLabel),
             DataConfidenceDetail: NullIfWhiteSpace(context.DataConfidenceDetail));
     }

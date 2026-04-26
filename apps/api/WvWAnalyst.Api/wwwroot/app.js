@@ -5541,6 +5541,14 @@ function renderFightDossier(detail) {
         executionContext?.phaseDurationLabel ? `Phase duration: ${executionContext.phaseDurationLabel}` : null,
         executionContext?.enemyFormationStyleLabel ? `Enemy formation: ${executionContext.enemyFormationStyleLabel}` : null,
         executionContext?.enemyFormationStyleDetail ?? null,
+        typeof executionContext?.enemyMovementScore === "number"
+            ? `Enemy movement: ${executionContext.enemyMovementScore} / 100${executionContext.enemyMovementScoreLabel ? ` (${executionContext.enemyMovementScoreLabel})` : ""}`
+            : executionContext?.enemyMovementScoreLabel ? `Enemy movement: ${executionContext.enemyMovementScoreLabel}` : null,
+        executionContext?.enemyMovementScoreDetail ?? null,
+        executionContext?.threeWayDetected
+            ? `Fight type: ${executionContext.threeWayLabel || "3-way"}`
+            : null,
+        executionContext?.threeWayDetail ?? null,
         executionContext?.dataConfidenceLabel ? `Data confidence: ${executionContext.dataConfidenceLabel}` : null,
         executionContext?.dataConfidenceDetail ?? null,
         ...(execution.confidenceNotes ?? [])
