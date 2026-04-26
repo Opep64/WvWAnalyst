@@ -5,6 +5,7 @@ obj/
 storage/cache/*
 storage/db/*
 storage/fights/*
+storage/logs/*
 storage/patch-metadata.json
 
 !storage/cache/.gitkeep
