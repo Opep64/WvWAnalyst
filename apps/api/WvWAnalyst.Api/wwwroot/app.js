@@ -1,6 +1,7 @@
 const DIRECTORY_MAX_PARALLELISM_KEY = "wvw-analyst.last-max-parallelism";
 const ACTIVE_BATCH_JOB_KEY = "wvw-analyst.active-batch-job";
 const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
+const FIGHT_SHAPE_DIAGNOSTICS_KEY = "wvw-analyst.show-fight-shape-diagnostics";
 const ANALYSIS_TREND_MODE_KEY = "wvw-analyst.analysis-trend-mode";
 const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
@@ -13,6 +14,7 @@ let batchStatusPollHandle = null;
 let manageActivityRefreshHandle = null;
 let analysisLoadPromise = null;
 let showFightBrowserTopBursts = false;
+let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY) === "true";
 let logFileUploadBusy = false;
 let manageResetBusy = false;
 let activeAppTab = "manage";
@@ -4935,6 +4937,7 @@ function buildFightBrowserRow(fight, selectedFightId) {
             <td>${escapeHtml(duration)}</td>
             <td>${escapeHtml(getOutcomeDisplayLabel(fight))}</td>
             <td>${escapeHtml(getExecutionScoreLabel(fight))}</td>
+            <td data-fight-shape-diagnostics ${showFightShapeDiagnostics ? "" : "hidden"}>${buildFightShapeBrowserCell(fightIndex?.fightShape)}</td>
             <td>${escapeHtml(String(squadCount))}</td>
             <td>${escapeHtml(String(enemyCount))}</td>
             <td>${buildAttributePills(fight.attributes)}</td>
@@ -4947,6 +4950,370 @@ function buildFightBrowserRow(fight, selectedFightId) {
             </td>
         </tr>
     `;
+}
+
+function buildFightShapeBrowserCell(shape) {
+    if (!shape) {
+        return `<span class="yi-shape-chip yi-shape-chip-missing">No probe</span>`;
+    }
+
+    if (!shape.available) {
+        return `<span class="yi-shape-chip yi-shape-chip-unknown" title="${escapeHtml(shape.detectionLabel ?? "No conservative cleanup boundary detected.")}">Unknown</span>`;
+    }
+
+    const cleanupStart = shape.cleanupStartTimeMs != null
+        ? formatSeconds(Number(shape.cleanupStartTimeMs) / 1000, 0)
+        : "n/a";
+    const side = formatShapeSide(shape.cleanupSide);
+    const title = [
+        shape.detectionLabel,
+        `cleanup ${cleanupStart}`,
+        `side ${side}`,
+        `confidence ${formatPercent(Number(shape.confidence ?? 0) * 100, 0)}`,
+        shape.rules?.length ? `rules ${shape.rules.join(", ")}` : null
+    ].filter(Boolean).join(" | ");
+
+    return `<span class="yi-shape-chip yi-shape-chip-detected" title="${escapeHtml(title)}">${escapeHtml(side)} ${escapeHtml(cleanupStart)}</span>`;
+}
+
+function formatShapeSide(side) {
+    if (side === "squad") {
+        return "Squad";
+    }
+    if (side === "enemy") {
+        return "Enemy";
+    }
+    return "Unknown";
+}
+
+function buildFightShapeDiagnosticsHtml(shape) {
+    if (!shape) {
+        return `<p class="workspace-note">No fight-shape diagnostic payload is stored for this fight.</p>`;
+    }
+
+    const cleanupStart = shape.cleanupStartTimeMs != null ? formatSeconds(Number(shape.cleanupStartTimeMs) / 1000, 1) : "n/a";
+    const competitiveDuration = formatSeconds(Number(shape.competitiveDurationMs ?? 0) / 1000, 1);
+    const cleanupDuration = formatSeconds(Number(shape.cleanupDurationMs ?? 0) / 1000, 1);
+    const headline = shape.available
+        ? `${formatShapeSide(shape.cleanupSide)} cleanup candidate at ${cleanupStart}`
+        : "No conservative cleanup boundary";
+    const confidence = formatPercent(Number(shape.confidence ?? 0) * 100, 0);
+
+    return `
+        <div class="yi-shape-headline">
+            <strong>${escapeHtml(headline)}</strong>
+            <span>${escapeHtml(confidence)} confidence</span>
+        </div>
+        <div class="yi-shape-grid">
+            ${buildYiShapeMetric("Competitive", competitiveDuration)}
+            ${buildYiShapeMetric("Cleanup", cleanupDuration)}
+            ${buildYiShapeMetric("Cleanup share", formatPercent(shape.cleanupPercent))}
+            ${buildYiShapeMetric("Losing side", formatShapeSide(shape.losingSide))}
+        </div>
+        <div class="yi-shape-rules">${buildYiShapeRules(shape.rules ?? [])}</div>
+        ${buildFightShapeBestCandidateHtml(shape)}
+        ${buildFightShapeStateHtml(shape)}
+        <p class="workspace-note yi-shape-note">${escapeHtml(shape.detectionLabel ?? "")}</p>
+    `;
+}
+
+function buildYiShapeMetric(label, value) {
+    return `
+        <div class="yi-shape-metric">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>
+    `;
+}
+
+function buildYiShapeRules(rules) {
+    if (!rules.length) {
+        return `<span class="yi-shape-rule">no rules</span>`;
+    }
+    return rules.map(rule => `<span class="yi-shape-rule">${escapeHtml(rule.replaceAll("_", " "))}</span>`).join("");
+}
+
+function buildFightShapeStateHtml(shape) {
+    const squad = shape.squadAtCleanupStart;
+    const enemy = shape.enemyAtCleanupStart;
+    const before = shape.atCleanupStart;
+    const after = shape.afterCleanupStart;
+    if (!squad && !enemy && !before && !after) {
+        return "";
+    }
+
+    return `
+        <div class="yi-shape-state-grid">
+            ${buildYiShapeSideState("Squad at boundary", squad)}
+            ${buildYiShapeSideState("Enemy at boundary", enemy)}
+            ${buildYiShapeEventState("Before boundary", before)}
+            ${buildYiShapeEventState("After boundary", after)}
+        </div>
+    `;
+}
+
+function buildFightShapeBestCandidateHtml(shape) {
+    if (!shape?.bestCandidateTimeMs && !shape?.bestCandidateReason && !shape?.bestCandidateDetail) {
+        return "";
+    }
+    const candidateTime = shape.bestCandidateTimeMs != null ? formatSeconds(Number(shape.bestCandidateTimeMs) / 1000, 1) : "n/a";
+    const candidateSide = formatShapeSide(shape.bestCandidateCleanupSide);
+    const candidateConfidence = formatPercent(Number(shape.bestCandidateConfidence ?? 0) * 100, 0);
+    return `
+        <div class="yi-shape-best-candidate">
+            <strong>${escapeHtml(`Best candidate: ${candidateTime} (${candidateSide}, ${candidateConfidence})`)}</strong>
+            <span>${escapeHtml(shape.bestCandidateReason ?? "")}</span>
+            <span>${escapeHtml(shape.bestCandidateDetail ?? "")}</span>
+        </div>
+    `;
+}
+
+function buildYiShapeSideState(title, state) {
+    if (!state) {
+        return "";
+    }
+    return `
+        <div class="yi-shape-state-card">
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(`${formatNumber(state.active)} active / ${formatNumber(state.known)} known`)}</span>
+            <span>${escapeHtml(`${formatNumber(getFightShapeCombatCapable(state))} combat-capable`)}</span>
+            <span>${escapeHtml(`${formatNumber(state.downed)} downed, ${formatNumber(state.deadOrDc)} dead/DC`)}</span>
+            <span>${escapeHtml(`${formatNumber(state.removed)} removed, ${formatNumber(state.farFromFight)} far, ${formatNumber(state.unobserved)} unobserved`)}</span>
+        </div>
+    `;
+}
+
+function getFightShapeCombatCapable(state) {
+    if (!state) {
+        return "";
+    }
+    return Number(state.active ?? 0) + Number(state.downed ?? 0);
+}
+
+function buildYiShapeEventState(title, snapshot) {
+    if (!snapshot) {
+        return "";
+    }
+    return `
+        <div class="yi-shape-state-card">
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(`Downs S/E: ${formatNumber(snapshot.squadMembersDowned)} / ${formatNumber(snapshot.enemyPlayersDowned)}`)}</span>
+            <span>${escapeHtml(`Kills S/E: ${formatNumber(snapshot.squadKillsSecured)} / ${formatNumber(snapshot.enemyKillsSecured)}`)}</span>
+            <span>${escapeHtml(`Damage S/E: ${formatNumber(snapshot.squadDamage)} / ${formatNumber(snapshot.enemyDamage)}`)}</span>
+        </div>
+    `;
+}
+
+function buildFightShapeExportTsv(fights) {
+    const headers = [
+        "fightId",
+        "fightTime",
+        "fightName",
+        "sourceFile",
+        "commander",
+        "outcome",
+        "score",
+        "durationSec",
+        "squadPlayers",
+        "enemyPlayers",
+        "shapeStatus",
+        "cleanupSide",
+        "losingSide",
+        "confidence",
+        "cleanupStartSec",
+        "competitiveDurationSec",
+        "cleanupDurationSec",
+        "cleanupPercent",
+        "rules",
+        "detectionLabel",
+        "bestCandidateSec",
+        "bestCandidateSide",
+        "bestCandidateConfidence",
+        "bestCandidateReason",
+        "bestCandidateDetail",
+        "squadActiveAtBoundary",
+        "squadCombatCapableAtBoundary",
+        "squadKnownAtBoundary",
+        "squadDownedAtBoundary",
+        "squadDeadOrDcAtBoundary",
+        "squadRemovedAtBoundary",
+        "squadFarFromFightAtBoundary",
+        "squadUnobservedAtBoundary",
+        "enemyActiveAtBoundary",
+        "enemyCombatCapableAtBoundary",
+        "enemyKnownAtBoundary",
+        "enemyDownedAtBoundary",
+        "enemyDeadOrDcAtBoundary",
+        "enemyRemovedAtBoundary",
+        "enemyFarFromFightAtBoundary",
+        "enemyUnobservedAtBoundary",
+        "beforeSquadDowns",
+        "beforeEnemyDowns",
+        "beforeSquadKills",
+        "beforeEnemyKills",
+        "beforeSquadRecoveries",
+        "beforeEnemyRecoveries",
+        "beforeSquadDamage",
+        "beforeEnemyDamage",
+        "afterSquadDowns",
+        "afterEnemyDowns",
+        "afterSquadKills",
+        "afterEnemyKills",
+        "afterSquadRecoveries",
+        "afterEnemyRecoveries",
+        "afterSquadDamage",
+        "afterEnemyDamage",
+        "analystSchema"
+    ];
+    const rows = fights.map(fight => buildFightShapeExportRow(fight));
+    return [
+        headers.join("\t"),
+        ...rows.map(row => row.map(formatTsvCell).join("\t"))
+    ].join("\n");
+}
+
+function buildFightShapeExportRow(fight) {
+    const fightIndex = fight.fightIndex ?? {};
+    const shape = fightIndex.fightShape;
+    const squadState = shape?.squadAtCleanupStart;
+    const enemyState = shape?.enemyAtCleanupStart;
+    const before = shape?.atCleanupStart;
+    const after = shape?.afterCleanupStart;
+
+    return [
+        fight.fightId,
+        fightIndex.timeStartStandard ?? fightIndex.timeStart,
+        fightIndex.fightName,
+        fight.sourceFileName,
+        (fightIndex.commanderDisplayNames ?? []).join(", "),
+        fightIndex.outcome?.displayLabel ?? fightIndex.outcome?.outcomeCode,
+        fightIndex.execution?.overallScore,
+        millisecondsToSeconds(fightIndex.durationMilliseconds),
+        fightIndex.squadPlayerCount,
+        fightIndex.enemyPlayerCount ?? fightIndex.enemyTargetCount,
+        getFightShapeStatus(shape),
+        shape?.cleanupSide,
+        shape?.losingSide,
+        shape?.confidence,
+        millisecondsToSeconds(shape?.cleanupStartTimeMs),
+        millisecondsToSeconds(shape?.competitiveDurationMs),
+        millisecondsToSeconds(shape?.cleanupDurationMs),
+        shape?.cleanupPercent,
+        (shape?.rules ?? []).join("|"),
+        shape?.detectionLabel,
+        millisecondsToSeconds(shape?.bestCandidateTimeMs),
+        shape?.bestCandidateCleanupSide,
+        shape?.bestCandidateConfidence,
+        shape?.bestCandidateReason,
+        shape?.bestCandidateDetail,
+        squadState?.active,
+        getFightShapeCombatCapable(squadState),
+        squadState?.known,
+        squadState?.downed,
+        squadState?.deadOrDc,
+        squadState?.removed,
+        squadState?.farFromFight,
+        squadState?.unobserved,
+        enemyState?.active,
+        getFightShapeCombatCapable(enemyState),
+        enemyState?.known,
+        enemyState?.downed,
+        enemyState?.deadOrDc,
+        enemyState?.removed,
+        enemyState?.farFromFight,
+        enemyState?.unobserved,
+        before?.squadMembersDowned,
+        before?.enemyPlayersDowned,
+        before?.squadKillsSecured,
+        before?.enemyKillsSecured,
+        before?.squadRecoveries,
+        before?.enemyRecoveries,
+        before?.squadDamage,
+        before?.enemyDamage,
+        after?.squadMembersDowned,
+        after?.enemyPlayersDowned,
+        after?.squadKillsSecured,
+        after?.enemyKillsSecured,
+        after?.squadRecoveries,
+        after?.enemyRecoveries,
+        after?.squadDamage,
+        after?.enemyDamage,
+        fightIndex.analystSchemaVersion
+    ];
+}
+
+function getFightShapeStatus(shape) {
+    if (!shape) {
+        return "missing";
+    }
+    return shape.available ? "detected" : "unknown";
+}
+
+function millisecondsToSeconds(value) {
+    if (value == null || value === "") {
+        return "";
+    }
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        return "";
+    }
+    return Math.round(numericValue / 100) / 10;
+}
+
+function formatTsvCell(value) {
+    return String(value ?? "")
+        .replaceAll("\t", " ")
+        .replaceAll("\r", " ")
+        .replaceAll("\n", " ")
+        .trim();
+}
+
+function renderFightShapeExport(filteredFights) {
+    const textarea = document.querySelector("#fight-shape-export-textarea");
+    const summary = document.querySelector("#fight-shape-export-summary");
+    const copyButton = document.querySelector("#fight-shape-export-copy");
+    if (!textarea || !summary || !copyButton) {
+        return;
+    }
+
+    if (!showFightShapeDiagnostics) {
+        textarea.value = "";
+        summary.textContent = "";
+        copyButton.disabled = true;
+        return;
+    }
+
+    const detectedCount = filteredFights.filter(fight => fight.fightIndex?.fightShape?.available).length;
+    const unknownCount = filteredFights.filter(fight => {
+        const shape = fight.fightIndex?.fightShape;
+        return shape && !shape.available;
+    }).length;
+    const missingCount = filteredFights.filter(fight => !fight.fightIndex?.fightShape).length;
+    textarea.value = buildFightShapeExportTsv(filteredFights);
+    summary.textContent = `${filteredFights.length} filtered fights | ${detectedCount} detected | ${unknownCount} unknown | ${missingCount} missing payload.`;
+    copyButton.disabled = filteredFights.length === 0;
+}
+
+async function copyFightShapeExport() {
+    const textarea = document.querySelector("#fight-shape-export-textarea");
+    const copyButton = document.querySelector("#fight-shape-export-copy");
+    if (!textarea || !copyButton) {
+        return;
+    }
+
+    textarea.focus();
+    textarea.select();
+    try {
+        await navigator.clipboard.writeText(textarea.value);
+    } catch {
+        document.execCommand("copy");
+    }
+
+    const previousText = copyButton.textContent;
+    copyButton.textContent = "Copied";
+    window.setTimeout(() => {
+        copyButton.textContent = previousText;
+    }, 1200);
 }
 
 function buildFightBrowserTopBurstRow(entry) {
@@ -5016,6 +5383,7 @@ function renderFightBrowserTopBursts(filteredFights) {
 function renderFightBrowser(snapshot, selectedFightId) {
     const summary = document.querySelector("#fight-browser-summary");
     const body = document.querySelector("#fight-browser-body");
+    syncFightShapeDiagnosticsVisibility();
     renderFightBrowserFilterOptions(snapshot.fightBrowser.fights);
     renderPatchScopeOptions(
         "#fight-browser-patch-scope",
@@ -5031,6 +5399,7 @@ function renderFightBrowser(snapshot, selectedFightId) {
     const filteredFights = applyFightBrowserFilters(snapshot);
     updateFightBrowserSortHeaders();
     renderFightBrowserTopBursts(filteredFights);
+    renderFightShapeExport(filteredFights);
 
     summary.textContent = snapshot.fightBrowser.failedCount > 0
         ? `Showing ${filteredFights.length} of ${snapshot.fightBrowser.totalCount} imported fights. ${snapshot.fightBrowser.failedCount} parser-failed rows are kept out of the fight browser.`
@@ -5039,7 +5408,7 @@ function renderFightBrowser(snapshot, selectedFightId) {
     if (filteredFights.length === 0) {
         body.innerHTML = `
             <tr>
-                <td colspan="9">No fights matched the current filters.</td>
+                <td colspan="${showFightShapeDiagnostics ? 10 : 9}">No fights matched the current filters.</td>
             </tr>
         `;
         return;
@@ -5067,6 +5436,7 @@ function renderFightDossier(detail) {
     const execution = fightIndex?.execution;
     const executionContext = execution?.context;
     const executionOutcome = execution?.outcome;
+    const fightShape = fightIndex?.fightShape;
     const squadSide = fightIndex?.squadSide;
     const enemySide = fightIndex?.enemySide;
     const commanderSummary = fightIndex?.commanderSummary;
@@ -5240,6 +5610,7 @@ function renderFightDossier(detail) {
     setInnerHtml("#dossier-parser-list", buildDossierFactListHtml(parserItems));
     setInnerHtml("#dossier-commanders-list", buildDossierFactListHtml(commanders));
     setInnerHtml("#dossier-extensions-list", buildDossierFactListHtml(extensions));
+    setInnerHtml("#dossier-fight-shape", buildFightShapeDiagnosticsHtml(fightShape));
 
     setInnerHtml("#dossier-artifact-links", [
         buildActionLink(detail.artifactLinks.parserConsoleLogUrl, "Parser log"),
@@ -5278,6 +5649,7 @@ function clearFightDossier() {
     setInnerHtml("#dossier-pillar-grid", "");
     setInnerHtml("#dossier-player-body", "");
     setInnerHtml("#dossier-commander-focus-list", "");
+    setInnerHtml("#dossier-fight-shape", "");
     setInnerHtml("#dossier-enemy-classes", "");
 }
 
@@ -5292,6 +5664,7 @@ function renderFightDossierError(fightId, error) {
     setInnerHtml("#dossier-outcome-list", "");
     setInnerHtml("#dossier-execution-list", "");
     setInnerHtml("#dossier-confidence-list", "");
+    setInnerHtml("#dossier-fight-shape", "");
     setInnerHtml("#dossier-commander-focus-list", "");
     setInnerHtml("#dossier-parser-list", buildTagListHtml([error instanceof Error ? error.message : String(error)]));
     setInnerHtml("#dossier-commanders-list", "");
@@ -5477,6 +5850,28 @@ function syncSharedManageState(snapshot) {
     if (!lastBatchResult && !activeBatchJobId && !batchStatusPollHandle) {
         document.querySelector("#batch-status").textContent = DEFAULT_BATCH_STATUS_MESSAGE;
         renderBatchResults(null);
+    }
+}
+
+function syncFightShapeDiagnosticsVisibility() {
+    const toggle = document.querySelector("#manage-show-fight-shape-diagnostics");
+    if (toggle) {
+        toggle.checked = showFightShapeDiagnostics;
+    }
+
+    document.querySelectorAll("[data-fight-shape-diagnostics]").forEach(element => {
+        element.hidden = !showFightShapeDiagnostics;
+    });
+}
+
+function setFightShapeDiagnosticsVisible(isVisible) {
+    showFightShapeDiagnostics = Boolean(isVisible);
+    localStorage.setItem(FIGHT_SHAPE_DIAGNOSTICS_KEY, showFightShapeDiagnostics ? "true" : "false");
+    // The cleanup probe TSV and fight-shape dossier/browser widgets are intentionally retained for future tuning,
+    // but they stay hidden unless this local Manage-page switch is enabled.
+    syncFightShapeDiagnosticsVisibility();
+    if (currentDashboardSnapshot) {
+        renderFightBrowser(currentDashboardSnapshot, getSelectedFightId());
     }
 }
 
@@ -6070,6 +6465,7 @@ function hydrateBatchForm() {
             ? Math.min(16, Math.max(1, parsedParallelism))
             : 4);
 
+    syncFightShapeDiagnosticsVisibility();
     syncManageControls();
 }
 
@@ -6255,6 +6651,9 @@ document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
 });
 document.querySelector("#batch-results-show-all").addEventListener("change", () => renderBatchResults(lastBatchResult));
 document.querySelector("#batch-results-show-excluded").addEventListener("change", () => renderBatchResults(lastBatchResult));
+document.querySelector("#manage-show-fight-shape-diagnostics").addEventListener("change", event => {
+    setFightShapeDiagnosticsVisible(event.target.checked);
+});
 document.querySelector("#patch-metadata-save-button").addEventListener("click", () => void handlePatchMetadataSave());
 document.querySelector("#patch-metadata-reload-button").addEventListener("click", () => void handlePatchMetadataReload());
 document.querySelector("#fight-browser-commander").addEventListener("change", handleFightBrowserChange);
@@ -6284,6 +6683,7 @@ document.querySelector("#fight-browser-clear-class-filters").addEventListener("c
     clearFightBrowserClassFilters();
     handleFightBrowserChange();
 });
+document.querySelector("#fight-shape-export-copy").addEventListener("click", () => void copyFightShapeExport());
 document.querySelector("#analysis-class-filters").addEventListener("change", event => {
     const box = event.target.closest(".class-filter-box");
     if (!box) {

@@ -74,6 +74,7 @@ public sealed class EliteInsightsFightIndexer
                 DefenseSaves: BuildDefenseSavesFromAnalystPayload(payload.DefenseSaves),
                 MitigationSummary: BuildMitigationSummaryFromAnalystPayload(payload.MitigationSummary, payload.DefenseSaves),
                 Obliterate: BuildObliterateFromAnalystPayload(payload.Obliterate),
+                FightShape: BuildFightShapeFromAnalystPayload(payload.FightShape),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
                 TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
                 Players: players,
@@ -220,6 +221,7 @@ public sealed class EliteInsightsFightIndexer
             DefenseSaves: null,
             MitigationSummary: null,
             Obliterate: null,
+            FightShape: null,
             ThreatBoons: Array.Empty<FightThreatBoonIndexDto>(),
             TopBursts: Array.Empty<FightTopBurstIndexDto>(),
             Players: Array.Empty<FightPlayerIndexDto>(),
@@ -508,6 +510,77 @@ public sealed class EliteInsightsFightIndexer
         return new FightObliterateIndexDto(
             HitCount: summary.HitCount,
             BarrierRemovedHitCount: summary.BarrierRemovedHitCount);
+    }
+
+    private static FightShapeIndexDto? BuildFightShapeFromAnalystPayload(WvWAnalystFightShapeDto? shape)
+    {
+        if (shape is null)
+        {
+            return null;
+        }
+
+        return new FightShapeIndexDto(
+            Available: shape.Available,
+            DetectionLabel: NullIfWhiteSpace(shape.DetectionLabel),
+            CleanupSide: NullIfWhiteSpace(shape.CleanupSide),
+            LosingSide: NullIfWhiteSpace(shape.LosingSide),
+            Confidence: shape.Confidence,
+            CompetitiveEndTimeMs: shape.CompetitiveEndTimeMs,
+            CleanupStartTimeMs: shape.CleanupStartTimeMs,
+            CompetitiveDurationMs: shape.CompetitiveDurationMs,
+            CleanupDurationMs: shape.CleanupDurationMs,
+            CleanupPercent: shape.CleanupPercent,
+            Rules: shape.Rules?
+                .Select(NullIfWhiteSpace)
+                .Where(rule => rule is not null)
+                .Select(rule => rule!)
+                .ToArray()
+                ?? Array.Empty<string>(),
+            BestCandidateTimeMs: shape.BestCandidateTimeMs,
+            BestCandidateCleanupSide: NullIfWhiteSpace(shape.BestCandidateCleanupSide),
+            BestCandidateConfidence: shape.BestCandidateConfidence,
+            BestCandidateReason: NullIfWhiteSpace(shape.BestCandidateReason),
+            BestCandidateDetail: NullIfWhiteSpace(shape.BestCandidateDetail),
+            AtCleanupStart: BuildFightShapeEventSnapshot(shape.AtCleanupStart),
+            AfterCleanupStart: BuildFightShapeEventSnapshot(shape.AfterCleanupStart),
+            SquadAtCleanupStart: BuildFightShapeSideState(shape.SquadAtCleanupStart),
+            EnemyAtCleanupStart: BuildFightShapeSideState(shape.EnemyAtCleanupStart));
+    }
+
+    private static FightShapeEventSnapshotIndexDto? BuildFightShapeEventSnapshot(WvWAnalystFightShapeEventSnapshotDto? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        return new FightShapeEventSnapshotIndexDto(
+            SquadMembersDowned: snapshot.SquadMembersDowned,
+            EnemyPlayersDowned: snapshot.EnemyPlayersDowned,
+            SquadKillsSecured: snapshot.SquadKillsSecured,
+            EnemyKillsSecured: snapshot.EnemyKillsSecured,
+            SquadRecoveries: snapshot.SquadRecoveries,
+            EnemyRecoveries: snapshot.EnemyRecoveries,
+            SquadDamage: snapshot.SquadDamage,
+            EnemyDamage: snapshot.EnemyDamage);
+    }
+
+    private static FightShapeSideStateIndexDto? BuildFightShapeSideState(WvWAnalystFightShapeSideStateDto? state)
+    {
+        if (state is null)
+        {
+            return null;
+        }
+
+        return new FightShapeSideStateIndexDto(
+            Total: state.Total,
+            Known: state.Known,
+            Active: state.Active,
+            Downed: state.Downed,
+            DeadOrDc: state.DeadOrDc,
+            Removed: state.Removed,
+            FarFromFight: state.FarFromFight,
+            Unobserved: state.Unobserved);
     }
 
     private static IReadOnlyList<FightPlayerIndexDto> BuildPlayersFromAnalystPayload(IReadOnlyList<WvWAnalystPlayerSummaryDto>? players)

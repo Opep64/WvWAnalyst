@@ -10,7 +10,6 @@ using WvWAnalyst.Contracts;
 var builder = WebApplication.CreateBuilder(args);
 const long MaxUploadBodyBytes = 4L * 1024L * 1024L * 1024L;
 const string NoStoreCacheControl = "no-store, no-cache, must-revalidate";
-const string ImmutableAssetCacheControl = "public, max-age=31536000, immutable";
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -79,18 +78,7 @@ app.Use(async (context, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
-    OnPrepareResponse = static context =>
-    {
-        var fileName = context.File.Name;
-        if (fileName.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
-            fileName.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
-        {
-            ApplyImmutableAssetHeaders(context.Context.Response);
-            return;
-        }
-
-        ApplyNoStoreHeaders(context.Context.Response);
-    }
+    OnPrepareResponse = static context => ApplyNoStoreHeaders(context.Context.Response)
 });
 
 app.MapGet("/api/health", () => Results.Ok(new
@@ -276,13 +264,6 @@ static void ApplyNoStoreHeaders(HttpResponse response)
     response.Headers["Cache-Control"] = NoStoreCacheControl;
     response.Headers["Pragma"] = "no-cache";
     response.Headers["Expires"] = "0";
-}
-
-static void ApplyImmutableAssetHeaders(HttpResponse response)
-{
-    response.Headers["Cache-Control"] = ImmutableAssetCacheControl;
-    response.Headers.Remove("Pragma");
-    response.Headers.Remove("Expires");
 }
 
 static string ResolveImportDirectoryPath(string? mode, AppPathService paths)

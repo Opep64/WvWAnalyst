@@ -251,6 +251,181 @@ h1 {
     padding: 16px;
 }
 
+.dossier-fight-shape-yi {
+    position: relative;
+    margin-bottom: 18px;
+    border-color: rgba(255, 207, 115, 0.58);
+    background:
+        linear-gradient(135deg, rgba(255, 207, 115, 0.16), rgba(255, 143, 143, 0.10)),
+        var(--panel-strong);
+    box-shadow: 0 0 0 1px rgba(255, 207, 115, 0.12), 0 18px 44px rgba(255, 143, 143, 0.10);
+}
+
+.yi-diagnostic-kicker {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    margin-bottom: 8px;
+    border: 1px solid rgba(255, 207, 115, 0.52);
+    border-radius: 999px;
+    background: rgba(255, 207, 115, 0.14);
+    color: var(--warning);
+    padding: 3px 9px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.yi-shape-headline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 8px 0 12px;
+}
+
+.yi-shape-headline strong {
+    font-size: 1rem;
+}
+
+.yi-shape-headline span {
+    color: var(--warning);
+    font-weight: 800;
+}
+
+.yi-shape-grid,
+.yi-shape-state-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+}
+
+.yi-shape-metric,
+.yi-shape-state-card {
+    border: 1px solid rgba(255, 207, 115, 0.18);
+    border-radius: 12px;
+    background: rgba(10, 15, 22, 0.35);
+    padding: 10px;
+}
+
+.yi-shape-metric span,
+.yi-shape-state-card span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.yi-shape-metric strong,
+.yi-shape-state-card strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.yi-shape-rules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.yi-shape-best-candidate {
+    border: 1px solid rgba(255, 207, 115, 0.18);
+    border-radius: 8px;
+    background: rgba(10, 15, 22, 0.28);
+    margin: 12px 0;
+    padding: 10px;
+}
+
+.yi-shape-best-candidate strong,
+.yi-shape-best-candidate span {
+    display: block;
+}
+
+.yi-shape-best-candidate span {
+    color: var(--muted);
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.yi-shape-rule,
+.yi-shape-chip {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 207, 115, 0.32);
+    background: rgba(255, 207, 115, 0.12);
+    color: var(--warning);
+    padding: 3px 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.yi-shape-chip-detected {
+    border-color: rgba(118, 215, 165, 0.42);
+    background: rgba(118, 215, 165, 0.14);
+    color: var(--success);
+}
+
+.yi-shape-chip-unknown {
+    border-color: rgba(255, 207, 115, 0.36);
+    background: rgba(255, 207, 115, 0.12);
+    color: var(--warning);
+}
+
+.yi-shape-chip-missing {
+    border-color: rgba(159, 176, 195, 0.24);
+    background: rgba(159, 176, 195, 0.10);
+    color: var(--muted);
+}
+
+.yi-shape-note {
+    margin-bottom: 0;
+}
+
+.diagnostic-export-card {
+    margin: 0 0 18px;
+    border: 1px solid rgba(255, 207, 115, 0.50);
+    border-radius: 14px;
+    background:
+        linear-gradient(135deg, rgba(255, 207, 115, 0.13), rgba(83, 183, 255, 0.08)),
+        rgba(12, 19, 27, 0.72);
+    padding: 14px;
+}
+
+.diagnostic-export-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.diagnostic-export-header h3 {
+    font-size: 1rem;
+}
+
+.diagnostic-export-header .workspace-note {
+    margin: 4px 0 0;
+}
+
+.diagnostic-export-textarea {
+    width: 100%;
+    min-height: 220px;
+    resize: vertical;
+    border: 1px solid rgba(255, 207, 115, 0.28);
+    border-radius: 10px;
+    background: rgba(6, 10, 15, 0.68);
+    color: var(--ink);
+    padding: 10px;
+    font: 0.82rem Consolas, "Cascadia Mono", monospace;
+    line-height: 1.45;
+    white-space: pre;
+}
+
 .dossier-panel .tag-block > div {
     background: var(--panel-strong);
     border: 1px solid var(--line);
@@ -1029,6 +1204,11 @@ h1 {
     flex-wrap: wrap;
     gap: 16px;
     margin: 12px 0 8px;
+}
+
+.diagnostic-options-toolbar {
+    align-items: center;
+    margin-top: 12px;
 }
 
 .batch-toggle {

@@ -24,11 +24,94 @@ public sealed class WvWAnalystFightPayloadDto
 
     public WvWAnalystObliterateSummaryDto? Obliterate { get; set; }
 
+    public WvWAnalystFightShapeDto? FightShape { get; set; }
+
     public IReadOnlyList<WvWAnalystThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystThreatBoonSummaryDto>();
 
     public IReadOnlyList<WvWAnalystTopBurstDto> TopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
 
     public IReadOnlyList<WvWAnalystPlayerSummaryDto> Players { get; set; } = Array.Empty<WvWAnalystPlayerSummaryDto>();
+}
+
+public sealed class WvWAnalystFightShapeDto
+{
+    public bool Available { get; set; }
+
+    public string DetectionLabel { get; set; } = string.Empty;
+
+    public string CleanupSide { get; set; } = string.Empty;
+
+    public string LosingSide { get; set; } = string.Empty;
+
+    public double Confidence { get; set; }
+
+    public long? CompetitiveEndTimeMs { get; set; }
+
+    public long? CleanupStartTimeMs { get; set; }
+
+    public long CompetitiveDurationMs { get; set; }
+
+    public long CleanupDurationMs { get; set; }
+
+    public double CleanupPercent { get; set; }
+
+    public IReadOnlyList<string> Rules { get; set; } = Array.Empty<string>();
+
+    public long? BestCandidateTimeMs { get; set; }
+
+    public string BestCandidateCleanupSide { get; set; } = string.Empty;
+
+    public double BestCandidateConfidence { get; set; }
+
+    public string BestCandidateReason { get; set; } = string.Empty;
+
+    public string BestCandidateDetail { get; set; } = string.Empty;
+
+    public WvWAnalystFightShapeEventSnapshotDto? AtCleanupStart { get; set; }
+
+    public WvWAnalystFightShapeEventSnapshotDto? AfterCleanupStart { get; set; }
+
+    public WvWAnalystFightShapeSideStateDto? SquadAtCleanupStart { get; set; }
+
+    public WvWAnalystFightShapeSideStateDto? EnemyAtCleanupStart { get; set; }
+}
+
+public sealed class WvWAnalystFightShapeEventSnapshotDto
+{
+    public int SquadMembersDowned { get; set; }
+
+    public int EnemyPlayersDowned { get; set; }
+
+    public int SquadKillsSecured { get; set; }
+
+    public int EnemyKillsSecured { get; set; }
+
+    public int SquadRecoveries { get; set; }
+
+    public int EnemyRecoveries { get; set; }
+
+    public long SquadDamage { get; set; }
+
+    public long EnemyDamage { get; set; }
+}
+
+public sealed class WvWAnalystFightShapeSideStateDto
+{
+    public int Total { get; set; }
+
+    public int Known { get; set; }
+
+    public int Active { get; set; }
+
+    public int Downed { get; set; }
+
+    public int DeadOrDc { get; set; }
+
+    public int Removed { get; set; }
+
+    public int FarFromFight { get; set; }
+
+    public int Unobserved { get; set; }
 }
 
 public sealed class WvWAnalystMetaDto

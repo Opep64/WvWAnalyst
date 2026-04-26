@@ -206,6 +206,7 @@ public sealed record FightIndexDto(
     FightDefenseSaveIndexDto? DefenseSaves,
     FightMitigationSummaryIndexDto? MitigationSummary,
     FightObliterateIndexDto? Obliterate,
+    FightShapeIndexDto? FightShape,
     IReadOnlyList<FightThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightTopBurstIndexDto> TopBursts,
     IReadOnlyList<FightPlayerIndexDto> Players,
@@ -502,6 +503,48 @@ public sealed record FightPlayerProvidedBoonIndexDto(
     double Generation,
     double GenerationPresence,
     double Overstack);
+
+public sealed record FightShapeIndexDto(
+    bool Available,
+    string? DetectionLabel,
+    string? CleanupSide,
+    string? LosingSide,
+    double Confidence,
+    long? CompetitiveEndTimeMs,
+    long? CleanupStartTimeMs,
+    long CompetitiveDurationMs,
+    long CleanupDurationMs,
+    double CleanupPercent,
+    IReadOnlyList<string> Rules,
+    long? BestCandidateTimeMs,
+    string? BestCandidateCleanupSide,
+    double BestCandidateConfidence,
+    string? BestCandidateReason,
+    string? BestCandidateDetail,
+    FightShapeEventSnapshotIndexDto? AtCleanupStart,
+    FightShapeEventSnapshotIndexDto? AfterCleanupStart,
+    FightShapeSideStateIndexDto? SquadAtCleanupStart,
+    FightShapeSideStateIndexDto? EnemyAtCleanupStart);
+
+public sealed record FightShapeEventSnapshotIndexDto(
+    int SquadMembersDowned,
+    int EnemyPlayersDowned,
+    int SquadKillsSecured,
+    int EnemyKillsSecured,
+    int SquadRecoveries,
+    int EnemyRecoveries,
+    long SquadDamage,
+    long EnemyDamage);
+
+public sealed record FightShapeSideStateIndexDto(
+    int Total,
+    int Known,
+    int Active,
+    int Downed,
+    int DeadOrDc,
+    int Removed,
+    int FarFromFight,
+    int Unobserved);
 
 public sealed record FightOutcomeDto(
     string OutcomeCode,

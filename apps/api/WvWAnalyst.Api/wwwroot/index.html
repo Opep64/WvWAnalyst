@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260425f">
+    <link rel="stylesheet" href="/styles.css?v=20260426cleanup6">
 </head>
 <body>
     <div class="page-shell">
@@ -83,6 +83,13 @@
                     </div>
                 </div>
                 <div class="import-status" id="manage-reset-status">No reset has been run in this browser session yet.</div>
+                <div class="browser-controls diagnostic-options-toolbar">
+                    <label class="batch-toggle">
+                        <input id="manage-show-fight-shape-diagnostics" type="checkbox">
+                        <span>Show fight-shape diagnostics</span>
+                    </label>
+                    <p class="workspace-note">Reveals the temporary cleanup probe TSV, fight-shape browser column, and dossier diagnostics.</p>
+                </div>
                 <div class="batch-results-toolbar" id="batch-results-toolbar" hidden>
                     <label class="batch-toggle">
                         <input id="batch-results-show-all" type="checkbox">
@@ -158,6 +165,11 @@
                         <div class="fight-actions" id="dossier-artifact-links"></div>
                     </div>
                 </div>
+                <section class="dossier-card dossier-fight-shape-yi" data-fight-shape-diagnostics hidden>
+                    <div class="yi-diagnostic-kicker">Temporary Diagnostic</div>
+                    <h3>Cleanup Boundary Probe</h3>
+                    <div id="dossier-fight-shape"></div>
+                </section>
                 <div class="dossier-grid dossier-grid-thirds">
                     <section class="dossier-card">
                         <h3>Outcome</h3>
@@ -420,6 +432,17 @@
                         </div>
                     </details>
                 </div>
+                <section class="diagnostic-export-card" data-fight-shape-diagnostics hidden>
+                    <div class="diagnostic-export-header">
+                        <div>
+                            <div class="yi-diagnostic-kicker">Temporary Export</div>
+                            <h3>Cleanup Probe TSV</h3>
+                            <p class="workspace-note" id="fight-shape-export-summary"></p>
+                        </div>
+                        <button class="action-link action-link-button" id="fight-shape-export-copy" type="button">Copy TSV</button>
+                    </div>
+                    <textarea id="fight-shape-export-textarea" class="diagnostic-export-textarea" readonly spellcheck="false">Loading cleanup probe export...</textarea>
+                </section>
                 <div class="table-shell table-shell-scroll table-shell-fight-browser">
                     <table class="data-table">
                         <thead>
@@ -429,6 +452,7 @@
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="duration">Duration</button></th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="outcome">Outcome</button></th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="score">Score</button></th>
+                                <th data-fight-shape-diagnostics hidden>Temp Shape</th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="squad">Squad</button></th>
                                 <th><button class="sort-header" type="button" data-fight-browser-sort="enemy">Enemy</button></th>
                                 <th>Attributes</th>
@@ -773,6 +797,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260425f" defer></script>
+    <script src="/app.js?v=20260426cleanup6" defer></script>
 </body>
 </html>
