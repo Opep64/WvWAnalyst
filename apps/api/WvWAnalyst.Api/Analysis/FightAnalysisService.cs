@@ -441,7 +441,7 @@ public sealed class FightAnalysisService
                 var averageRecoveries = sampleCount == 0 ? 0.0 : Math.Round(mergedFightEntries.Average(entry => entry.Recoveries), 1);
                 double? averageInPositionRate = positioningRates.Length == 0 ? null : Math.Round(positioningRates.Average(), 1);
                 var winRatePercent = sampleCount == 0 ? 0.0 : Math.Round(winCount * 100.0 / sampleCount, 1);
-                var impactScore = ComputeImpactScore(
+                var aggregateImpactScore = ComputeImpactScore(
                     averageWeightedLaneScore: laneScores.Length == 0 ? 0.0 : laneScores.Average(score => score.Weighted),
                     winRatePercent: winRatePercent,
                     averageDamage: averageDamage,
@@ -455,6 +455,7 @@ public sealed class FightAnalysisService
                     averageDeaths: averageDeaths,
                     averageRecoveries: averageRecoveries,
                     averageInPositionRate: averageInPositionRate);
+                var impactScore = ComputeFightWeightedCharacterImpactScore(characters, aggregateImpactScore);
 
                 return new FightAnalysisPlayerRowDto(
                     Account: group.Key,
@@ -1758,6 +1759,21 @@ public sealed class FightAnalysisService
                 + sustainScore * 0.15
                 + survivalScore * 0.10
                 + winRatePercent * 0.05),
+            1);
+    }
+
+    private static double ComputeFightWeightedCharacterImpactScore(
+        IReadOnlyList<FightAnalysisPlayerCharacterDto> characters,
+        double fallbackImpactScore)
+    {
+        int fightCount = characters.Sum(character => Math.Max(0, character.FightCount));
+        if (fightCount <= 0)
+        {
+            return fallbackImpactScore;
+        }
+
+        return Math.Round(
+            characters.Sum(character => character.ImpactScore * Math.Max(0, character.FightCount)) / fightCount,
             1);
     }
 

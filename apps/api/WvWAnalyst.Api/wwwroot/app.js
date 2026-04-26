@@ -2521,7 +2521,7 @@ function getSelectedAnalysisPlayerImpactDetail(player) {
     if (stringEqualsIgnoreCase(laneKey, "all")) {
         return {
             value: Number(player.impactScore ?? 0),
-            note: `${formatPercent(player.averageWeightedLaneScore)} weighted lane`
+            note: "Fight-weighted character impact"
         };
     }
 
@@ -4036,7 +4036,7 @@ function renderAnalysisPlayers(snapshot) {
     const selectedLaneLabel = getSelectedAnalysisPlayerLaneLabel();
     const hasSearchValue = Boolean(document.querySelector("#analysis-player-search")?.value.trim());
     const laneScopeSummary = stringEqualsIgnoreCase(getSelectedAnalysisPlayerLaneKey(), "all")
-        ? "Impact shows overall impact."
+        ? "Impact is fight-weighted across each player's character/spec cards."
         : `Impact shows the best ${selectedLaneLabel} value from any character/spec card with at least 10 total fights, and only players with at least ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneLabel} appearances are shown.`;
     const thresholdSummary = hasSearchValue
         ? `Search override is active, so matching players below ${MINIMUM_PLAYER_TABLE_FIGHTS} total imported fights can still appear.`
