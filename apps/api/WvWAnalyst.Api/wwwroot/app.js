@@ -18,7 +18,7 @@ let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY
 let logFileUploadBusy = false;
 let manageResetBusy = false;
 let activeAppTab = "manage";
-let activeAnalysisTab = "players";
+let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "impact", direction: "desc" };
 let analysisClassSortState = { key: "impact", direction: "desc" };
@@ -32,6 +32,7 @@ let selectedAnalysisPlayerImpactTrendIds = null;
 let selectedAnalysisPlayerImpactTrendOwner = null;
 let selectedAnalysisClassImpactTrendIds = null;
 let selectedAnalysisClassImpactTrendOwner = null;
+let analysisImpactTrendLegendExpanded = { player: false, class: false };
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
 let compHelperCandidateTierKey = "best";
@@ -121,6 +122,19 @@ const COMP_HELPER_LANE_TARGETS = [
     { key: "control", label: "Control", floor: 50, target: 80, weight: 0.90 },
     { key: "rez", label: "Rez", floor: 25, target: 50, weight: 0.55 }
 ];
+const ANALYSIS_LANE_DISPLAY_ORDER = [
+    { key: "pressure", label: "Pressure", aliases: ["pressure"] },
+    { key: "conversion", label: "Conversion", aliases: ["conversion"] },
+    { key: "strip", label: "Boon Strip", aliases: ["strip", "boonstrip"] },
+    { key: "recovery", label: "Recovery", aliases: ["recovery"] },
+    { key: "prevention", label: "Prevention", aliases: ["prevention"] },
+    { key: "boonsupport", label: "Boon Support", aliases: ["boonsupport"] },
+    { key: "control", label: "Control", aliases: ["control"] },
+    { key: "rez", label: "Rez", aliases: ["rez"] }
+];
+const ANALYSIS_LANE_ORDER_LOOKUP = new Map(ANALYSIS_LANE_DISPLAY_ORDER.flatMap((entry, index) =>
+    [entry.key, entry.label, ...(entry.aliases ?? [])]
+        .map(alias => [normalizeAnalysisLaneOrderToken(alias), { ...entry, index }])));
 const COMP_HELPER_PACKAGE_TARGETS = [
     { key: "stability", label: "Stability", floor: 60, target: 95, weight: 1.50, mandatory: true, allowOvercap: false },
     { key: "healing", label: "Healing", floor: 60, target: 95, weight: 1.45, mandatory: true },
@@ -1707,6 +1721,152 @@ function clearAnalysisClassFilters() {
     clearSelectedClassFilterValues("#analysis-enemy-lacks");
 }
 
+function collapseAnalysisFilterDrawers() {
+    document.querySelectorAll(".analysis-workbench details").forEach(details => {
+        details.open = false;
+    });
+}
+
+function resetAnalysisFiltersToDefaults() {
+    document.querySelector("#analysis-commander").value = "";
+    document.querySelector("#analysis-start-date").value = "";
+    document.querySelector("#analysis-end-date").value = "";
+    document.querySelector("#analysis-outcome").value = "all";
+    document.querySelector("#analysis-patch-scope").value = "all";
+    clearSelectedAttributeFilterValues("#analysis-attribute-filters");
+    clearAnalysisClassFilters();
+    collapseAnalysisFilterDrawers();
+    currentAnalysisSnapshot = null;
+}
+
+function buildAnalysisScopeStaticChip(label) {
+    return `
+        <li>
+            <span class="analysis-scope-chip-static">${escapeHtml(label)}</span>
+        </li>
+    `;
+}
+
+function buildAnalysisScopeClearChip(key, label) {
+    return `
+        <li>
+            <button class="analysis-scope-chip" type="button" data-analysis-scope-clear="${escapeHtml(key)}" title="${escapeHtml(`Remove ${label}`)}">
+                <span>${escapeHtml(label)}</span>
+                <span class="analysis-scope-chip-clear" aria-hidden="true">x</span>
+            </button>
+        </li>
+    `;
+}
+
+function buildAnalysisPatchScopeChipLabel(selection) {
+    const patchScope = String(selection?.patchScope ?? "all");
+    if (!patchScope || patchScope === "all") {
+        return null;
+    }
+
+    const eraIds = selection?.patchEraIds ?? [];
+    if (patchScope === "era" && eraIds.length > 0) {
+        return `Patch: ${eraIds.join(", ")}`;
+    }
+
+    return `Patch: ${patchScope}`;
+}
+
+function buildAnalysisScopeChipListHtml(snapshot) {
+    const selection = snapshot?.selection ?? {};
+    const chips = [
+        buildAnalysisScopeStaticChip(`${snapshot.scope.filteredFightCount} fights`),
+        buildAnalysisScopeStaticChip(`${snapshot.scope.winCount}-${snapshot.scope.lossCount}-${snapshot.scope.drawCount} record`)
+    ];
+    const removableChips = [];
+
+    if (selection.commander) {
+        removableChips.push(buildAnalysisScopeClearChip("commander", `Commander: ${selection.commander}`));
+    }
+
+    if (selection.startDate) {
+        removableChips.push(buildAnalysisScopeClearChip("startDate", `Start: ${selection.startDate}`));
+    }
+
+    if (selection.endDate) {
+        removableChips.push(buildAnalysisScopeClearChip("endDate", `End: ${selection.endDate}`));
+    }
+
+    if (selection.outcomeCode && selection.outcomeCode !== "all") {
+        removableChips.push(buildAnalysisScopeClearChip("outcome", `Outcome: ${selection.outcomeCode}`));
+    }
+
+    const patchLabel = buildAnalysisPatchScopeChipLabel(selection);
+    if (patchLabel) {
+        removableChips.push(buildAnalysisScopeClearChip("patch", patchLabel));
+    }
+
+    if ((selection.fightAttributeKeys?.length ?? 0) > 0) {
+        removableChips.push(buildAnalysisScopeClearChip("attributes", `Attributes: ${selection.fightAttributeKeys.join(", ")}`));
+    }
+
+    if ((selection.squadIncludeClasses?.length ?? 0) > 0) {
+        removableChips.push(buildAnalysisScopeClearChip("squadInclude", `Our side has: ${joinClassFilterLabels(selection.squadIncludeClasses)}`));
+    }
+
+    if ((selection.squadExcludeClasses?.length ?? 0) > 0) {
+        removableChips.push(buildAnalysisScopeClearChip("squadExclude", `Our side lacks: ${joinClassFilterLabels(selection.squadExcludeClasses)}`));
+    }
+
+    if ((selection.enemyIncludeClasses?.length ?? 0) > 0) {
+        removableChips.push(buildAnalysisScopeClearChip("enemyInclude", `Enemy has: ${joinClassFilterLabels(selection.enemyIncludeClasses)}`));
+    }
+
+    if ((selection.enemyExcludeClasses?.length ?? 0) > 0) {
+        removableChips.push(buildAnalysisScopeClearChip("enemyExclude", `Enemy lacks: ${joinClassFilterLabels(selection.enemyExcludeClasses)}`));
+    }
+
+    return [
+        ...chips,
+        ...(removableChips.length > 0 ? removableChips : [buildAnalysisScopeStaticChip("All optional filters")])
+    ].join("");
+}
+
+function clearAnalysisScopeFilter(key) {
+    switch (key) {
+        case "commander":
+            document.querySelector("#analysis-commander").value = "";
+            break;
+        case "startDate":
+            document.querySelector("#analysis-start-date").value = "";
+            break;
+        case "endDate":
+            document.querySelector("#analysis-end-date").value = "";
+            break;
+        case "outcome":
+            document.querySelector("#analysis-outcome").value = "all";
+            break;
+        case "patch":
+            document.querySelector("#analysis-patch-scope").value = "all";
+            break;
+        case "attributes":
+            clearSelectedAttributeFilterValues("#analysis-attribute-filters");
+            break;
+        case "squadInclude":
+            clearSelectedClassFilterValues("#analysis-squad-has");
+            break;
+        case "squadExclude":
+            clearSelectedClassFilterValues("#analysis-squad-lacks");
+            break;
+        case "enemyInclude":
+            clearSelectedClassFilterValues("#analysis-enemy-has");
+            break;
+        case "enemyExclude":
+            clearSelectedClassFilterValues("#analysis-enemy-lacks");
+            break;
+        default:
+            return false;
+    }
+
+    currentAnalysisSnapshot = null;
+    return true;
+}
+
 function matchesFightSideClassFilters(fight, sideKey, requiredClasses, excludedClasses) {
     if ((requiredClasses?.length ?? 0) === 0 && (excludedClasses?.length ?? 0) === 0) {
         return true;
@@ -2452,22 +2612,71 @@ function getLaneContributionByKey(collection, laneKey) {
     return (collection ?? []).find(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey)) ?? null;
 }
 
+function normalizeAnalysisLaneOrderToken(value) {
+    return String(value ?? "").trim().toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getAnalysisLaneOrderEntry(lane) {
+    const tokens = [
+        lane?.laneKey,
+        lane?.laneLabel,
+        lane?.key,
+        lane?.label
+    ]
+        .map(normalizeAnalysisLaneOrderToken)
+        .filter(Boolean);
+
+    for (const token of tokens) {
+        const match = ANALYSIS_LANE_ORDER_LOOKUP.get(token);
+        if (match) {
+            return match;
+        }
+    }
+
+    return null;
+}
+
+function getAnalysisLaneDisplayLabel(lane) {
+    return getAnalysisLaneOrderEntry(lane)?.label
+        ?? lane?.laneLabel
+        ?? lane?.label
+        ?? lane?.laneKey
+        ?? lane?.key
+        ?? "Lane";
+}
+
+function compareAnalysisLaneDisplayOrder(left, right) {
+    const leftOrder = getAnalysisLaneOrderEntry(left)?.index ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = getAnalysisLaneOrderEntry(right)?.index ?? Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder
+        || getAnalysisLaneDisplayLabel(left).localeCompare(getAnalysisLaneDisplayLabel(right), undefined, { sensitivity: "base" });
+}
+
+function getOrderedAnalysisLanes(lanes) {
+    return [...(lanes ?? [])].sort(compareAnalysisLaneDisplayOrder);
+}
+
+function getDefaultAnalysisLaneKey(availableLanes) {
+    const pressureLane = availableLanes.find(lane => getAnalysisLaneOrderEntry(lane)?.key === "pressure");
+    return pressureLane?.laneKey ?? availableLanes[0]?.laneKey ?? null;
+}
+
 function getSelectedAnalysisLaneRows(snapshot) {
-    const availableLanes = snapshot?.topLanes ?? [];
+    const availableLanes = getOrderedAnalysisLanes(snapshot?.topLanes ?? []);
     const normalizedSelected = [...new Set((selectedAnalysisLaneKeys ?? [])
         .filter(Boolean)
         .map(key => String(key)))]
         .filter(key => availableLanes.some(lane => stringEqualsIgnoreCase(lane.laneKey, key)));
 
     if (normalizedSelected.length === 0 && availableLanes.length > 0) {
-        selectedAnalysisLaneKeys = [availableLanes[0].laneKey];
+        const defaultKey = getDefaultAnalysisLaneKey(availableLanes);
+        selectedAnalysisLaneKeys = defaultKey ? [defaultKey] : [];
     } else {
         selectedAnalysisLaneKeys = normalizedSelected;
     }
 
-    return selectedAnalysisLaneKeys
-        .map(key => availableLanes.find(lane => stringEqualsIgnoreCase(lane.laneKey, key)) ?? null)
-        .filter(Boolean);
+    return availableLanes
+        .filter(lane => selectedAnalysisLaneKeys.some(key => stringEqualsIgnoreCase(key, lane.laneKey)));
 }
 
 function isAnalysisLaneSelected(snapshot, laneKey) {
@@ -2476,14 +2685,15 @@ function isAnalysisLaneSelected(snapshot, laneKey) {
 }
 
 function setSelectedAnalysisLaneKeys(snapshot, laneKeys) {
-    const availableLanes = snapshot?.topLanes ?? [];
+    const availableLanes = getOrderedAnalysisLanes(snapshot?.topLanes ?? []);
     const nextKeys = [...new Set((laneKeys ?? [])
         .filter(Boolean)
         .map(key => String(key)))]
         .filter(key => availableLanes.some(lane => stringEqualsIgnoreCase(lane.laneKey, key)));
 
     if (nextKeys.length === 0 && availableLanes.length > 0) {
-        selectedAnalysisLaneKeys = [availableLanes[0].laneKey];
+        const defaultKey = getDefaultAnalysisLaneKey(availableLanes);
+        selectedAnalysisLaneKeys = defaultKey ? [defaultKey] : [];
         return;
     }
 
@@ -2520,7 +2730,7 @@ function buildAnalysisLaneSelectionToggle(lane, isActive) {
                 type="checkbox"
                 data-analysis-lane-toggle="${escapeHtml(lane.laneKey)}"
                 ${isActive ? "checked" : ""}>
-            <span>${escapeHtml(lane.laneLabel)}</span>
+            <span>${escapeHtml(getAnalysisLaneDisplayLabel(lane))}</span>
         </label>
     `;
 }
@@ -2546,7 +2756,7 @@ function buildCombinedLaneContribution(selectedLaneRows, laneContributions) {
 
     return {
         laneKey: selectedLaneRows.map(lane => lane.laneKey).join("+"),
-        laneLabel: selectedLaneRows.map(lane => lane.laneLabel).join(" + "),
+        laneLabel: selectedLaneRows.map(getAnalysisLaneDisplayLabel).join(" + "),
         averageStrengthPercent: averageMetric(lane => lane.averageStrengthPercent),
         averageSharePercent: averageMetric(lane => lane.averageSharePercent),
         overallStrengthPercent: averageMetric(lane => lane.overallStrengthPercent),
@@ -2557,7 +2767,7 @@ function buildCombinedLaneContribution(selectedLaneRows, laneContributions) {
         matchedLaneCount: matchedEntries.length,
         selectedLaneCount: selectedLaneRows.length,
         coverageRatePercent: Math.round((matchedEntries.length / divisor) * 1000) / 10,
-        strongestLaneLabel: strongestMatch?.lane?.laneLabel ?? null
+        strongestLaneLabel: strongestMatch?.lane ? getAnalysisLaneDisplayLabel(strongestMatch.lane) : null
     };
 }
 
@@ -4268,6 +4478,8 @@ function buildAnalysisImpactTrendChart(trends, selectedIds, context) {
 
 function buildAnalysisImpactTrendCard(context, title, trends, selectedIds) {
     const prefix = context === "class" ? "analysis-class-impact-trend" : "analysis-player-impact-trend";
+    const isExpanded = Boolean(analysisImpactTrendLegendExpanded[context]);
+    const showLegendToggle = (trends?.length ?? 0) > 5;
     return `
         <section class="analysis-card analysis-card--wide analysis-boon-trend-card analysis-impact-trend-card">
             <div class="section-heading">
@@ -4280,9 +4492,12 @@ function buildAnalysisImpactTrendCard(context, title, trends, selectedIds) {
                     <button class="action-link action-link-button" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-action="none">Clear all</button>
                 </div>
             </div>
-            <div class="analysis-boon-trend-legend" id="${prefix}-legend">
+            <div class="analysis-boon-trend-legend analysis-impact-trend-legend ${isExpanded ? "is-expanded" : "is-collapsed"}" id="${prefix}-legend">
                 ${buildAnalysisImpactTrendLegend(trends, selectedIds, context)}
             </div>
+            ${showLegendToggle
+                ? `<button class="action-link action-link-button analysis-impact-trend-toggle" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-toggle aria-expanded="${isExpanded ? "true" : "false"}">${escapeHtml(isExpanded ? "Show fewer characters" : `Show all ${trends.length} characters`)}</button>`
+                : ""}
             <div class="analysis-boon-trend-chart-wrap" id="${prefix}-wrap">
                 <div class="analysis-boon-trend-tooltip" id="${prefix}-tooltip" hidden></div>
                 <div id="${prefix}-chart">${buildAnalysisImpactTrendChart(trends, selectedIds, context)}</div>
@@ -4412,6 +4627,17 @@ function handleAnalysisImpactTrendSelectionChange(event) {
 }
 
 function handleAnalysisImpactTrendActionClick(event) {
+    const toggle = event.target.closest("[data-analysis-impact-trend-toggle]");
+    if (toggle && currentAnalysisSnapshot) {
+        const context = toggle.dataset.analysisImpactTrendContext === "class" ? "class" : "player";
+        analysisImpactTrendLegendExpanded = {
+            ...analysisImpactTrendLegendExpanded,
+            [context]: !analysisImpactTrendLegendExpanded[context]
+        };
+        renderAnalysisImpactTrendContext(context);
+        return;
+    }
+
     const button = event.target.closest("[data-analysis-impact-trend-action]");
     if (!button || !currentAnalysisSnapshot) {
         return;
@@ -4791,20 +5017,21 @@ function renderAnalysisClasses(snapshot) {
 
 function renderAnalysisLanes(snapshot) {
     const laneSelectionContainer = document.querySelector("#analysis-lane-selection");
+    const orderedLanes = getOrderedAnalysisLanes(snapshot.topLanes ?? []);
     getSelectedAnalysisLaneRows(snapshot);
     setInnerHtml(
         "#analysis-lanes-body",
-        (snapshot.topLanes?.length
-            ? snapshot.topLanes.map(buildAnalysisLaneRow).join("")
-            : `<tr><td colspan="7">No lane summaries matched the current filters.</td></tr>`));
+        (orderedLanes.length
+            ? orderedLanes.map(buildAnalysisLaneRow).join("")
+            : `<tr><td colspan="6">No lane summaries matched the current filters.</td></tr>`));
 
     if (laneSelectionContainer) {
-        laneSelectionContainer.innerHTML = (snapshot.topLanes?.length ?? 0) > 0
-            ? snapshot.topLanes.map(lane => buildAnalysisLaneSelectionToggle(lane, isAnalysisLaneSelected(snapshot, lane.laneKey))).join("")
+        laneSelectionContainer.innerHTML = orderedLanes.length > 0
+            ? orderedLanes.map(lane => buildAnalysisLaneSelectionToggle(lane, isAnalysisLaneSelected(snapshot, lane.laneKey))).join("")
             : `<span class="table-inline-note">No lane toggles are available for this selection.</span>`;
     }
 
-    if (!snapshot.topLanes?.length) {
+    if (orderedLanes.length === 0) {
         selectedAnalysisLaneKeys = [];
         renderAnalysisLaneDetail(snapshot);
         return;
@@ -4812,7 +5039,7 @@ function renderAnalysisLanes(snapshot) {
 
     setInnerHtml(
         "#analysis-lanes-body",
-        snapshot.topLanes.map(buildAnalysisLaneRow).join(""));
+        orderedLanes.map(buildAnalysisLaneRow).join(""));
     renderAnalysisLaneDetail(snapshot);
 }
 
@@ -4824,7 +5051,7 @@ function buildAnalysisLaneRow(lane) {
 
     return `
         <tr class="${rowClasses.join(" ")}" data-lane-key="${escapeHtml(lane.laneKey)}">
-            <td><strong>${escapeHtml(lane.laneLabel)}</strong></td>
+            <td><strong>${escapeHtml(getAnalysisLaneDisplayLabel(lane))}</strong></td>
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(`${lane.samples} samples`)}</strong>
@@ -4835,7 +5062,6 @@ function buildAnalysisLaneRow(lane) {
             <td>${escapeHtml(`${formatPercent(lane.appearanceRatePercent)} fights | ${formatPercent(lane.averageSharePercent)} share`)}</td>
             <td>${escapeHtml(lane.topClassLabel ?? "-")}</td>
             <td>${escapeHtml(lane.topPlayerDisplayName ?? "-")}</td>
-            <td>${escapeHtml(lane.evidenceLine ?? "-")}</td>
         </tr>
     `;
 }
@@ -4932,7 +5158,7 @@ function renderAnalysisLaneDetail(snapshot) {
         return;
     }
 
-    const laneLabel = selectedLaneRows.map(lane => lane.laneLabel).join(" + ");
+    const laneLabel = selectedLaneRows.map(getAnalysisLaneDisplayLabel).join(" + ");
     const isCombinedLaneView = selectedLaneRows.length > 1;
     const combinedLane = {
         laneLabel,
@@ -4952,7 +5178,7 @@ function renderAnalysisLaneDetail(snapshot) {
         : getQualifiedLaneClasses(snapshot, selectedLaneRows[0].laneKey);
     const laneThresholdCopy = isCombinedLaneView
         ? `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total appearances across the selected lanes. Best classes come from the qualified class list and are scored on the selected lanes together.`
-        : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneRows[0].laneLabel} appearances. Best classes come from the qualified class list.`;
+        : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${getAnalysisLaneDisplayLabel(selectedLaneRows[0])} appearances. Best classes come from the qualified class list.`;
     const laneProfileCopy = isCombinedLaneView
         ? `${formatPercent(combinedLane.averageSharePercent)} average share across the selected lanes.`
         : `${formatPercent(combinedLane.averageSharePercent)} average share across retained lane samples.`;
@@ -5464,7 +5690,37 @@ function renderAnalysisBoons(snapshot) {
     renderAnalysisBoonDetail(selectedBoon);
 }
 
-function setActiveAnalysisTab(tabKey) {
+function resetAnalysisPanelScroll(tabKey) {
+    const panel = document.querySelector(`[data-analysis-panel="${tabKey}"]`);
+    if (!panel) {
+        return;
+    }
+
+    panel.scrollTop = 0;
+    panel.querySelectorAll(".table-shell-scroll, .analysis-split-detail").forEach(element => {
+        element.scrollTop = 0;
+    });
+
+    const panelRect = panel.getBoundingClientRect();
+    const workbench = document.querySelector(".analysis-workbench");
+    const workbenchRect = workbench?.getBoundingClientRect();
+    const workbenchBottom = workbenchRect && workbenchRect.bottom > 0 && workbenchRect.top < window.innerHeight
+        ? workbenchRect.bottom
+        : 0;
+    const targetViewportTop = workbenchBottom > 0 ? workbenchBottom + 12 : 12;
+    const scrollDelta = panelRect.top - targetViewportTop;
+
+    if (Math.abs(scrollDelta) > 1) {
+        window.scrollTo({
+            top: Math.max(0, window.scrollY + scrollDelta),
+            left: window.scrollX,
+            behavior: "auto"
+        });
+    }
+}
+
+function setActiveAnalysisTab(tabKey, options = {}) {
+    const { resetScroll = false } = options;
     activeAnalysisTab = tabKey;
 
     document.querySelectorAll("[data-analysis-tab]").forEach(button => {
@@ -5478,6 +5734,10 @@ function setActiveAnalysisTab(tabKey) {
         panel.classList.toggle("is-active", isActive);
         panel.hidden = !isActive;
     });
+
+    if (resetScroll) {
+        requestAnimationFrame(() => resetAnalysisPanelScroll(tabKey));
+    }
 }
 
 function renderAnalysisLoading(message = "Loading analysis...") {
@@ -5487,7 +5747,7 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-trend-delta-grid", "");
     setInnerHtml("#analysis-chart-grid", "");
     setInnerHtml("#analysis-mitigation-card", "");
-    setInnerHtml("#analysis-scope-list", buildTagListHtml([message]));
+    setInnerHtml("#analysis-scope-list", buildAnalysisScopeStaticChip(message));
     document.querySelector("#analysis-players-summary").textContent = message;
     setInnerHtml("#analysis-players-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-player-detail", "");
@@ -5523,37 +5783,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisCharts(snapshot);
     renderAnalysisMitigation(snapshot);
 
-    setInnerHtml(
-        "#analysis-scope-list",
-        buildTagListHtml([
-            `Wins: ${snapshot.scope.winCount}`,
-            `Losses: ${snapshot.scope.lossCount}`,
-            `Draws: ${snapshot.scope.drawCount}`,
-            snapshot.selection.commander ? `Commander: ${snapshot.selection.commander}` : "Commander: all",
-            snapshot.selection.startDate ? `Start: ${snapshot.selection.startDate}` : "Start: earliest",
-            snapshot.selection.endDate ? `End: ${snapshot.selection.endDate}` : "End: latest",
-            snapshot.selection.outcomeCode && snapshot.selection.outcomeCode !== "all"
-                ? `Outcome filter: ${snapshot.selection.outcomeCode}`
-                : "Outcome filter: all",
-            snapshot.selection.patchScope && snapshot.selection.patchScope !== "all"
-                ? `Patch scope: ${snapshot.selection.patchScope}${(snapshot.selection.patchEraIds?.length ?? 0) > 0 ? ` (${snapshot.selection.patchEraIds.join(", ")})` : ""}`
-                : "Patch scope: all",
-            (snapshot.selection?.fightAttributeKeys?.length ?? 0) > 0
-                ? `Attributes: ${snapshot.selection.fightAttributeKeys.join(", ")}`
-                : "Attributes: all",
-            (snapshot.selection?.squadIncludeClasses?.length ?? 0) > 0
-                ? `Our side has: ${joinClassFilterLabels(snapshot.selection.squadIncludeClasses)}`
-                : "Our side has: any",
-            (snapshot.selection?.squadExcludeClasses?.length ?? 0) > 0
-                ? `Our side lacks: ${joinClassFilterLabels(snapshot.selection.squadExcludeClasses)}`
-                : "Our side lacks: none",
-            (snapshot.selection?.enemyIncludeClasses?.length ?? 0) > 0
-                ? `Enemy has: ${joinClassFilterLabels(snapshot.selection.enemyIncludeClasses)}`
-                : "Enemy has: any",
-            (snapshot.selection?.enemyExcludeClasses?.length ?? 0) > 0
-                ? `Enemy lacks: ${joinClassFilterLabels(snapshot.selection.enemyExcludeClasses)}`
-                : "Enemy lacks: none"
-        ]));
+    setInnerHtml("#analysis-scope-list", buildAnalysisScopeChipListHtml(snapshot));
 
     renderAnalysisPlayers(snapshot);
     renderAnalysisClasses(snapshot);
@@ -7206,16 +7436,22 @@ function handleFightBrowserChange() {
 }
 
 async function refreshAnalysis() {
-    const button = document.querySelector("#analysis-apply-button");
-    button.disabled = true;
+    collapseAnalysisFilterDrawers();
+    setAnalysisRefreshControlsBusy(true);
 
     try {
         await ensureAnalysisLoaded(true);
     } catch (error) {
         renderAnalysisError(error instanceof Error ? error.message : String(error));
     } finally {
-        button.disabled = false;
+        setAnalysisRefreshControlsBusy(false);
     }
+}
+
+function setAnalysisRefreshControlsBusy(isBusy) {
+    document.querySelectorAll("#analysis-apply-button, #analysis-clear-filters-button").forEach(button => {
+        button.disabled = isBusy;
+    });
 }
 
 function updateAnalysisTrendControls(mode, smoothingWindow) {
@@ -7495,6 +7731,16 @@ document.querySelector("#analysis-clear-attribute-filters").addEventListener("cl
     clearSelectedAttributeFilterValues("#analysis-attribute-filters");
     currentAnalysisSnapshot = null;
 });
+document.querySelector("#analysis-scope-list").addEventListener("click", event => {
+    const button = event.target.closest("[data-analysis-scope-clear]");
+    if (!button) {
+        return;
+    }
+
+    if (clearAnalysisScopeFilter(button.dataset.analysisScopeClear)) {
+        void refreshAnalysis();
+    }
+});
 document.querySelector("#analysis-player-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
@@ -7708,6 +7954,10 @@ document.querySelector("#analysis-lane-detail").addEventListener("click", event 
     setActiveAnalysisLaneDetailTab(button.dataset.analysisLaneDetailTab);
 });
 document.querySelector("#analysis-apply-button").addEventListener("click", refreshAnalysis);
+document.querySelector("#analysis-clear-filters-button").addEventListener("click", () => {
+    resetAnalysisFiltersToDefaults();
+    void refreshAnalysis();
+});
 document.querySelectorAll("[data-app-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
 });
@@ -7721,7 +7971,7 @@ document.querySelectorAll("[data-analysis-class-sort]").forEach(button => {
     button.addEventListener("click", () => setAnalysisClassSort(button.dataset.analysisClassSort));
 });
 document.querySelectorAll("[data-analysis-tab]").forEach(button => {
-    button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab));
+    button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab, { resetScroll: true }));
 });
 
 hydrateBatchForm();

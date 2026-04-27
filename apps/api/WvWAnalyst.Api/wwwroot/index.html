@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260426cleanup6">
+    <link rel="stylesheet" href="/styles.css?v=20260427wide10">
 </head>
 <body>
     <div class="page-shell">
@@ -472,278 +472,321 @@
                     </div>
                     <p class="workspace-note" id="analysis-summary"></p>
                 </div>
-                <div class="browser-controls">
-                    <label class="browser-field">
-                        <span>Commander</span>
-                        <select id="analysis-commander">
-                            <option value="">All commanders</option>
-                        </select>
-                    </label>
-                    <label class="browser-field">
-                        <span>Start date</span>
-                        <input id="analysis-start-date" type="date">
-                    </label>
-                    <label class="browser-field">
-                        <span>End date</span>
-                        <input id="analysis-end-date" type="date">
-                    </label>
-                    <label class="browser-field">
-                        <span>Outcome</span>
-                        <select id="analysis-outcome">
-                            <option value="all">All fights</option>
-                            <option value="squad">Wins</option>
-                            <option value="enemy">Losses</option>
-                            <option value="draw">Draws</option>
-                        </select>
-                    </label>
-                    <label class="browser-field">
-                        <span>Patch scope</span>
-                        <select id="analysis-patch-scope">
-                            <option value="all">All patches</option>
-                        </select>
-                    </label>
-                    <div class="browser-field button-field">
-                        <span>Run</span>
-                        <button class="primary-button" id="analysis-apply-button" type="button">Refresh analysis</button>
-                    </div>
-                </div>
-                <details class="attribute-filter-field">
-                    <summary class="class-filter-trigger">
-                        <span class="class-filter-title-block">
-                            <strong>Fight attributes</strong>
-                            <span class="class-filter-summary" id="analysis-attribute-summary">Any attribute</span>
-                        </span>
-                        <span class="class-filter-trigger-label">Choose</span>
-                    </summary>
-                    <div class="attribute-filter-panel">
-                        <div class="class-filter-panel-actions">
-                            <p class="workspace-note">Require one or more derived fight labels.</p>
-                            <button class="action-link action-link-button" id="analysis-clear-attribute-filters" type="button">Clear</button>
-                        </div>
-                        <div class="attribute-filter-box" id="analysis-attribute-filters"></div>
-                    </div>
-                </details>
-                <div class="class-filter-toolbar">
-                    <p class="workspace-note">Check classes to require or exclude them on either side. Leave everything unchecked to include all fights.</p>
-                    <button class="action-link action-link-button" id="analysis-clear-class-filters" type="button">Clear all class filters</button>
-                </div>
-                <div class="class-filter-grid" id="analysis-class-filters">
-                    <details class="class-filter-field">
-                        <summary class="class-filter-trigger">
-                            <span class="class-filter-title-block">
-                                <strong>Our side has</strong>
-                                <span class="class-filter-summary" id="analysis-squad-has-summary">Any class</span>
-                            </span>
-                            <span class="class-filter-trigger-label">Choose</span>
-                        </summary>
-                        <div class="class-filter-panel">
-                            <div class="class-filter-panel-actions">
-                                <p class="workspace-note">Require one or more classes on our side.</p>
-                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-has">Clear</button>
+                <div class="analysis-workbench">
+                    <div class="analysis-scope-bar">
+                        <div class="browser-controls analysis-scope-controls">
+                            <label class="browser-field">
+                                <span>Commander</span>
+                                <select id="analysis-commander">
+                                    <option value="">All commanders</option>
+                                </select>
+                            </label>
+                            <label class="browser-field">
+                                <span>Start date</span>
+                                <input id="analysis-start-date" type="date">
+                            </label>
+                            <label class="browser-field">
+                                <span>End date</span>
+                                <input id="analysis-end-date" type="date">
+                            </label>
+                            <label class="browser-field">
+                                <span>Outcome</span>
+                                <select id="analysis-outcome">
+                                    <option value="all">All fights</option>
+                                    <option value="squad">Wins</option>
+                                    <option value="enemy">Losses</option>
+                                    <option value="draw">Draws</option>
+                                </select>
+                            </label>
+                            <label class="browser-field">
+                                <span>Patch scope</span>
+                                <select id="analysis-patch-scope">
+                                    <option value="all">All patches</option>
+                                </select>
+                            </label>
+                            <div class="browser-field button-field analysis-run-field">
+                                <span>Run</span>
+                                <div class="analysis-run-buttons">
+                                    <button class="primary-button" id="analysis-apply-button" type="button">Refresh analysis</button>
+                                    <button class="action-link action-link-button" id="analysis-clear-filters-button" type="button">Clear filters</button>
+                                </div>
                             </div>
-                            <div class="class-filter-box" id="analysis-squad-has"></div>
+                        </div>
+                    </div>
+                    <details class="analysis-filter-drawer">
+                        <summary class="analysis-filter-drawer-summary">
+                            <span>
+                                <strong>Advanced filters</strong>
+                                <span class="table-inline-note">Fight attributes and class composition</span>
+                            </span>
+                            <span class="class-filter-trigger-label">Open</span>
+                        </summary>
+                        <div class="analysis-filter-drawer-body">
+                            <details class="attribute-filter-field">
+                                <summary class="class-filter-trigger">
+                                    <span class="class-filter-title-block">
+                                        <strong>Fight attributes</strong>
+                                        <span class="class-filter-summary" id="analysis-attribute-summary">Any attribute</span>
+                                    </span>
+                                    <span class="class-filter-trigger-label">Choose</span>
+                                </summary>
+                                <div class="attribute-filter-panel">
+                                    <div class="class-filter-panel-actions">
+                                        <p class="workspace-note">Require one or more derived fight labels.</p>
+                                        <button class="action-link action-link-button" id="analysis-clear-attribute-filters" type="button">Clear</button>
+                                    </div>
+                                    <div class="attribute-filter-box" id="analysis-attribute-filters"></div>
+                                </div>
+                            </details>
+                            <div class="class-filter-toolbar">
+                                <p class="workspace-note">Check classes to require or exclude them on either side. Leave everything unchecked to include all fights.</p>
+                                <button class="action-link action-link-button" id="analysis-clear-class-filters" type="button">Clear all class filters</button>
+                            </div>
+                            <div class="class-filter-grid" id="analysis-class-filters">
+                                <details class="class-filter-field">
+                                    <summary class="class-filter-trigger">
+                                        <span class="class-filter-title-block">
+                                            <strong>Our side has</strong>
+                                            <span class="class-filter-summary" id="analysis-squad-has-summary">Any class</span>
+                                        </span>
+                                        <span class="class-filter-trigger-label">Choose</span>
+                                    </summary>
+                                    <div class="class-filter-panel">
+                                        <div class="class-filter-panel-actions">
+                                            <p class="workspace-note">Require one or more classes on our side.</p>
+                                            <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-has">Clear</button>
+                                        </div>
+                                        <div class="class-filter-box" id="analysis-squad-has"></div>
+                                    </div>
+                                </details>
+                                <details class="class-filter-field">
+                                    <summary class="class-filter-trigger">
+                                        <span class="class-filter-title-block">
+                                            <strong>Our side lacks</strong>
+                                            <span class="class-filter-summary" id="analysis-squad-lacks-summary">None excluded</span>
+                                        </span>
+                                        <span class="class-filter-trigger-label">Choose</span>
+                                    </summary>
+                                    <div class="class-filter-panel">
+                                        <div class="class-filter-panel-actions">
+                                            <p class="workspace-note">Exclude fights where our side had these classes.</p>
+                                            <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-lacks">Clear</button>
+                                        </div>
+                                        <div class="class-filter-box" id="analysis-squad-lacks"></div>
+                                    </div>
+                                </details>
+                                <details class="class-filter-field">
+                                    <summary class="class-filter-trigger">
+                                        <span class="class-filter-title-block">
+                                            <strong>Enemy has</strong>
+                                            <span class="class-filter-summary" id="analysis-enemy-has-summary">Any class</span>
+                                        </span>
+                                        <span class="class-filter-trigger-label">Choose</span>
+                                    </summary>
+                                    <div class="class-filter-panel">
+                                        <div class="class-filter-panel-actions">
+                                            <p class="workspace-note">Require one or more classes on the enemy side.</p>
+                                            <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-has">Clear</button>
+                                        </div>
+                                        <div class="class-filter-box" id="analysis-enemy-has"></div>
+                                    </div>
+                                </details>
+                                <details class="class-filter-field">
+                                    <summary class="class-filter-trigger">
+                                        <span class="class-filter-title-block">
+                                            <strong>Enemy lacks</strong>
+                                            <span class="class-filter-summary" id="analysis-enemy-lacks-summary">None excluded</span>
+                                        </span>
+                                        <span class="class-filter-trigger-label">Choose</span>
+                                    </summary>
+                                    <div class="class-filter-panel">
+                                        <div class="class-filter-panel-actions">
+                                            <p class="workspace-note">Exclude fights where the enemy side had these classes.</p>
+                                            <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-lacks">Clear</button>
+                                        </div>
+                                        <div class="class-filter-box" id="analysis-enemy-lacks"></div>
+                                    </div>
+                                </details>
+                            </div>
                         </div>
                     </details>
-                    <details class="class-filter-field">
-                        <summary class="class-filter-trigger">
-                            <span class="class-filter-title-block">
-                                <strong>Our side lacks</strong>
-                                <span class="class-filter-summary" id="analysis-squad-lacks-summary">None excluded</span>
-                            </span>
-                            <span class="class-filter-trigger-label">Choose</span>
-                        </summary>
-                        <div class="class-filter-panel">
-                            <div class="class-filter-panel-actions">
-                                <p class="workspace-note">Exclude fights where our side had these classes.</p>
-                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-squad-lacks">Clear</button>
-                            </div>
-                            <div class="class-filter-box" id="analysis-squad-lacks"></div>
+                    <div class="analysis-scope-chip-block">
+                        <div class="analysis-chip-heading">
+                            <h3>Active scope</h3>
+                            <span class="table-inline-note">Applied filters</span>
                         </div>
-                    </details>
-                    <details class="class-filter-field">
-                        <summary class="class-filter-trigger">
-                            <span class="class-filter-title-block">
-                                <strong>Enemy has</strong>
-                                <span class="class-filter-summary" id="analysis-enemy-has-summary">Any class</span>
-                            </span>
-                            <span class="class-filter-trigger-label">Choose</span>
-                        </summary>
-                        <div class="class-filter-panel">
-                            <div class="class-filter-panel-actions">
-                                <p class="workspace-note">Require one or more classes on the enemy side.</p>
-                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-has">Clear</button>
-                            </div>
-                            <div class="class-filter-box" id="analysis-enemy-has"></div>
-                        </div>
-                    </details>
-                    <details class="class-filter-field">
-                        <summary class="class-filter-trigger">
-                            <span class="class-filter-title-block">
-                                <strong>Enemy lacks</strong>
-                                <span class="class-filter-summary" id="analysis-enemy-lacks-summary">None excluded</span>
-                            </span>
-                            <span class="class-filter-trigger-label">Choose</span>
-                        </summary>
-                        <div class="class-filter-panel">
-                            <div class="class-filter-panel-actions">
-                                <p class="workspace-note">Exclude fights where the enemy side had these classes.</p>
-                                <button class="action-link action-link-button" type="button" data-class-filter-clear="analysis-enemy-lacks">Clear</button>
-                            </div>
-                            <div class="class-filter-box" id="analysis-enemy-lacks"></div>
-                        </div>
-                    </details>
-                </div>
-                <div class="stats-grid" id="analysis-overview-cards"></div>
-                <div class="browser-controls analysis-trend-toolbar">
-                    <label class="browser-field">
-                        <span>Trend mode</span>
-                        <select id="analysis-trend-mode">
-                            <option value="fight">Per fight</option>
-                            <option value="week">Weekly median</option>
-                            <option value="month">Monthly median</option>
-                        </select>
-                    </label>
-                    <label class="browser-field">
-                        <span>Smoothing</span>
-                        <select id="analysis-trend-smoothing">
-                            <option value="0">Off</option>
-                            <option value="3">3 points</option>
-                            <option value="5">5 points</option>
-                            <option value="8">8 points</option>
-                        </select>
-                    </label>
-                    <div class="browser-field browser-field-wide">
-                        <span>Trend summary</span>
-                        <div class="analysis-trend-summary" id="analysis-trend-summary">Per-fight points in date order.</div>
+                        <ul class="tag-list analysis-scope-chip-list" id="analysis-scope-list"></ul>
+                    </div>
+                    <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
+                        <button class="analysis-tab is-active" id="analysis-tab-overview" type="button" data-analysis-tab="overview" role="tab" aria-selected="true">Overview</button>
+                        <button class="analysis-tab" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="false">Players</button>
+                        <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
+                        <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
+                        <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
+                        <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
                     </div>
                 </div>
-                <div class="stats-grid analysis-trend-delta-grid" id="analysis-trend-delta-grid"></div>
-                <div class="pillar-grid" id="analysis-chart-grid"></div>
-                <div class="stats-grid analysis-mitigation-grid" id="analysis-mitigation-card"></div>
-                <div class="tag-block">
-                    <div>
-                        <h3>Filter scope</h3>
-                        <ul class="tag-list" id="analysis-scope-list"></ul>
+                <div class="analysis-panel analysis-panel-overview is-active" id="analysis-panel-overview" data-analysis-panel="overview" role="tabpanel" aria-labelledby="analysis-tab-overview">
+                    <div class="analysis-overview-body">
+                        <div class="stats-grid" id="analysis-overview-cards"></div>
+                        <div class="browser-controls analysis-trend-toolbar">
+                            <label class="browser-field">
+                                <span>Trend mode</span>
+                                <select id="analysis-trend-mode">
+                                    <option value="fight">Per fight</option>
+                                    <option value="week">Weekly median</option>
+                                    <option value="month">Monthly median</option>
+                                </select>
+                            </label>
+                            <label class="browser-field">
+                                <span>Smoothing</span>
+                                <select id="analysis-trend-smoothing">
+                                    <option value="0">Off</option>
+                                    <option value="3">3 points</option>
+                                    <option value="5">5 points</option>
+                                    <option value="8">8 points</option>
+                                </select>
+                            </label>
+                            <div class="browser-field browser-field-wide">
+                                <span>Trend summary</span>
+                                <div class="analysis-trend-summary" id="analysis-trend-summary">Per-fight points in date order.</div>
+                            </div>
+                        </div>
+                        <div class="stats-grid analysis-trend-delta-grid" id="analysis-trend-delta-grid"></div>
+                        <div class="pillar-grid" id="analysis-chart-grid"></div>
+                        <div class="stats-grid analysis-mitigation-grid" id="analysis-mitigation-card"></div>
                     </div>
                 </div>
-                <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
-                    <button class="analysis-tab is-active" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="true">Players</button>
-                    <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
-                    <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
-                    <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
-                    <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
-                </div>
-                <div class="analysis-panel is-active" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players">
+                <div class="analysis-panel" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players" hidden>
                     <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. By default the table shows players with at least 40 total imported fights, but search can surface smaller samples.</p>
-                    <div class="browser-controls analysis-player-toolbar">
-                        <label class="browser-field browser-field-wide">
-                            <span>Search players</span>
-                            <input id="analysis-player-search" type="search" placeholder="Guild Wars ID or character name">
-                        </label>
-                        <label class="browser-field">
-                            <span>Impact lane</span>
-                            <select id="analysis-player-lane-filter">
-                                <option value="all">All lanes</option>
-                            </select>
-                        </label>
+                    <div class="analysis-split-panel">
+                        <div class="analysis-split-list">
+                            <div class="browser-controls analysis-player-toolbar">
+                                <label class="browser-field browser-field-wide">
+                                    <span>Search players</span>
+                                    <input id="analysis-player-search" type="search" placeholder="Guild Wars ID or character name">
+                                </label>
+                                <label class="browser-field">
+                                    <span>Impact lane</span>
+                                    <select id="analysis-player-lane-filter">
+                                        <option value="all">All lanes</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <p class="workspace-note analysis-panel-note" id="analysis-players-summary"></p>
+                            <div class="table-shell table-shell-scroll table-shell-analysis-players">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="player">Player</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="appearances">Appearances</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="record">Record</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="impact">Impact</button></th>
+                                            <th>Classes</th>
+                                            <th>Lane fit</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-players-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <aside class="analysis-split-detail">
+                            <div id="analysis-player-detail"></div>
+                        </aside>
                     </div>
-                    <p class="workspace-note analysis-panel-note" id="analysis-players-summary"></p>
-                    <div class="table-shell table-shell-scroll table-shell-analysis-players">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th><button class="sort-header" type="button" data-analysis-player-sort="player">Player</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-player-sort="appearances">Appearances</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-player-sort="record">Record</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-player-sort="impact">Impact</button></th>
-                                    <th>Classes</th>
-                                    <th>Lane fit</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analysis-players-body"></tbody>
-                        </table>
-                    </div>
-                    <div id="analysis-player-detail"></div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-classes" data-analysis-panel="classes" role="tabpanel" aria-labelledby="analysis-tab-classes" hidden>
                     <p class="workspace-note analysis-panel-note">A compact view of what each class contributed across the filtered fights and who tended to drive that value. The main class list requires at least 40 class appearances, and the class player list requires at least 20 appearances on that class.</p>
-                    <div class="table-shell table-shell-scroll table-shell-analysis-classes">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th><button class="sort-header" type="button" data-analysis-class-sort="class">Class</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-class-sort="samples">Samples</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-class-sort="impact">Impact</button></th>
-                                    <th><button class="sort-header" type="button" data-analysis-class-sort="record">Record</button></th>
-                                    <th>Top player</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analysis-classes-body"></tbody>
-                        </table>
+                    <div class="analysis-split-panel analysis-split-panel-classes">
+                        <div class="analysis-split-list">
+                            <div class="table-shell table-shell-scroll table-shell-analysis-classes">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="class">Class</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="samples">Samples</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="impact">Impact</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="record">Record</button></th>
+                                            <th>Top player</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-classes-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <aside class="analysis-split-detail">
+                            <div id="analysis-class-detail"></div>
+                        </aside>
                     </div>
-                    <div id="analysis-class-detail"></div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-lanes" data-analysis-panel="lanes" role="tabpanel" aria-labelledby="analysis-tab-lanes" hidden>
-                    <p class="workspace-note analysis-panel-note">Shows which lanes appeared most often, how strong they were, and which classes or players anchored them. Click a row to focus on one lane, then add more lanes below to score them together on one player or class.</p>
-                    <div class="tag-block">
-                        <div>
+                    <div class="analysis-lanes-layout">
+                        <aside class="analysis-lanes-sidebar">
                             <h3>Selected Lanes</h3>
                             <div class="comp-helper-favorites" id="analysis-lane-selection"></div>
+                        </aside>
+                        <div class="analysis-lanes-content">
+                            <p class="workspace-note analysis-panel-note">Shows which lanes appeared most often, how strong they were, and which classes or players anchored them. Click a row to focus on one lane, then add more lanes below to score them together on one player or class.</p>
+                            <div class="table-shell">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Lane</th>
+                                            <th>Use</th>
+                                            <th>Strength</th>
+                                            <th>Coverage</th>
+                                            <th>Top class</th>
+                                            <th>Top player</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-lanes-body"></tbody>
+                                </table>
+                            </div>
+                            <div id="analysis-lane-detail"></div>
                         </div>
                     </div>
-                    <div class="table-shell">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Lane</th>
-                                    <th>Use</th>
-                                    <th>Strength</th>
-                                    <th>Coverage</th>
-                                    <th>Top class</th>
-                                    <th>Top player</th>
-                                    <th>Evidence</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analysis-lanes-body"></tbody>
-                        </table>
-                    </div>
-                    <div id="analysis-lane-detail"></div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-boons" data-analysis-panel="boons" role="tabpanel" aria-labelledby="analysis-tab-boons" hidden>
-                    <p class="workspace-note analysis-panel-note">Threat-boon relevance around pressured squad samples, with selected-boon detail showing which classes generated that boon best across the filtered fights.</p>
-                    <section class="analysis-card analysis-card--wide analysis-boon-trend-card">
-                        <div class="section-heading">
-                            <div>
-                                <h3>Boon Uptime</h3>
-                                <p id="analysis-boon-trend-summary"></p>
+                    <div class="analysis-boons-layout">
+                        <div class="analysis-boons-content">
+                            <p class="workspace-note analysis-panel-note">Threat-boon relevance around pressured squad samples, with selected-boon detail showing which classes generated that boon best across the filtered fights.</p>
+                            <div class="table-shell">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Boon</th>
+                                            <th>Type</th>
+                                            <th>Fights</th>
+                                            <th>Coverage</th>
+                                            <th>Stacks</th>
+                                            <th>Overapplication</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-boons-body"></tbody>
+                                </table>
                             </div>
-                            <div class="analysis-boon-trend-actions">
-                                <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="all">Add all</button>
-                                <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="none">Clear all</button>
-                            </div>
+                            <div id="analysis-boon-detail"></div>
                         </div>
-                        <div class="analysis-boon-trend-legend" id="analysis-boon-trend-legend"></div>
-                        <div class="analysis-boon-trend-chart-wrap">
-                            <div class="analysis-boon-trend-tooltip" id="analysis-boon-trend-tooltip" hidden></div>
-                            <div id="analysis-boon-trend-chart"></div>
-                        </div>
-                    </section>
-                    <div class="table-shell">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Boon</th>
-                                    <th>Type</th>
-                                    <th>Fights</th>
-                                    <th>Coverage</th>
-                                    <th>Stacks</th>
-                                    <th>Overapplication</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analysis-boons-body"></tbody>
-                        </table>
+                        <aside class="analysis-boons-graph">
+                            <section class="analysis-card analysis-card--wide analysis-boon-trend-card">
+                                <div class="section-heading">
+                                    <div>
+                                        <h3>Boon Uptime</h3>
+                                        <p id="analysis-boon-trend-summary"></p>
+                                    </div>
+                                    <div class="analysis-boon-trend-actions">
+                                        <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="all">Add all</button>
+                                        <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="none">Clear all</button>
+                                    </div>
+                                </div>
+                                <div class="analysis-boon-trend-legend" id="analysis-boon-trend-legend"></div>
+                                <div class="analysis-boon-trend-chart-wrap">
+                                    <div class="analysis-boon-trend-tooltip" id="analysis-boon-trend-tooltip" hidden></div>
+                                    <div id="analysis-boon-trend-chart"></div>
+                                </div>
+                            </section>
+                        </aside>
                     </div>
-                    <div id="analysis-boon-detail"></div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-comp-helper" data-analysis-panel="comp-helper" role="tabpanel" aria-labelledby="analysis-tab-comp-helper" hidden>
                     <p class="workspace-note analysis-panel-note">Package-aware v2 comp helper. It keeps the lane-aware v1 model, then adds mandatory and secondary package checks while building balanced 5-player suggestions from the current analysis filter. Hard and soft CC are still combined into one CC package for now.</p>
@@ -814,6 +857,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260426cleanup6" defer></script>
+    <script src="/app.js?v=20260427wide10" defer></script>
 </body>
 </html>
