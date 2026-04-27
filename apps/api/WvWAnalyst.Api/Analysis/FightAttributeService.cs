@@ -24,6 +24,7 @@ public sealed class FightAttributeService
         new("cleanup", "Cleanup", "Fight Shape", "Squad-favored fight with strong kill control and limited squad losses."),
         new("no-decision", "No Decision", "Fight Shape", "Fight ended without a decisive down, kill, or winner signal."),
         new("three-way", "3-Way", "Fight Shape", "Two distinct enemy teams were detected in the same fight."),
+        new("organized-enemy", "Organized Enemy", "Fight Shape", "Enemy movement tightness scored in the organized range or better."),
         new("elite-tight-enemy", "Elite Tight Enemy", "Fight Shape", "Enemy movement tightness scored in the elite range."),
         new("tight-enemy", "Tight Enemy", "Fight Shape", "Enemy movement tightness scored in the tight range."),
         new("cloudy-fight", "Cloudy Fight", "Fight Shape", "Enemy formation was detected as loose or cloud-like."),
@@ -227,6 +228,11 @@ public sealed class FightAttributeService
         {
             string enemyMovementDetail = context.EnemyMovementScoreDetail
                 ?? $"Enemy movement scored {enemyMovementScore}/100.";
+            if (enemyMovementScore >= 72)
+            {
+                attributes.Add(Create("organized-enemy", 0.84, 1, enemyMovementDetail));
+            }
+
             if (enemyMovementScore >= 92)
             {
                 attributes.Add(Create("elite-tight-enemy", 0.9, 2, enemyMovementDetail));

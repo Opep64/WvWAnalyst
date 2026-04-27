@@ -10,6 +10,23 @@ public sealed class FightAnalysisService
     private const int MinimumClassSampleCount = 40;
     private const int MinimumClassPlayerFightCount = 20;
     private const double CleanupPhaseImpactWeight = 0.25;
+    private const int MinimumExpectedScoreSampleCount = 5;
+    private const int MediumExpectedScoreSampleCount = 15;
+    private const int GoodExpectedScoreSampleCount = 30;
+    private const double StrictExpectedScoreSizeRatioTolerance = 0.20;
+    private const double BroadExpectedScoreSizeRatioTolerance = 0.35;
+    private const double StrictExpectedScoreClassMixTolerance = 0.35;
+    private const double BroadExpectedScoreClassMixTolerance = 0.55;
+
+    private static readonly string[] ExpectedScoreContextAttributeKeys =
+    [
+        "three-way",
+        "cloudy-fight",
+        "stack-clash",
+        "organized-enemy",
+        "tight-enemy",
+        "elite-tight-enemy"
+    ];
 
     private readonly FightCatalogService _fightCatalog;
     private readonly PatchMetadataService _patchMetadata;
@@ -84,6 +101,7 @@ public sealed class FightAnalysisService
             .OrderBy(fight => GetFightSortValue(fight))
             .ToArray();
 
+        var expectedScoreLookup = BuildExpectedScoreLookup(allFights);
         var trackedPlayerSamples = GetTrackedPlayerSamples(allFights);
         var totalPlayerFightCounts = BuildTotalPlayerFightCounts(trackedPlayerSamples);
         var totalCharacterFightCounts = BuildTotalCharacterFightCounts(trackedPlayerSamples);
@@ -111,8 +129,8 @@ public sealed class FightAnalysisService
                 PatchEraIds: patchSelection.EraIds,
                 FightAttributeKeys: normalizedFightAttributes),
             Scope: BuildScope(allFights, filteredFights),
-            Overview: BuildOverview(filteredFights),
-            Trends: BuildTrends(filteredFights),
+            Overview: BuildOverview(filteredFights, expectedScoreLookup),
+            Trends: BuildTrends(filteredFights, expectedScoreLookup),
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
             TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
             TopLanes: BuildTopLanes(filteredFights),
@@ -166,7 +184,9 @@ public sealed class FightAnalysisService
             .ToArray();
     }
 
-    private static FightAnalysisOverviewDto BuildOverview(IReadOnlyList<FightArtifactSummaryDto> fights)
+    private static FightAnalysisOverviewDto BuildOverview(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyDictionary<string, FightExpectedScoreResult> expectedScoreLookup)
     {
         var executionScoreSamples = fights
             .Select(fight => new
@@ -200,6 +220,21 @@ public sealed class FightAnalysisService
             .FirstOrDefault()
             ?.Key;
 
+        var expectedScoreSamples = fights
+            .Select(fight => new
+            {
+                Fight = fight,
+                Expected = expectedScoreLookup.TryGetValue(fight.FightId, out var expected) ? expected : null
+            })
+            .Where(sample => sample.Expected is not null)
+            .ToArray();
+        var expectedScoreResults = expectedScoreSamples
+            .Select(sample => sample.Expected!)
+            .ToArray();
+        var medianExpectedScoreSampleCount = expectedScoreResults.Length == 0
+            ? 0
+            : (int)Math.Round(CalculateMedian(expectedScoreResults.Select(score => (double)score.SampleCount)));
+
         double averageSquadSize = fights.Count == 0 ? 0.0 : Math.Round(fights.Average(fight => fight.FightIndex?.SquadPlayerCount ?? 0), 1);
         double averageEnemySize = fights.Count == 0 ? 0.0 : Math.Round(fights.Average(fight => fight.FightIndex?.EnemyPlayerCount ?? fight.FightIndex?.EnemyTargetCount ?? 0), 1);
         double averageDurationSeconds = fights.Count == 0
@@ -216,6 +251,23 @@ public sealed class FightAnalysisService
                     sample => (double)sample.Execution!.OverallScore!.Value,
                     sample => sample.Fight), 1),
             AverageOverallGrade: gradeSource,
+            AverageExpectedScore: expectedScoreSamples.Length == 0
+                ? null
+                : Math.Round(CleanupAdjustedAverage(
+                    expectedScoreSamples,
+                    sample => sample.Expected!.ExpectedScore,
+                    sample => sample.Fight), 1),
+            AverageContextDelta: expectedScoreSamples.Length == 0
+                ? null
+                : Math.Round(CleanupAdjustedAverage(
+                    expectedScoreSamples,
+                    sample => sample.Expected!.ContextDelta,
+                    sample => sample.Fight), 1),
+            ContextDeltaConfidenceLabel: expectedScoreSamples.Length == 0
+                ? null
+                : DeriveExpectedScoreConfidenceLabel(medianExpectedScoreSampleCount),
+            ContextDeltaSampleCount: expectedScoreSamples.Length,
+            ContextDeltaDetail: BuildContextDeltaOverviewDetail(fights.Count, expectedScoreResults),
             AverageCohesionScore: GetPillarAverage(pillarLookup, "cohesion-positioning"),
             AveragePressureScore: GetPillarAverage(pillarLookup, "pressure-burst"),
             AverageDownstateScore: GetPillarAverage(pillarLookup, "downstate-control"),
@@ -354,13 +406,16 @@ public sealed class FightAnalysisService
             BarrierRemovedRatePercent: barrierRemovedRatePercent);
     }
 
-    private static IReadOnlyList<FightAnalysisTrendPointDto> BuildTrends(IReadOnlyList<FightArtifactSummaryDto> fights)
+    private static IReadOnlyList<FightAnalysisTrendPointDto> BuildTrends(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyDictionary<string, FightExpectedScoreResult> expectedScoreLookup)
     {
         return fights
             .Select(fight =>
             {
                 var pillars = BuildPillarMap(fight.FightIndex?.Execution?.Pillars);
                 var fightTimestamp = GetFightDateTimeOffset(fight);
+                expectedScoreLookup.TryGetValue(fight.FightId, out var expectedScore);
                 return new FightAnalysisTrendPointDto(
                     FightId: fight.FightId,
                     FightName: fight.FightIndex?.FightName ?? fight.SourceFileName ?? fight.FightId,
@@ -373,12 +428,368 @@ public sealed class FightAnalysisService
                     AttributeKeys: (fight.Attributes ?? Array.Empty<FightAttributeDto>()).Select(attribute => attribute.Key).ToArray(),
                     AttributeLabels: (fight.Attributes ?? Array.Empty<FightAttributeDto>()).Select(attribute => attribute.Label).ToArray(),
                     OverallScore: fight.FightIndex?.Execution?.OverallScore,
+                    ExpectedScore: expectedScore is null ? null : Math.Round(expectedScore.ExpectedScore, 1),
+                    ContextDelta: expectedScore is null ? null : Math.Round(expectedScore.ContextDelta, 1),
+                    ExpectedScoreSampleCount: expectedScore?.SampleCount ?? 0,
+                    ExpectedScoreConfidenceLabel: expectedScore?.ConfidenceLabel,
+                    ExpectedScoreDetail: expectedScore?.Detail,
                     CohesionScore: pillars.TryGetValue("cohesion-positioning", out int cohesion) ? cohesion : null,
                     PressureScore: pillars.TryGetValue("pressure-burst", out int pressure) ? pressure : null,
                     DownstateScore: pillars.TryGetValue("downstate-control", out int downstate) ? downstate : null,
                     ResilienceScore: pillars.TryGetValue("resilience-stabilization", out int resilience) ? resilience : null);
             })
             .ToArray();
+    }
+
+    private static IReadOnlyDictionary<string, FightExpectedScoreResult> BuildExpectedScoreLookup(
+        IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var samples = fights
+            .Select(BuildExpectedScoreSample)
+            .Where(sample => sample is not null)
+            .Cast<FightExpectedScoreSample>()
+            .ToArray();
+        if (samples.Length <= MinimumExpectedScoreSampleCount)
+        {
+            return new Dictionary<string, FightExpectedScoreResult>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var results = new Dictionary<string, FightExpectedScoreResult>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sample in samples)
+        {
+            var expectedScore = BuildExpectedScoreForSample(sample, samples);
+            if (expectedScore is not null)
+            {
+                results[sample.FightId] = expectedScore;
+            }
+        }
+
+        return results;
+    }
+
+    private static FightExpectedScoreSample? BuildExpectedScoreSample(FightArtifactSummaryDto fight)
+    {
+        var fightIndex = fight.FightIndex;
+        if (fightIndex?.Execution?.ScoreAvailable != true || fightIndex.Execution.OverallScore is not int overallScore)
+        {
+            return null;
+        }
+
+        double squadSize = GetSquadSize(fight);
+        double enemySize = GetEnemySize(fight);
+        double sizeRatio = squadSize > 0.0 ? enemySize / squadSize : 0.0;
+
+        return new FightExpectedScoreSample(
+            FightId: fight.FightId,
+            OverallScore: overallScore,
+            CommanderKey: GetExpectedScoreCommanderKey(fight),
+            PatchEraId: fight.PatchEra?.Id ?? string.Empty,
+            SquadSize: squadSize,
+            EnemySize: enemySize,
+            SizeRatio: sizeRatio,
+            DurationBucket: GetExpectedScoreDurationBucket(GetFightDurationSeconds(fight)),
+            DataProfileKey: GetExpectedScoreDataProfileKey(fight),
+            ContextAttributeKeys: BuildExpectedScoreContextAttributeSet(fight),
+            SquadClassProfile: BuildClassProfile(fightIndex.SquadSide?.Classes));
+    }
+
+    private static FightExpectedScoreResult? BuildExpectedScoreForSample(
+        FightExpectedScoreSample target,
+        IReadOnlyList<FightExpectedScoreSample> samples)
+    {
+        var comparisonPool = samples
+            .Where(sample => !string.Equals(sample.FightId, target.FightId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (comparisonPool.Length < MinimumExpectedScoreSampleCount)
+        {
+            return null;
+        }
+
+        var candidateTiers = new (string Detail, FightExpectedScoreSample[] Candidates)[]
+        {
+            (
+                "same commander, patch, and context",
+                comparisonPool
+                    .Where(candidate => HasSameCommander(target, candidate)
+                        && HasSamePatch(target, candidate)
+                        && MatchesStrictExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "same commander and context",
+                comparisonPool
+                    .Where(candidate => HasSameCommander(target, candidate)
+                        && MatchesStrictExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "same patch and context",
+                comparisonPool
+                    .Where(candidate => HasSamePatch(target, candidate)
+                        && MatchesStrictExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "similar fight context",
+                comparisonPool
+                    .Where(candidate => MatchesStrictExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "same patch with broader context",
+                comparisonPool
+                    .Where(candidate => HasSamePatch(target, candidate)
+                        && MatchesBroadExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "broader fight context",
+                comparisonPool
+                    .Where(candidate => MatchesBroadExpectedContext(target, candidate))
+                    .ToArray()
+            ),
+            (
+                "overall scored catalog baseline",
+                comparisonPool
+            )
+        };
+
+        foreach (var tier in candidateTiers)
+        {
+            if (tier.Candidates.Length >= MinimumExpectedScoreSampleCount)
+            {
+                return BuildExpectedScoreResult(target, tier.Candidates, tier.Detail);
+            }
+        }
+
+        return null;
+    }
+
+    private static FightExpectedScoreResult BuildExpectedScoreResult(
+        FightExpectedScoreSample target,
+        IReadOnlyList<FightExpectedScoreSample> candidates,
+        string detail)
+    {
+        double expectedScore = Math.Round(CalculateMedian(candidates.Select(candidate => (double)candidate.OverallScore)), 1);
+        double contextDelta = Math.Round(target.OverallScore - expectedScore, 1);
+        string confidenceLabel = DeriveExpectedScoreConfidenceLabel(candidates.Count);
+        string fightLabel = candidates.Count == 1 ? "fight" : "fights";
+
+        return new FightExpectedScoreResult(
+            ExpectedScore: expectedScore,
+            ContextDelta: contextDelta,
+            SampleCount: candidates.Count,
+            ConfidenceLabel: confidenceLabel,
+            Detail: $"Expected {expectedScore.ToString("0.0", CultureInfo.InvariantCulture)} from {candidates.Count} {fightLabel} using {detail}.");
+    }
+
+    private static string BuildContextDeltaOverviewDetail(
+        int filteredFightCount,
+        IReadOnlyList<FightExpectedScoreResult> expectedScores)
+    {
+        if (filteredFightCount == 0)
+        {
+            return "No fights matched the current filters.";
+        }
+
+        if (expectedScores.Count == 0)
+        {
+            return $"No expected-score baseline yet. Each fight needs at least {MinimumExpectedScoreSampleCount} scored comparison fights.";
+        }
+
+        int medianSampleCount = (int)Math.Round(CalculateMedian(expectedScores.Select(score => (double)score.SampleCount)));
+        string confidenceLabel = DeriveExpectedScoreConfidenceLabel(medianSampleCount);
+        string coverage = expectedScores.Count == filteredFightCount
+            ? "All filtered fights"
+            : $"{expectedScores.Count} of {filteredFightCount} filtered fights";
+
+        return $"{coverage} have expected-score baselines. Typical baseline uses {medianSampleCount} comparison fights ({confidenceLabel.ToLowerInvariant()} confidence).";
+    }
+
+    private static bool HasSameCommander(FightExpectedScoreSample target, FightExpectedScoreSample candidate)
+    {
+        return !string.IsNullOrWhiteSpace(target.CommanderKey)
+            && string.Equals(target.CommanderKey, candidate.CommanderKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasSamePatch(FightExpectedScoreSample target, FightExpectedScoreSample candidate)
+    {
+        return !string.IsNullOrWhiteSpace(target.PatchEraId)
+            && string.Equals(target.PatchEraId, candidate.PatchEraId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesStrictExpectedContext(FightExpectedScoreSample target, FightExpectedScoreSample candidate)
+    {
+        return Math.Abs(target.SizeRatio - candidate.SizeRatio) <= StrictExpectedScoreSizeRatioTolerance
+            && target.DurationBucket == candidate.DurationBucket
+            && string.Equals(target.DataProfileKey, candidate.DataProfileKey, StringComparison.OrdinalIgnoreCase)
+            && target.ContextAttributeKeys.SetEquals(candidate.ContextAttributeKeys)
+            && CalculateClassProfileDistance(target.SquadClassProfile, candidate.SquadClassProfile) <= StrictExpectedScoreClassMixTolerance;
+    }
+
+    private static bool MatchesBroadExpectedContext(FightExpectedScoreSample target, FightExpectedScoreSample candidate)
+    {
+        return Math.Abs(target.SizeRatio - candidate.SizeRatio) <= BroadExpectedScoreSizeRatioTolerance
+            && Math.Abs(target.DurationBucket - candidate.DurationBucket) <= 1
+            && HasSameContextFlag(target, candidate, "three-way")
+            && CalculateClassProfileDistance(target.SquadClassProfile, candidate.SquadClassProfile) <= BroadExpectedScoreClassMixTolerance;
+    }
+
+    private static bool HasSameContextFlag(FightExpectedScoreSample target, FightExpectedScoreSample candidate, string attributeKey)
+    {
+        return target.ContextAttributeKeys.Contains(attributeKey) == candidate.ContextAttributeKeys.Contains(attributeKey);
+    }
+
+    private static string DeriveExpectedScoreConfidenceLabel(int sampleCount)
+    {
+        return sampleCount switch
+        {
+            >= GoodExpectedScoreSampleCount => "Good",
+            >= MediumExpectedScoreSampleCount => "Medium",
+            _ => "Low"
+        };
+    }
+
+    private static double GetSquadSize(FightArtifactSummaryDto fight)
+    {
+        var fightIndex = fight.FightIndex;
+        if (fightIndex is null)
+        {
+            return 0.0;
+        }
+
+        if (fightIndex.SquadPlayerCount > 0)
+        {
+            return fightIndex.SquadPlayerCount;
+        }
+
+        if (fightIndex.SquadSide?.PlayerCount is int sidePlayerCount && sidePlayerCount > 0)
+        {
+            return sidePlayerCount;
+        }
+
+        return fightIndex.PlayerCount > 0 ? fightIndex.PlayerCount : 0.0;
+    }
+
+    private static double GetEnemySize(FightArtifactSummaryDto fight)
+    {
+        var fightIndex = fight.FightIndex;
+        if (fightIndex is null)
+        {
+            return 0.0;
+        }
+
+        if (fightIndex.EnemyPlayerCount > 0)
+        {
+            return fightIndex.EnemyPlayerCount;
+        }
+
+        if (fightIndex.EnemyTargetCount > 0)
+        {
+            return fightIndex.EnemyTargetCount;
+        }
+
+        if (fightIndex.EnemySide?.PlayerCount is int sidePlayerCount && sidePlayerCount > 0)
+        {
+            return sidePlayerCount;
+        }
+
+        return 0.0;
+    }
+
+    private static string GetExpectedScoreCommanderKey(FightArtifactSummaryDto fight)
+    {
+        return NormalizeLookupKey(fight.FightIndex?.CommanderDisplayNames?.FirstOrDefault());
+    }
+
+    private static int GetExpectedScoreDurationBucket(double durationSeconds)
+    {
+        return durationSeconds switch
+        {
+            <= 0.0 => -1,
+            <= 90.0 => 0,
+            <= 180.0 => 1,
+            <= 300.0 => 2,
+            _ => 3
+        };
+    }
+
+    private static string GetExpectedScoreDataProfileKey(FightArtifactSummaryDto fight)
+    {
+        var mitigation = fight.FightIndex?.MitigationSummary;
+        if (mitigation is null)
+        {
+            return "mitigation:none";
+        }
+
+        return mitigation.HasBarrierData
+            ? "mitigation:barrier"
+            : "mitigation:no-barrier";
+    }
+
+    private static HashSet<string> BuildExpectedScoreContextAttributeSet(FightArtifactSummaryDto fight)
+    {
+        var fightAttributeKeys = (fight.Attributes ?? Array.Empty<FightAttributeDto>())
+            .Select(attribute => attribute.Key)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var contextAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var attributeKey in ExpectedScoreContextAttributeKeys)
+        {
+            if (fightAttributeKeys.Contains(attributeKey))
+            {
+                contextAttributes.Add(attributeKey);
+            }
+        }
+
+        return contextAttributes;
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildClassProfile(IReadOnlyList<FightSideClassIndexDto>? classes)
+    {
+        var groupedClasses = (classes ?? Array.Empty<FightSideClassIndexDto>())
+            .Where(classEntry => classEntry.Count > 0 && !string.IsNullOrWhiteSpace(classEntry.ClassLabel))
+            .GroupBy(classEntry => NormalizeLookupKey(classEntry.ClassLabel), StringComparer.OrdinalIgnoreCase)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .Select(group => new
+            {
+                ClassKey = group.Key,
+                Count = group.Sum(classEntry => classEntry.Count)
+            })
+            .ToArray();
+        int totalCount = groupedClasses.Sum(classEntry => classEntry.Count);
+        if (totalCount <= 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return groupedClasses.ToDictionary(
+            classEntry => classEntry.ClassKey,
+            classEntry => classEntry.Count / (double)totalCount,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static double CalculateClassProfileDistance(
+        IReadOnlyDictionary<string, double> left,
+        IReadOnlyDictionary<string, double> right)
+    {
+        if (left.Count == 0 || right.Count == 0)
+        {
+            return 0.0;
+        }
+
+        var classKeys = left.Keys
+            .Concat(right.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        return classKeys.Sum(classKey =>
+            Math.Abs(GetClassProfileShare(left, classKey) - GetClassProfileShare(right, classKey))) / 2.0;
+    }
+
+    private static double GetClassProfileShare(IReadOnlyDictionary<string, double> profile, string classKey)
+    {
+        return profile.TryGetValue(classKey, out double share) ? share : 0.0;
     }
 
     private static IReadOnlyList<FightAnalysisPlayerRowDto> BuildTopPlayers(
@@ -1391,6 +1802,23 @@ public sealed class FightAnalysisService
         return value.HasValue ? Math.Round(value.Value, digits) : null;
     }
 
+    private static double CalculateMedian(IEnumerable<double> values)
+    {
+        var sortedValues = values
+            .Where(value => !double.IsNaN(value) && !double.IsInfinity(value))
+            .OrderBy(value => value)
+            .ToArray();
+        if (sortedValues.Length == 0)
+        {
+            return 0.0;
+        }
+
+        int middleIndex = sortedValues.Length / 2;
+        return sortedValues.Length % 2 == 1
+            ? sortedValues[middleIndex]
+            : (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2.0;
+    }
+
     private static double GetFightShapeImpactWeight(FightArtifactSummaryDto fight)
     {
         var shape = fight.FightIndex?.FightShape;
@@ -2206,6 +2634,26 @@ public sealed class FightAnalysisService
 internal sealed record PatchSelection(
     string Scope,
     IReadOnlyList<string> EraIds);
+
+internal sealed record FightExpectedScoreSample(
+    string FightId,
+    int OverallScore,
+    string CommanderKey,
+    string PatchEraId,
+    double SquadSize,
+    double EnemySize,
+    double SizeRatio,
+    int DurationBucket,
+    string DataProfileKey,
+    HashSet<string> ContextAttributeKeys,
+    IReadOnlyDictionary<string, double> SquadClassProfile);
+
+internal sealed record FightExpectedScoreResult(
+    double ExpectedScore,
+    double ContextDelta,
+    int SampleCount,
+    string ConfidenceLabel,
+    string Detail);
 
 internal sealed record PlayerFightSample(
     FightArtifactSummaryDto Fight,

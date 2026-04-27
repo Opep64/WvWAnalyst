@@ -71,6 +71,7 @@ const ANALYSIS_TREND_MODE_OPTIONS = {
 const ANALYSIS_TREND_SMOOTHING_OPTIONS = [0, 3, 5, 8];
 const ANALYSIS_TREND_METRICS = [
     { key: "overallScore", title: "Overall trend", averageKey: "averageOverallScore", fallbackValue: "n/a", detail: "Execution score across the selected trend buckets.", comparisonLabel: "Overall" },
+    { key: "contextDelta", title: "Context delta trend", averageKey: "averageContextDelta", fallbackValue: "n/a", detail: "Actual execution score minus expected score for similar fights.", comparisonLabel: "Context delta", signed: true, positiveLabel: "Better", negativeLabel: "Worse", rangeMode: "signed" },
     { key: "cohesionScore", title: "Cohesion trend", averageKey: "averageCohesionScore", fallbackValue: "n/a", detail: "Cohesion & positioning pillar.", comparisonLabel: "Cohesion" },
     { key: "pressureScore", title: "Pressure trend", averageKey: "averagePressureScore", fallbackValue: "n/a", detail: "Pressure & burst pillar.", comparisonLabel: "Pressure" },
     { key: "downstateScore", title: "Downstate trend", averageKey: "averageDownstateScore", fallbackValue: "n/a", detail: "Downstate control pillar.", comparisonLabel: "Downstate" },
@@ -399,6 +400,34 @@ function formatSignedNumber(value, maximumFractionDigits = 1) {
     return `${numeric > 0 ? "+" : "-"}${formatNumber(Math.abs(numeric), maximumFractionDigits)}`;
 }
 
+function formatAnalysisMetricValue(metric, value, maximumFractionDigits = 1) {
+    if (value == null) {
+        return metric?.fallbackValue ?? "n/a";
+    }
+
+    return metric?.signed
+        ? formatSignedNumber(value, maximumFractionDigits)
+        : formatNumber(value, maximumFractionDigits);
+}
+
+function resolveAnalysisChartRange(metric, values) {
+    if (metric?.rangeMode !== "signed") {
+        return { minValue: 0, maxValue: 100 };
+    }
+
+    const numericValues = values
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value));
+    const maxMagnitude = numericValues.length === 0
+        ? 10
+        : Math.max(10, ...numericValues.map(value => Math.abs(value)));
+    const roundedMagnitude = Math.min(100, Math.ceil(maxMagnitude / 5) * 5);
+    return {
+        minValue: -roundedMagnitude,
+        maxValue: roundedMagnitude
+    };
+}
+
 function buildAnalysisLinePath(values, minValue = 0, maxValue = 100) {
     const width = 320;
     const height = 118;
@@ -621,6 +650,8 @@ function buildAggregatedTrendPoints(points, mode) {
             bucketLabel: formatAnalysisTrendBucketLabel(bucket.bucketStart, normalizedMode),
             fightCount: bucket.points.length,
             overallScore: calculateMedian(bucket.points.map(point => point.overallScore)),
+            expectedScore: calculateMedian(bucket.points.map(point => point.expectedScore)),
+            contextDelta: calculateMedian(bucket.points.map(point => point.contextDelta)),
             cohesionScore: calculateMedian(bucket.points.map(point => point.cohesionScore)),
             pressureScore: calculateMedian(bucket.points.map(point => point.pressureScore)),
             downstateScore: calculateMedian(bucket.points.map(point => point.downstateScore)),
@@ -747,8 +778,8 @@ function buildAnalysisTrendDeltaCard(metric, aggregatedPoints, mode) {
     const directionLabel = Math.abs(delta) < 0.75
         ? "Flat"
         : delta > 0
-            ? "Up"
-            : "Down";
+            ? (metric.positiveLabel ?? "Up")
+            : (metric.negativeLabel ?? "Down");
 
     return `
         <article class="analysis-card analysis-delta-card">
@@ -757,19 +788,19 @@ function buildAnalysisTrendDeltaCard(metric, aggregatedPoints, mode) {
             <div class="analysis-delta-metric">${escapeHtml(formatSignedNumber(delta, 1))}</div>
             <div class="table-inline-note">${escapeHtml(comparison.comparisonLabel)}</div>
             <div class="analysis-delta-pair">
-                <span>Recent ${escapeHtml(formatNumber(recentAverage, 1))}</span>
-                <span>Prior ${escapeHtml(formatNumber(priorAverage, 1))}</span>
+                <span>Recent ${escapeHtml(formatAnalysisMetricValue(metric, recentAverage, 1))}</span>
+                <span>Prior ${escapeHtml(formatAnalysisMetricValue(metric, priorAverage, 1))}</span>
             </div>
         </article>
     `;
 }
 
-function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW, showPoints = false) {
+function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW, showPoints = false, minValue = 0, maxValue = 100) {
     const normalizedSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(smoothingWindow);
-    const rawPath = normalizedSmoothingWindow > 1 ? buildAnalysisLinePath(values) : "";
+    const rawPath = normalizedSmoothingWindow > 1 ? buildAnalysisLinePath(values, minValue, maxValue) : "";
     const smoothedValues = buildRollingAverage(values, normalizedSmoothingWindow);
-    const smoothPath = buildAnalysisLinePath(smoothedValues);
-    const pointMarkup = showPoints ? buildAnalysisPointMarkup(values) : "";
+    const smoothPath = buildAnalysisLinePath(smoothedValues, minValue, maxValue);
+    const pointMarkup = showPoints ? buildAnalysisPointMarkup(values, minValue, maxValue) : "";
     const empty = !rawPath && !smoothPath;
     const numericCount = values.filter(value => value != null && !Number.isNaN(Number(value))).length;
     const effectiveWindow = normalizedSmoothingWindow > 1
@@ -2065,6 +2096,19 @@ function buildAnalysisOverviewCards(snapshot) {
             detail: "Execution score across the filtered fights."
         },
         {
+            title: "Context delta",
+            value: overview.averageContextDelta != null
+                ? formatSignedNumber(overview.averageContextDelta, 1)
+                : "n/a",
+            detail: overview.contextDeltaDetail ?? "Actual execution score minus expected score for similar fights.",
+            lines: overview.averageExpectedScore != null
+                ? [
+                    `Expected ${formatNumber(overview.averageExpectedScore, 1)}`,
+                    `${overview.contextDeltaConfidenceLabel ?? "Low"} confidence | ${formatNumber(overview.contextDeltaSampleCount ?? 0)} baselines`
+                ]
+                : []
+        },
+        {
             title: "Average cohesion",
             value: overview.averageCohesionScore != null ? formatNumber(overview.averageCohesionScore, 1) : "n/a",
             detail: "Commander-relative positioning and formation discipline."
@@ -2140,17 +2184,20 @@ function renderAnalysisCharts(snapshot) {
     const cards = ANALYSIS_TREND_METRICS.map(metric => {
         const values = aggregatedPoints.map(point => point?.[metric.key] ?? null);
         const averageValue = snapshot.overview?.[metric.averageKey];
+        const chartRange = resolveAnalysisChartRange(metric, values);
         const detail = analysisTrendMode === "fight"
             ? `${metric.detail} ${trends.length} fights in date order.`
             : `${metric.detail} ${aggregatedPoints.length} ${aggregatedPoints.length === 1 ? ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitSingular : ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitPlural} from ${trends.length} fights.`;
 
         return buildAnalysisChartCard(
             metric.title,
-            averageValue != null ? formatNumber(averageValue, 1) : metric.fallbackValue,
+            formatAnalysisMetricValue(metric, averageValue, 1),
             values,
             detail,
             analysisTrendSmoothingWindow,
-            showPoints);
+            showPoints,
+            chartRange.minValue,
+            chartRange.maxValue);
     });
 
     setInnerHtml("#analysis-chart-grid", cards.join(""));
