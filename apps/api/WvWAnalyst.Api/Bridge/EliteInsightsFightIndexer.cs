@@ -352,10 +352,30 @@ public sealed class EliteInsightsFightIndexer
         var sideClasses = (classes ?? Array.Empty<WvWAnalystSideClassSummaryDto>())
             .Where(entry => !string.IsNullOrWhiteSpace(entry.ClassLabel))
             .GroupBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new FightSideClassIndexDto(
-                ClassLabel: group.First().ClassLabel.Trim(),
-                Icon: group.Select(entry => NullIfWhiteSpace(entry.Icon)).FirstOrDefault(icon => icon is not null),
-                Count: group.Sum(entry => Math.Max(0, entry.Count))))
+            .Select(group =>
+            {
+                var coverageEntries = group
+                    .Select(entry => entry.FightCoverage)
+                    .Where(coverage => coverage is not null && coverage.Score > 0.0)
+                    .Select(coverage => coverage!)
+                    .ToArray();
+                return new FightSideClassIndexDto(
+                    ClassLabel: group.First().ClassLabel.Trim(),
+                    Icon: group.Select(entry => NullIfWhiteSpace(entry.Icon)).FirstOrDefault(icon => icon is not null),
+                    Count: group.Sum(entry => Math.Max(0, entry.Count)),
+                    FightCoverageScore: coverageEntries.Length == 0 ? 0.0 : Math.Round(coverageEntries.Average(coverage => coverage.Score), 1),
+                    FightCoverageLabel: PickMostCommonNonEmpty(coverageEntries.Select(coverage => coverage.Label)),
+                    FightCoverageSummary: PickMostCommonNonEmpty(coverageEntries.Select(coverage => coverage.Summary)),
+                    FightCoverageDetail: PickMostCommonNonEmpty(coverageEntries.Select(coverage => coverage.Detail)),
+                    FightCoverageCaveats: coverageEntries
+                        .SelectMany(coverage => coverage.Caveats ?? Array.Empty<string>())
+                        .Select(NullIfWhiteSpace)
+                        .Where(value => value is not null)
+                        .Select(value => value!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray(),
+                    FightCoverageLanes: BuildSideClassCoverageLanes(coverageEntries));
+            })
             .OrderByDescending(entry => entry.Count)
             .ThenBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -373,9 +393,47 @@ public sealed class EliteInsightsFightIndexer
             .Select(group => new FightSideClassIndexDto(
                 ClassLabel: group.First(),
                 Icon: null,
-                Count: group.Count()))
+                Count: group.Count(),
+                FightCoverageScore: 0.0,
+                FightCoverageLabel: null,
+                FightCoverageSummary: null,
+                FightCoverageDetail: null,
+                FightCoverageCaveats: Array.Empty<string>(),
+                FightCoverageLanes: Array.Empty<FightSideClassCoverageLaneIndexDto>()))
             .OrderByDescending(entry => entry.Count)
             .ThenBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightSideClassCoverageLaneIndexDto> BuildSideClassCoverageLanes(
+        IReadOnlyList<WvWAnalystSpecFightCoverageDto> coverageEntries)
+    {
+        return coverageEntries
+            .SelectMany(coverage => coverage.Lanes ?? Array.Empty<WvWAnalystSpecFightCoverageLaneDto>())
+            .Where(lane => !string.IsNullOrWhiteSpace(lane.Label))
+            .GroupBy(lane => NullIfWhiteSpace(lane.Key) ?? lane.Label.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var laneEntries = group.ToArray();
+                var sample = laneEntries[0];
+                return new FightSideClassCoverageLaneIndexDto(
+                    Key: NullIfWhiteSpace(sample.Key) ?? group.Key,
+                    Label: sample.Label.Trim(),
+                    StrengthPercent: Math.Round(laneEntries.Average(lane => lane.StrengthPercent), 1),
+                    SharePercent: Math.Round(laneEntries.Average(lane => lane.SharePercent), 1),
+                    PerSlotEfficiency: Math.Round(laneEntries.Average(lane => lane.PerSlotEfficiency), 1),
+                    PlayersContributing: (int)Math.Round(laneEntries.Average(lane => lane.PlayersContributing)),
+                    PlayerCount: (int)Math.Round(laneEntries.Average(lane => lane.PlayerCount)),
+                    DemandScorePercent: Math.Round(laneEntries.Average(lane => lane.DemandScorePercent), 1),
+                    DemandLabel: PickMostCommonNonEmpty(laneEntries.Select(lane => lane.DemandLabel)),
+                    DemandWeightPercent: Math.Round(laneEntries.Average(lane => lane.DemandWeightPercent), 1),
+                    CoverageScore: Math.Round(laneEntries.Average(lane => lane.CoverageScore), 1),
+                    EvidenceLine: PickMostCommonNonEmpty(laneEntries.Select(lane => lane.EvidenceLine)));
+            })
+            .OrderByDescending(lane => lane.CoverageScore)
+            .ThenByDescending(lane => lane.DemandScorePercent)
+            .ThenByDescending(lane => lane.StrengthPercent)
+            .ThenBy(lane => lane.Label, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -630,6 +688,31 @@ public sealed class EliteInsightsFightIndexer
                 DemandFitSummary: NullIfWhiteSpace(player.DemandFitSummary),
                 ContributionProfile: NullIfWhiteSpace(player.ContributionProfile),
                 KeyContributionSummary: NullIfWhiteSpace(player.KeyContributionSummary),
+                FightImpactScore: player.FightImpactScore,
+                FightImpactLabel: NullIfWhiteSpace(player.FightImpactLabel),
+                FightImpactSummary: NullIfWhiteSpace(player.FightImpactSummary),
+                FightImpactDetail: NullIfWhiteSpace(player.FightImpactDetail),
+                FightImpactConfidenceLabel: NullIfWhiteSpace(player.FightImpactConfidenceLabel),
+                FightImpactCaveats: player.FightImpactCaveats?
+                    .Select(NullIfWhiteSpace)
+                    .Where(value => value is not null)
+                    .Select(value => value!)
+                    .ToArray()
+                    ?? Array.Empty<string>(),
+                FightImpactLanes: player.FightImpactLanes?
+                    .Where(lane => !string.IsNullOrWhiteSpace(lane.Label))
+                    .Select(lane => new FightPlayerFightImpactLaneIndexDto(
+                        Key: NullIfWhiteSpace(lane.Key) ?? string.Empty,
+                        Label: lane.Label.Trim(),
+                        StrengthPercent: lane.StrengthPercent,
+                        SharePercent: lane.SharePercent,
+                        DemandScorePercent: lane.DemandScorePercent,
+                        DemandLabel: NullIfWhiteSpace(lane.DemandLabel),
+                        DemandWeightPercent: lane.DemandWeightPercent,
+                        ImpactScore: lane.ImpactScore,
+                        EvidenceLine: NullIfWhiteSpace(lane.EvidenceLine)))
+                    .ToArray()
+                    ?? Array.Empty<FightPlayerFightImpactLaneIndexDto>(),
                 EvaluationConfidenceLabel: NullIfWhiteSpace(player.EvaluationConfidenceLabel),
                 EvaluationConfidenceDetail: NullIfWhiteSpace(player.EvaluationConfidenceDetail),
                 EvaluationCaveats: player.EvaluationCaveats?
@@ -1056,6 +1139,19 @@ public sealed class EliteInsightsFightIndexer
     private static string? NullIfWhiteSpace(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? PickMostCommonNonEmpty(IEnumerable<string?> values)
+    {
+        return values
+            .Select(NullIfWhiteSpace)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Key)
+            .FirstOrDefault();
     }
 
     private static bool TryGetArray(JsonElement element, string propertyName, out JsonElement array)

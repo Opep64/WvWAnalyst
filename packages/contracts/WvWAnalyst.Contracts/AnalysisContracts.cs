@@ -157,6 +157,9 @@ public sealed record FightAnalysisPlayerRowDto(
     double AverageRecoveriesPerFight,
     double? AverageInPositionRate,
     string? ContributionSummary,
+    double AverageFightImpactScore,
+    int FightImpactSampleCount,
+    IReadOnlyList<FightAnalysisFightImpactLaneDto> FightImpactLanes,
     IReadOnlyList<string> CharacterNames,
     IReadOnlyList<FightAnalysisPlayerCharacterDto> Characters,
     IReadOnlyList<FightAnalysisCharacterImpactTrendDto> CharacterImpactTrends);
@@ -188,7 +191,18 @@ public sealed record FightAnalysisPlayerCharacterDto(
     double AverageEngagedPresencePercent,
     FightAnalysisCharacterPackageInputsDto PackageInputs,
     IReadOnlyList<string> EvidenceLines,
+    double AverageFightImpactScore,
+    int FightImpactSampleCount,
+    IReadOnlyList<FightAnalysisFightImpactLaneDto> FightImpactLanes,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions);
+
+public sealed record FightAnalysisFightImpactLaneDto(
+    string LaneKey,
+    string LaneLabel,
+    double AverageImpactScore,
+    double AverageDemandWeightPercent,
+    double AverageStrengthPercent,
+    int Samples);
 
 public sealed record FightAnalysisCharacterPackageInputsDto(
     double PressureStrength,
@@ -234,6 +248,7 @@ public sealed record FightAnalysisLaneMetricDto(
 public sealed record FightAnalysisClassRowDto(
     string ClassLabel,
     int SampleCount,
+    int TotalSampleCountAll,
     int DistinctAccounts,
     int WinCount,
     int LossCount,
@@ -243,10 +258,21 @@ public sealed record FightAnalysisClassRowDto(
     string? TopPlayerDisplayName,
     double AveragePrimaryLaneScore,
     double AverageWeightedLaneScore,
+    double AverageFightCoverageScore,
+    int FightCoverageSampleCount,
+    IReadOnlyList<FightAnalysisClassFightCoverageLaneDto> FightCoverageLanes,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions,
     IReadOnlyList<PatchImpactDto> PatchImpacts,
     IReadOnlyList<FightAnalysisClassPlayerRowDto> Players,
     IReadOnlyList<FightAnalysisCharacterImpactTrendDto> CharacterImpactTrends);
+
+public sealed record FightAnalysisClassFightCoverageLaneDto(
+    string LaneKey,
+    string LaneLabel,
+    double AverageCoverageScore,
+    double AverageDemandWeightPercent,
+    double AverageStrengthPercent,
+    int Samples);
 
 public sealed record FightAnalysisEnemyClassRowDto(
     string ClassLabel,
@@ -287,6 +313,8 @@ public sealed record FightAnalysisClassPlayerRowDto(
     int DrawCount,
     double WinRatePercent,
     double ImpactScore,
+    double AverageFightImpactScore,
+    int FightImpactSampleCount,
     string? PrimaryLaneLabel,
     double AveragePrimaryLaneScore,
     double AverageWeightedLaneScore);

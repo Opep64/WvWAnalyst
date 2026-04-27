@@ -328,7 +328,27 @@ public sealed record FightSideIndexDto(
 public sealed record FightSideClassIndexDto(
     string ClassLabel,
     string? Icon,
-    int Count);
+    int Count,
+    double FightCoverageScore,
+    string? FightCoverageLabel,
+    string? FightCoverageSummary,
+    string? FightCoverageDetail,
+    IReadOnlyList<string> FightCoverageCaveats,
+    IReadOnlyList<FightSideClassCoverageLaneIndexDto> FightCoverageLanes);
+
+public sealed record FightSideClassCoverageLaneIndexDto(
+    string Key,
+    string Label,
+    double StrengthPercent,
+    double SharePercent,
+    double PerSlotEfficiency,
+    int PlayersContributing,
+    int PlayerCount,
+    double DemandScorePercent,
+    string? DemandLabel,
+    double DemandWeightPercent,
+    double CoverageScore,
+    string? EvidenceLine);
 
 public sealed record FightCommanderIndexDto(
     int ActorId,
@@ -433,6 +453,13 @@ public sealed record FightPlayerIndexDto(
     string? DemandFitSummary,
     string? ContributionProfile,
     string? KeyContributionSummary,
+    double FightImpactScore,
+    string? FightImpactLabel,
+    string? FightImpactSummary,
+    string? FightImpactDetail,
+    string? FightImpactConfidenceLabel,
+    IReadOnlyList<string> FightImpactCaveats,
+    IReadOnlyList<FightPlayerFightImpactLaneIndexDto> FightImpactLanes,
     string? EvaluationConfidenceLabel,
     string? EvaluationConfidenceDetail,
     IReadOnlyList<string> EvaluationCaveats,
@@ -441,6 +468,17 @@ public sealed record FightPlayerIndexDto(
     IReadOnlyList<FightPlayerLaneIndexDto> Lanes,
     IReadOnlyList<FightPlayerThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightPlayerProvidedBoonIndexDto> ProvidedBoons);
+
+public sealed record FightPlayerFightImpactLaneIndexDto(
+    string Key,
+    string Label,
+    double StrengthPercent,
+    double SharePercent,
+    double DemandScorePercent,
+    string? DemandLabel,
+    double DemandWeightPercent,
+    double ImpactScore,
+    string? EvidenceLine);
 
 public sealed record FightEnemyPlayerIndexDto(
     int ActorId,

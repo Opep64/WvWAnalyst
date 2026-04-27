@@ -205,6 +205,50 @@ public sealed class WvWAnalystSideClassSummaryDto
     public string Icon { get; set; } = string.Empty;
 
     public int Count { get; set; }
+
+    public WvWAnalystSpecFightCoverageDto? FightCoverage { get; set; }
+}
+
+public sealed class WvWAnalystSpecFightCoverageDto
+{
+    public double Score { get; set; }
+
+    public string Label { get; set; } = string.Empty;
+
+    public string Summary { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+
+    public IReadOnlyList<string> Caveats { get; set; } = Array.Empty<string>();
+
+    public IReadOnlyList<WvWAnalystSpecFightCoverageLaneDto> Lanes { get; set; } = Array.Empty<WvWAnalystSpecFightCoverageLaneDto>();
+}
+
+public sealed class WvWAnalystSpecFightCoverageLaneDto
+{
+    public string Key { get; set; } = string.Empty;
+
+    public string Label { get; set; } = string.Empty;
+
+    public double StrengthPercent { get; set; }
+
+    public double SharePercent { get; set; }
+
+    public double PerSlotEfficiency { get; set; }
+
+    public int PlayersContributing { get; set; }
+
+    public int PlayerCount { get; set; }
+
+    public double DemandScorePercent { get; set; }
+
+    public string DemandLabel { get; set; } = string.Empty;
+
+    public double DemandWeightPercent { get; set; }
+
+    public double CoverageScore { get; set; }
+
+    public string EvidenceLine { get; set; } = string.Empty;
 }
 
 public sealed class WvWAnalystCommanderDto
@@ -623,6 +667,20 @@ public sealed class WvWAnalystPlayerSummaryDto
 
     public string KeyContributionSummary { get; set; } = string.Empty;
 
+    public double FightImpactScore { get; set; }
+
+    public string FightImpactLabel { get; set; } = string.Empty;
+
+    public string FightImpactSummary { get; set; } = string.Empty;
+
+    public string FightImpactDetail { get; set; } = string.Empty;
+
+    public string FightImpactConfidenceLabel { get; set; } = string.Empty;
+
+    public IReadOnlyList<string> FightImpactCaveats { get; set; } = Array.Empty<string>();
+
+    public IReadOnlyList<WvWAnalystPlayerFightImpactLaneDto> FightImpactLanes { get; set; } = Array.Empty<WvWAnalystPlayerFightImpactLaneDto>();
+
     public string EvaluationConfidenceLabel { get; set; } = string.Empty;
 
     public string EvaluationConfidenceDetail { get; set; } = string.Empty;
@@ -638,6 +696,27 @@ public sealed class WvWAnalystPlayerSummaryDto
     public IReadOnlyList<WvWAnalystPlayerThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystPlayerThreatBoonSummaryDto>();
 
     public IReadOnlyList<WvWAnalystPlayerProvidedBoonSummaryDto> ProvidedBoons { get; set; } = Array.Empty<WvWAnalystPlayerProvidedBoonSummaryDto>();
+}
+
+public sealed class WvWAnalystPlayerFightImpactLaneDto
+{
+    public string Key { get; set; } = string.Empty;
+
+    public string Label { get; set; } = string.Empty;
+
+    public double StrengthPercent { get; set; }
+
+    public double SharePercent { get; set; }
+
+    public double DemandScorePercent { get; set; }
+
+    public string DemandLabel { get; set; } = string.Empty;
+
+    public double DemandWeightPercent { get; set; }
+
+    public double ImpactScore { get; set; }
+
+    public string EvidenceLine { get; set; } = string.Empty;
 }
 
 public sealed class WvWAnalystEnemyPlayerSummaryDto

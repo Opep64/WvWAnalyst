@@ -20,9 +20,9 @@ let manageResetBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
-let analysisPlayerSortState = { key: "impact", direction: "desc" };
-let analysisClassSortState = { key: "impact", direction: "desc" };
-let analysisClassPlayerSortState = { key: "impact", direction: "desc" };
+let analysisPlayerSortState = { key: "performance", direction: "desc" };
+let analysisClassSortState = { key: "performance", direction: "desc" };
+let analysisClassPlayerSortState = { key: "performance", direction: "desc" };
 let analysisEnemySortState = { key: "total", direction: "desc" };
 let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
@@ -2390,6 +2390,9 @@ function getAnalysisPlayerSortValue(player, sortKey) {
             return Number(player.fightCount ?? 0);
         case "record":
             return Number(player.winRatePercent ?? 0);
+        case "fightImpact":
+            return Number(player.averageFightImpactScore ?? 0);
+        case "performance":
         case "impact":
         default:
             return getSelectedAnalysisPlayerImpactValue(player);
@@ -2441,6 +2444,9 @@ function getAnalysisClassSortValue(classRow, sortKey) {
             return Number(classRow.sampleCount ?? 0);
         case "record":
             return Number(classRow.winRatePercent ?? 0);
+        case "fightCoverage":
+            return Number(classRow.averageFightCoverageScore ?? 0);
+        case "performance":
         case "impact":
         default:
             return Number(classRow.contributionScore ?? 0);
@@ -2494,6 +2500,9 @@ function getAnalysisClassPlayerSortValue(player, sortKey) {
             return Number(player.winRatePercent ?? 0);
         case "lanefit":
             return Number(player.averagePrimaryLaneScore ?? 0);
+        case "fightImpact":
+            return Number(player.averageFightImpactScore ?? 0);
+        case "performance":
         case "impact":
         default:
             return Number(player.impactScore ?? 0);
@@ -2850,7 +2859,7 @@ function getSelectedAnalysisPlayerImpactDetail(player) {
     if (stringEqualsIgnoreCase(laneKey, "all")) {
         return {
             value: Number(player.impactScore ?? 0),
-            note: "Fight-weighted character impact"
+            note: "Analyst performance score"
         };
     }
 
@@ -2867,6 +2876,79 @@ function getSelectedAnalysisPlayerImpactDetail(player) {
         value: Number(match.lane.overallStrengthPercent ?? 0),
         note: `${match.character.characterName} / ${match.character.classLabel} | ${formatPercent(match.lane.appearanceRatePercent)} appearance | ${formatPercent(match.lane.overallSharePercent)} overall share`
     };
+}
+
+function getAverageFightImpactDetail(item) {
+    const score = Number(item?.averageFightImpactScore ?? 0);
+    const samples = Number(item?.fightImpactSampleCount ?? 0);
+    if (score <= 0 || samples <= 0) {
+        return {
+            value: "-",
+            note: "Unavailable"
+        };
+    }
+
+    return {
+        value: `${formatNumber(score, 1)}/100`,
+        note: `${formatNumber(samples)} fight${samples === 1 ? "" : "s"}`
+    };
+}
+
+function getAverageFightCoverageDetail(item) {
+    const score = Number(item?.averageFightCoverageScore ?? 0);
+    const samples = Number(item?.fightCoverageSampleCount ?? 0);
+    if (score <= 0 || samples <= 0) {
+        return {
+            value: "-",
+            note: "Unavailable"
+        };
+    }
+
+    return {
+        value: `${formatNumber(score, 1)}/100`,
+        note: `${formatNumber(samples)} fight${samples === 1 ? "" : "s"}`
+    };
+}
+
+function buildFightImpactNote(item) {
+    const score = Number(item?.averageFightImpactScore ?? 0);
+    const samples = Number(item?.fightImpactSampleCount ?? 0);
+    if (score <= 0 || samples <= 0) {
+        return "";
+    }
+
+    return `Fight Impact ${formatNumber(score, 1)}/100 over ${formatNumber(samples)} fight${samples === 1 ? "" : "s"}`;
+}
+
+function buildFightCoverageNote(item) {
+    const score = Number(item?.averageFightCoverageScore ?? 0);
+    const samples = Number(item?.fightCoverageSampleCount ?? 0);
+    if (score <= 0 || samples <= 0) {
+        return "";
+    }
+
+    return `Fight Coverage ${formatNumber(score, 1)}/100 over ${formatNumber(samples)} fight${samples === 1 ? "" : "s"}`;
+}
+
+function buildDemandAdjustedLanePills(lanes, valueKey, labelPrefix) {
+    const retained = (lanes ?? [])
+        .filter(lane => Number(lane?.[valueKey] ?? 0) > 0)
+        .slice(0, 4);
+    if (retained.length === 0) {
+        return "";
+    }
+
+    return `
+        <div class="attribute-pill-list">
+            ${retained.map(lane => {
+                const label = lane.laneLabel ?? lane.laneKey ?? "Lane";
+                const value = Number(lane[valueKey] ?? 0);
+                const demandWeight = Number(lane.averageDemandWeightPercent ?? 0);
+                const title = `${labelPrefix} ${formatNumber(value, 1)} points | ${formatPercent(demandWeight)} demand weight`;
+                return `<span class="attribute-pill" title="${escapeHtml(title)}">${escapeHtml(`${label} ${formatNumber(value, 1)}`)}</span>`;
+            }).join("")}
+        </div>
+    `;
 }
 
 function shouldIncludeAnalysisPlayerForSelectedLane(player) {
@@ -3935,7 +4017,7 @@ function buildCompHelperCandidateRow(candidate, lockedCandidates) {
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(`Fit ${formatNumber(candidate.priorityScore, 1)}`)}</strong>
-                    <span class="table-inline-note">${escapeHtml(`Impact ${formatNumber(candidate.impactScore, 1)} | reliability ${formatPercent(candidate.reliability * 100, 0)}`)}</span>
+                    <span class="table-inline-note">${escapeHtml(`Performance ${formatNumber(candidate.impactScore, 1)} | reliability ${formatPercent(candidate.reliability * 100, 0)}`)}</span>
                 </div>
             </td>
         </tr>
@@ -4148,6 +4230,7 @@ function buildAnalysisPlayerRow(player, isSelected) {
         ? `Most-played character: ${player.displayName}`
         : null;
     const impactDetail = getSelectedAnalysisPlayerImpactDetail(player);
+    const fightImpactDetail = getAverageFightImpactDetail(player);
 
     return `
         <tr class="${rowClasses.join(" ")}" data-player-account="${escapeHtml(player.account)}">
@@ -4174,6 +4257,12 @@ function buildAnalysisPlayerRow(player, isSelected) {
                 <div class="table-stack">
                     <strong>${escapeHtml(formatNumber(impactDetail.value, 1))}</strong>
                     <span class="table-inline-note">${escapeHtml(impactDetail.note)}</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(fightImpactDetail.value)}</strong>
+                    <span class="table-inline-note">${escapeHtml(fightImpactDetail.note)}</span>
                 </div>
             </td>
             <td>${escapeHtml((player.classesPlayed ?? []).join(", ") || "-")}</td>
@@ -4508,7 +4597,7 @@ function buildAnalysisImpactTrendChart(trends, selectedIds, context) {
 
             const x = chart.xForIndex(nightIndex.get(point.dateKey));
             const y = chart.yForValue(point.impactScore);
-            const label = `${trend.label ?? trend.characterName} ${point.dateLabel}: Impact ${formatNumber(point.impactScore, 1)}`;
+            const label = `${trend.label ?? trend.characterName} ${point.dateLabel}: Performance ${formatNumber(point.impactScore, 1)}`;
             return `
                 <circle class="analysis-boon-trend-point"
                     cx="${x}"
@@ -4724,6 +4813,8 @@ function buildAnalysisCharacterCard(character) {
         ? `${formatPercent(character.averageTooFarRate)} too far, ${formatPercent(character.averageOverextendedRate)} overextended, ${formatPercent(character.averageLateralRiskRate)} lateral risk`
         : "Commander-relative replay samples were not available for this character.";
     const classText = character.classLabel || "Unknown class";
+    const fightImpactNote = buildFightImpactNote(character);
+    const fightImpactPills = buildDemandAdjustedLanePills(character.fightImpactLanes, "averageImpactScore", "Fight Impact");
 
     return `
         <article class="analysis-character-card">
@@ -4735,12 +4826,14 @@ function buildAnalysisCharacterCard(character) {
                 <div class="analysis-character-meta">
                     <span class="analysis-character-pill">${escapeHtml(`${character.fightCount} fights`)}</span>
                     <span class="analysis-character-pill">${escapeHtml(`${formatPercent(character.winRatePercent)} wins`)}</span>
-                    <span class="analysis-character-pill">${escapeHtml(`Impact ${formatNumber(character.impactScore, 1)}`)}</span>
+                    <span class="analysis-character-pill">${escapeHtml(`Performance ${formatNumber(character.impactScore, 1)}`)}</span>
+                    ${fightImpactNote ? `<span class="analysis-character-pill">${escapeHtml(`Fight Impact ${formatNumber(character.averageFightImpactScore, 1)}/100`)}</span>` : ""}
                     <span class="analysis-character-pill">${escapeHtml(`${character.confidenceLabel ?? "Unknown"} confidence`)}</span>
                 </div>
             </div>
             <p class="analysis-character-lead">${escapeHtml(buildCharacterObservedLead(character))}</p>
             <p class="analysis-character-copy">${escapeHtml(buildCharacterObservedCopy(character))}</p>
+            ${fightImpactNote ? `<p class="analysis-character-copy">${escapeHtml(fightImpactNote)}.</p>${fightImpactPills}` : ""}
             ${character.confidenceDetail ? `<p class="table-inline-note">${escapeHtml(character.confidenceDetail)}</p>` : ""}
             <div class="analysis-character-lane-grid">
                 ${(character.laneContributions ?? []).length
@@ -4787,7 +4880,7 @@ function renderAnalysisPlayerDetail(player) {
                 <p>Character/class breakdown across the current analysis filter.</p>
             </div>
         </div>
-        ${buildAnalysisImpactTrendCard("player", "Character Impact", impactTrends, selectedIds)}
+        ${buildAnalysisImpactTrendCard("player", "Character Performance", impactTrends, selectedIds)}
         <div class="analysis-character-grid">
             ${(player.characters ?? []).map(buildAnalysisCharacterCard).join("")}
         </div>
@@ -4804,8 +4897,8 @@ function renderAnalysisPlayers(snapshot) {
     const selectedLaneLabel = getSelectedAnalysisPlayerLaneLabel();
     const hasSearchValue = Boolean(document.querySelector("#analysis-player-search")?.value.trim());
     const laneScopeSummary = stringEqualsIgnoreCase(getSelectedAnalysisPlayerLaneKey(), "all")
-        ? "Impact is fight-weighted across each player's character/spec cards."
-        : `Impact shows the best ${selectedLaneLabel} value from any character/spec card with at least 10 total fights, and only players with at least ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneLabel} appearances are shown.`;
+        ? "Performance is the existing Analyst score across each player's character/spec cards; Fight Impact is the separate parser-derived average."
+        : `Performance shows the best ${selectedLaneLabel} value from any character/spec card with at least 10 total fights, and only players with at least ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneLabel} appearances are shown. Fight Impact remains the overall demand-adjusted average.`;
     const thresholdSummary = hasSearchValue
         ? `Search override is active, so matching players below ${MINIMUM_PLAYER_TABLE_FIGHTS} total imported fights can still appear.`
         : `By default only players with at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total imported fights are shown.`;
@@ -4816,7 +4909,7 @@ function renderAnalysisPlayers(snapshot) {
 
     if (filteredPlayers.length === 0) {
         selectedAnalysisPlayerAccount = null;
-        body.innerHTML = `<tr><td colspan="6">No player rows matched the current filters.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="7">No player rows matched the current filters.</td></tr>`;
         renderAnalysisPlayerDetail(null);
         return;
     }
@@ -4838,6 +4931,7 @@ function buildAnalysisClassRow(classRow) {
     if (stringEqualsIgnoreCase(classRow.classLabel, selectedAnalysisClassLabel)) {
         rowClasses.push("is-selected");
     }
+    const fightCoverageDetail = getAverageFightCoverageDetail(classRow);
 
     return `
         <tr class="${rowClasses.join(" ")}" data-class-label="${escapeHtml(classRow.classLabel)}">
@@ -4852,13 +4946,20 @@ function buildAnalysisClassRow(classRow) {
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(String(classRow.sampleCount))}</strong>
-                    <span class="table-inline-note">${escapeHtml(`${classRow.distinctAccounts} accounts`)}</span>
+                    <span class="table-inline-note">${escapeHtml("Selected samples")}</span>
+                    <span class="table-inline-note">${escapeHtml(`${formatNumber(classRow.totalSampleCountAll ?? classRow.sampleCount)} total | ${classRow.distinctAccounts} accounts`)}</span>
                 </div>
             </td>
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(formatNumber(classRow.contributionScore, 1))}</strong>
                     <span class="table-inline-note">${escapeHtml(`${formatPercent(classRow.averageWeightedLaneScore)} weighted lane`)}</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(fightCoverageDetail.value)}</strong>
+                    <span class="table-inline-note">${escapeHtml(fightCoverageDetail.note)}</span>
                 </div>
             </td>
             <td>${escapeHtml(`${classRow.winCount}-${classRow.lossCount}-${classRow.drawCount} | ${formatPercent(classRow.winRatePercent)} wins`)}</td>
@@ -4940,6 +5041,7 @@ function buildAnalysisClassPlayerRow(player) {
     const playerNote = player.displayName && !stringEqualsIgnoreCase(player.displayName, player.account)
         ? `Most-played character: ${player.displayName}`
         : null;
+    const fightImpactDetail = getAverageFightImpactDetail(player);
 
     return `
         <tr>
@@ -4960,6 +5062,12 @@ function buildAnalysisClassPlayerRow(player) {
                 <div class="table-stack">
                     <strong>${escapeHtml(formatNumber(player.impactScore, 1))}</strong>
                     <span class="table-inline-note">${escapeHtml(`${formatPercent(player.averageWeightedLaneScore)} weighted lane`)}</span>
+                </div>
+            </td>
+            <td>
+                <div class="table-stack">
+                    <strong>${escapeHtml(fightImpactDetail.value)}</strong>
+                    <span class="table-inline-note">${escapeHtml(fightImpactDetail.note)}</span>
                 </div>
             </td>
             <td>${escapeHtml(`${player.primaryLaneLabel ?? "Unclassified"} | ${formatPercent(player.averagePrimaryLaneScore)} primary`)}</td>
@@ -4992,16 +5100,18 @@ function renderAnalysisClassDetail(classRow) {
     const impactTrends = classRow.characterImpactTrends ?? [];
     ensureAnalysisClassImpactTrendSelection(classRow, impactTrends);
     const selectedIds = selectedAnalysisClassImpactTrendIds ?? new Set();
+    const fightCoverageNote = buildFightCoverageNote(classRow);
+    const fightCoveragePills = buildDemandAdjustedLanePills(classRow.fightCoverageLanes, "averageCoverageScore", "Fight Coverage");
 
     container.className = "analysis-player-detail";
     container.innerHTML = `
         <div class="section-heading">
             <div>
                 <h3>${escapeHtml(classRow.classLabel)}</h3>
-                <p>${escapeHtml(`${classRow.sampleCount} class samples across ${classRow.distinctAccounts} accounts. ${topPlayerCopy}`)}</p>
+                <p>${escapeHtml(`${classRow.sampleCount} selected class samples, ${formatNumber(classRow.totalSampleCountAll ?? classRow.sampleCount)} total, across ${classRow.distinctAccounts} accounts. ${topPlayerCopy}`)}</p>
             </div>
         </div>
-        ${buildAnalysisImpactTrendCard("class", "Character Impact", impactTrends, selectedIds)}
+        ${buildAnalysisImpactTrendCard("class", "Character Performance", impactTrends, selectedIds)}
         <div class="analysis-character-grid">
             <article class="analysis-character-card">
                 <div class="analysis-character-header">
@@ -5012,11 +5122,13 @@ function renderAnalysisClassDetail(classRow) {
                     <div class="analysis-character-meta">
                         <span class="analysis-character-pill">${escapeHtml(`${classRow.sampleCount} samples`)}</span>
                         <span class="analysis-character-pill">${escapeHtml(`${formatPercent(classRow.winRatePercent)} wins`)}</span>
-                        <span class="analysis-character-pill">${escapeHtml(`Impact ${formatNumber(classRow.contributionScore, 1)}`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`Performance ${formatNumber(classRow.contributionScore, 1)}`)}</span>
+                        ${fightCoverageNote ? `<span class="analysis-character-pill">${escapeHtml(`Fight Coverage ${formatNumber(classRow.averageFightCoverageScore, 1)}/100`)}</span>` : ""}
                     </div>
                 </div>
                 <p class="analysis-character-lead">${escapeHtml(`Observed contribution leaned across ${classRow.classLabel}'s strongest lanes in the filtered fights.`)}</p>
                 <p class="analysis-character-copy">${escapeHtml(`Weighted lane score averaged ${formatPercent(classRow.averageWeightedLaneScore)} across ${classRow.sampleCount} class appearances.`)}</p>
+                ${fightCoverageNote ? `<p class="analysis-character-copy">${escapeHtml(`${fightCoverageNote}. This is separate from the raw lane capability cards below.`)}</p>${fightCoveragePills}` : ""}
                 <div class="analysis-character-lane-grid">
                     ${(classRow.laneContributions ?? []).length
                         ? classRow.laneContributions.map(lane => buildCharacterLaneCard(lane, classRow.sampleCount)).join("")
@@ -5028,7 +5140,7 @@ function renderAnalysisClassDetail(classRow) {
         <div class="section-heading">
             <div>
                 <h3>Players on ${escapeHtml(classRow.classLabel)}</h3>
-                <p>Sorted by overall class impact.</p>
+                <p>Sorted by overall class performance.</p>
             </div>
         </div>
         <div class="table-shell table-shell-scroll table-shell-analysis-players">
@@ -5038,14 +5150,15 @@ function renderAnalysisClassDetail(classRow) {
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="player">Player</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="appearances">Appearances</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="record">Record</button></th>
-                        <th><button class="sort-header" type="button" data-analysis-class-player-sort="impact">Impact</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-class-player-sort="performance">Performance</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-class-player-sort="fightImpact">Fight Impact</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="lanefit">Lane fit</button></th>
                     </tr>
                 </thead>
                 <tbody>
                     ${(sortedPlayers.length
                         ? sortedPlayers.map(buildAnalysisClassPlayerRow).join("")
-                        : `<tr><td colspan="5">No player rows were retained for this class.</td></tr>`)}
+                        : `<tr><td colspan="6">No player rows were retained for this class.</td></tr>`)}
                 </tbody>
             </table>
         </div>
@@ -5062,7 +5175,7 @@ function renderAnalysisClasses(snapshot) {
 
     if (sortedClasses.length === 0) {
         selectedAnalysisClassLabel = null;
-        body.innerHTML = `<tr><td colspan="5">No class rows matched the current filters.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="6">No class rows matched the current filters.</td></tr>`;
         renderAnalysisClassDetail(null);
         return;
     }
@@ -5356,7 +5469,7 @@ function renderAnalysisLaneDetail(snapshot) {
                             <th>Player</th>
                             <th>Appearances</th>
                             <th>Record</th>
-                            <th>Impact</th>
+                            <th>Performance</th>
                             <th>Lane fit</th>
                         </tr>
                     </thead>
@@ -5375,7 +5488,7 @@ function renderAnalysisLaneDetail(snapshot) {
                         <tr>
                             <th>Class</th>
                             <th>Samples</th>
-                            <th>Impact</th>
+                            <th>Performance</th>
                             <th>Lane strength</th>
                             <th>Lane fit</th>
                             <th>Top player</th>
@@ -5884,9 +5997,9 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-mitigation-card", "");
     setInnerHtml("#analysis-scope-list", buildAnalysisScopeStaticChip(message));
     document.querySelector("#analysis-players-summary").textContent = message;
-    setInnerHtml("#analysis-players-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-players-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-player-detail", "");
-    setInnerHtml("#analysis-classes-body", `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-classes-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-class-detail", "");
     document.querySelector("#analysis-enemies-summary").textContent = message;
     setInnerHtml("#analysis-enemies-body", `<tr><td colspan="10">${escapeHtml(message)}</td></tr>`);

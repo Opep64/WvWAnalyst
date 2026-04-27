@@ -659,7 +659,7 @@
                     </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players" hidden>
-                    <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. By default the table shows players with at least 40 total imported fights, but search can surface smaller samples.</p>
+                    <p class="workspace-note analysis-panel-note">Grouped by Guild Wars account so you can follow the same player across different classes and builds. Performance is the existing Analyst score; Fight Impact is the demand-adjusted replay-visible contribution estimate. By default the table shows players with at least 40 total imported fights, but search can surface smaller samples.</p>
                     <div class="analysis-split-panel">
                         <div class="analysis-split-list">
                             <div class="browser-controls analysis-player-toolbar">
@@ -668,7 +668,7 @@
                                     <input id="analysis-player-search" type="search" placeholder="Guild Wars ID or character name">
                                 </label>
                                 <label class="browser-field">
-                                    <span>Impact lane</span>
+                                    <span>Lane focus</span>
                                     <select id="analysis-player-lane-filter">
                                         <option value="all">All lanes</option>
                                     </select>
@@ -682,7 +682,8 @@
                                             <th><button class="sort-header" type="button" data-analysis-player-sort="player">Player</button></th>
                                             <th><button class="sort-header" type="button" data-analysis-player-sort="appearances">Appearances</button></th>
                                             <th><button class="sort-header" type="button" data-analysis-player-sort="record">Record</button></th>
-                                            <th><button class="sort-header" type="button" data-analysis-player-sort="impact">Impact</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="performance">Performance</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-player-sort="fightImpact">Fight Impact</button></th>
                                             <th>Classes</th>
                                             <th>Lane fit</th>
                                         </tr>
@@ -697,7 +698,7 @@
                     </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-classes" data-analysis-panel="classes" role="tabpanel" aria-labelledby="analysis-tab-classes" hidden>
-                    <p class="workspace-note analysis-panel-note">A compact view of what each class contributed across the filtered fights and who tended to drive that value. The main class list requires at least 40 class appearances, and the class player list requires at least 20 appearances on that class.</p>
+                    <p class="workspace-note analysis-panel-note">A compact view of what each class contributed across the filtered fights and who tended to drive that value. Performance is the existing class capability score; Fight Coverage is the demand-adjusted replay-visible coverage estimate. The main class list requires at least 40 total imported class appearances, and the class player list requires at least 20 total appearances on that class.</p>
                     <div class="analysis-split-panel analysis-split-panel-classes">
                         <div class="analysis-split-list">
                             <div class="table-shell table-shell-scroll table-shell-analysis-classes">
@@ -706,7 +707,8 @@
                                         <tr>
                                             <th><button class="sort-header" type="button" data-analysis-class-sort="class">Class</button></th>
                                             <th><button class="sort-header" type="button" data-analysis-class-sort="samples">Samples</button></th>
-                                            <th><button class="sort-header" type="button" data-analysis-class-sort="impact">Impact</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="performance">Performance</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-class-sort="fightCoverage">Fight Coverage</button></th>
                                             <th><button class="sort-header" type="button" data-analysis-class-sort="record">Record</button></th>
                                             <th>Top player</th>
                                         </tr>

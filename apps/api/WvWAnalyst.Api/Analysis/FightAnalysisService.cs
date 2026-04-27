@@ -119,6 +119,7 @@ public sealed class FightAnalysisService
         var totalPlayerFightCounts = BuildTotalPlayerFightCounts(trackedPlayerSamples);
         var totalCharacterFightCounts = BuildTotalCharacterFightCounts(trackedPlayerSamples);
         var totalCharacterLaneSampleCounts = BuildTotalCharacterLaneSampleCounts(trackedPlayerSamples);
+        var totalClassSampleCounts = BuildTotalClassSampleCounts(allFights);
         var totalClassPlayerFightCounts = BuildTotalClassPlayerFightCounts(allFights);
 
         return new FightAnalysisSnapshotDto(
@@ -145,7 +146,7 @@ public sealed class FightAnalysisService
             Overview: BuildOverview(filteredFights, expectedScoreLookup),
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
-            TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
+            TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
@@ -869,6 +870,8 @@ public sealed class FightAnalysisService
                 var contributionSummary = PickMostCommonNonEmpty(mergedFightEntries
                     .Select(entry => entry.KeyContributionSummary ?? entry.ContributionProfile ?? entry.FitSummary))
                     ?? primaryCharacter?.ContributionSummary;
+                var fightImpact = ComputeAverageFightImpact(mergedFightEntries);
+                var fightImpactLanes = BuildFightImpactLanes(mergedFightEntries, 5);
                 var averageDamage = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Damage, entry => entry.Fight), 0);
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
@@ -930,6 +933,9 @@ public sealed class FightAnalysisService
                     AverageRecoveriesPerFight: averageRecoveries,
                     AverageInPositionRate: averageInPositionRate,
                     ContributionSummary: string.IsNullOrWhiteSpace(contributionSummary) ? null : contributionSummary,
+                    AverageFightImpactScore: fightImpact.Average,
+                    FightImpactSampleCount: fightImpact.SampleCount,
+                    FightImpactLanes: fightImpactLanes,
                     CharacterNames: characters
                         .Select(character => character.CharacterName)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -947,6 +953,7 @@ public sealed class FightAnalysisService
 
     private static IReadOnlyList<FightAnalysisClassRowDto> BuildTopClasses(
         IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyDictionary<string, int> totalClassSampleCounts,
         IReadOnlyDictionary<string, int> totalClassPlayerFightCounts,
         IReadOnlyList<PatchImpactDto> patchImpacts)
     {
@@ -963,7 +970,13 @@ public sealed class FightAnalysisService
                     .SelectMany(playerGroup => MergePlayerFightSamplesByFight(playerGroup.ToArray()))
                     .ToArray();
                 var sampleCount = mergedFightEntries.Length;
+                int totalSampleCountAll = totalClassSampleCounts.TryGetValue(group.Key, out int totalClassSamples)
+                    ? totalClassSamples
+                    : sampleCount;
                 var laneContributions = BuildAggregateLaneContributions(mergedFightEntries, sampleCount, 6);
+                var fightCoverageSamples = BuildClassFightCoverageSamples(fights, group.Key);
+                var fightCoverage = ComputeAverageFightCoverage(fightCoverageSamples);
+                var fightCoverageLanes = BuildClassFightCoverageLanes(fightCoverageSamples, 5);
                 var laneScores = mergedFightEntries
                     .Select(entry => new
                     {
@@ -972,10 +985,14 @@ public sealed class FightAnalysisService
                     })
                     .Where(score => score.Score.Primary > 0.0 || score.Score.Weighted > 0.0)
                     .ToArray();
-                var winCount = mergedFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "squad", StringComparison.OrdinalIgnoreCase));
-                var lossCount = mergedFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "enemy", StringComparison.OrdinalIgnoreCase));
-                var drawCount = mergedFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "draw", StringComparison.OrdinalIgnoreCase));
-                var winRatePercent = sampleCount == 0 ? 0.0 : Math.Round(winCount * 100.0 / sampleCount, 1);
+                var classFightEntries = mergedFightEntries
+                    .GroupBy(entry => entry.Fight.FightId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToArray();
+                var winCount = classFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "squad", StringComparison.OrdinalIgnoreCase));
+                var lossCount = classFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "enemy", StringComparison.OrdinalIgnoreCase));
+                var drawCount = classFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "draw", StringComparison.OrdinalIgnoreCase));
+                var winRatePercent = classFightEntries.Length == 0 ? 0.0 : Math.Round(winCount * 100.0 / classFightEntries.Length, 1);
                 var averageDamage = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Damage, entry => entry.Fight), 0);
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
@@ -1015,6 +1032,7 @@ public sealed class FightAnalysisService
                 return new FightAnalysisClassRowDto(
                     ClassLabel: group.Key,
                     SampleCount: sampleCount,
+                    TotalSampleCountAll: totalSampleCountAll,
                     DistinctAccounts: classPlayers.Count,
                     WinCount: winCount,
                     LossCount: lossCount,
@@ -1028,12 +1046,15 @@ public sealed class FightAnalysisService
                     AverageWeightedLaneScore: laneScores.Length == 0
                         ? 0.0
                         : Math.Round(CleanupAdjustedAverage(laneScores, score => score.Score.Weighted, score => score.Fight), 1),
+                    AverageFightCoverageScore: fightCoverage.Average,
+                    FightCoverageSampleCount: fightCoverage.SampleCount,
+                    FightCoverageLanes: fightCoverageLanes,
                     LaneContributions: laneContributions,
                     PatchImpacts: GetPatchImpactsForClass(group.Key, patchImpacts),
                     Players: classPlayers,
                     CharacterImpactTrends: characterImpactTrends);
             })
-            .Where(row => row.SampleCount >= MinimumClassSampleCount)
+            .Where(row => row.TotalSampleCountAll >= MinimumClassSampleCount)
             .OrderByDescending(row => row.ContributionScore)
             .ThenByDescending(row => row.AverageWeightedLaneScore)
             .ThenByDescending(row => row.SampleCount)
@@ -1626,6 +1647,8 @@ public sealed class FightAnalysisService
                 double? averageTooFarRate = RoundNullable(CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.TooFarRate, entry => entry.Fight), 1);
                 double? averageOverextendedRate = RoundNullable(CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.OverextendedRate, entry => entry.Fight), 1);
                 double? averageLateralRiskRate = RoundNullable(CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.LateralRiskRate, entry => entry.Fight), 1);
+                var fightImpact = ComputeAverageFightImpact(mergedFightEntries);
+                var fightImpactLanes = BuildFightImpactLanes(mergedFightEntries, 5);
                 var impactScore = ComputeImpactScore(
                     averageWeightedLaneScore: laneScores.Length == 0
                         ? 0.0
@@ -1696,6 +1719,9 @@ public sealed class FightAnalysisService
                     AverageEngagedPresencePercent: Math.Round(ComputeAveragePresencePercent(mergedFightEntries, entry => entry.CombatSeconds), 1),
                     PackageInputs: packageInputs,
                     EvidenceLines: evidenceLines,
+                    AverageFightImpactScore: fightImpact.Average,
+                    FightImpactSampleCount: fightImpact.SampleCount,
+                    FightImpactLanes: fightImpactLanes,
                     LaneContributions: laneContributions);
             })
             .OrderByDescending(character => character.FightCount)
@@ -1850,6 +1876,7 @@ public sealed class FightAnalysisService
                     averageDeaths: averageDeaths,
                     averageRecoveries: averageRecoveries,
                     averageInPositionRate: averageInPositionRate);
+                var fightImpact = ComputeAverageFightImpact(mergedFightEntries);
                 var primaryLane = mergedFightEntries
                     .Select(entry => GetPrimaryLane(entry.Lanes))
                     .Where(lane => lane is not null)
@@ -1876,6 +1903,8 @@ public sealed class FightAnalysisService
                     DrawCount: drawCount,
                     WinRatePercent: winRatePercent,
                     ImpactScore: impactScore,
+                    AverageFightImpactScore: fightImpact.Average,
+                    FightImpactSampleCount: fightImpact.SampleCount,
                     PrimaryLaneLabel: primaryLane,
                     AveragePrimaryLaneScore: laneScores.Length == 0
                         ? 0.0
@@ -1935,6 +1964,100 @@ public sealed class FightAnalysisService
             .OrderByDescending(lane => lane.OverallStrengthPercent)
             .ThenByDescending(lane => lane.AppearanceRatePercent)
             .ThenByDescending(lane => lane.Samples)
+            .ThenBy(lane => lane.LaneLabel, StringComparer.OrdinalIgnoreCase)
+            .Take(maxCount)
+            .ToArray();
+    }
+
+    private static (double Average, int SampleCount) ComputeAverageFightImpact(IReadOnlyList<MergedPlayerFightSample> mergedFightEntries)
+    {
+        var samples = mergedFightEntries
+            .Where(entry => entry.FightImpactScore > 0.0)
+            .ToArray();
+        return samples.Length == 0
+            ? (0.0, 0)
+            : (Math.Round(CleanupAdjustedAverage(samples, entry => entry.FightImpactScore, entry => entry.Fight), 1), samples.Length);
+    }
+
+    private static IReadOnlyList<FightAnalysisFightImpactLaneDto> BuildFightImpactLanes(
+        IReadOnlyList<MergedPlayerFightSample> mergedFightEntries,
+        int maxCount)
+    {
+        return mergedFightEntries
+            .SelectMany(entry => entry.FightImpactLanes.Select(lane => new
+            {
+                entry.Fight,
+                Lane = lane
+            }))
+            .GroupBy(entry => entry.Lane.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(laneGroup =>
+            {
+                var laneEntries = laneGroup.ToArray();
+                var sample = laneEntries[0].Lane;
+                return new FightAnalysisFightImpactLaneDto(
+                    LaneKey: laneGroup.Key,
+                    LaneLabel: string.IsNullOrWhiteSpace(sample.Label) ? laneGroup.Key : sample.Label,
+                    AverageImpactScore: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.ImpactScore, entry => entry.Fight), 1),
+                    AverageDemandWeightPercent: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.DemandWeightPercent, entry => entry.Fight), 1),
+                    AverageStrengthPercent: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.StrengthPercent, entry => entry.Fight), 1),
+                    Samples: laneEntries.Length);
+            })
+            .Where(lane => lane.AverageImpactScore > 0.0 || lane.AverageStrengthPercent > 0.0)
+            .OrderByDescending(lane => lane.AverageImpactScore)
+            .ThenByDescending(lane => lane.AverageDemandWeightPercent)
+            .ThenByDescending(lane => lane.AverageStrengthPercent)
+            .ThenBy(lane => lane.LaneLabel, StringComparer.OrdinalIgnoreCase)
+            .Take(maxCount)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ClassFightCoverageSample> BuildClassFightCoverageSamples(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        string classLabel)
+    {
+        return fights
+            .Select(fight => new ClassFightCoverageSample(
+                Fight: fight,
+                ClassEntry: (fight.FightIndex?.SquadSide?.Classes ?? Array.Empty<FightSideClassIndexDto>())
+                    .FirstOrDefault(entry => string.Equals(entry.ClassLabel, classLabel, StringComparison.OrdinalIgnoreCase))!))
+            .Where(sample => sample.ClassEntry is not null && sample.ClassEntry.FightCoverageScore > 0.0)
+            .ToArray();
+    }
+
+    private static (double Average, int SampleCount) ComputeAverageFightCoverage(IReadOnlyList<ClassFightCoverageSample> coverageSamples)
+    {
+        return coverageSamples.Count == 0
+            ? (0.0, 0)
+            : (Math.Round(CleanupAdjustedAverage(coverageSamples, sample => sample.ClassEntry.FightCoverageScore, sample => sample.Fight), 1), coverageSamples.Count);
+    }
+
+    private static IReadOnlyList<FightAnalysisClassFightCoverageLaneDto> BuildClassFightCoverageLanes(
+        IReadOnlyList<ClassFightCoverageSample> coverageSamples,
+        int maxCount)
+    {
+        return coverageSamples
+            .SelectMany(sample => (sample.ClassEntry.FightCoverageLanes ?? Array.Empty<FightSideClassCoverageLaneIndexDto>()).Select(lane => new
+            {
+                sample.Fight,
+                Lane = lane
+            }))
+            .GroupBy(entry => entry.Lane.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(laneGroup =>
+            {
+                var laneEntries = laneGroup.ToArray();
+                var sample = laneEntries[0].Lane;
+                return new FightAnalysisClassFightCoverageLaneDto(
+                    LaneKey: laneGroup.Key,
+                    LaneLabel: string.IsNullOrWhiteSpace(sample.Label) ? laneGroup.Key : sample.Label,
+                    AverageCoverageScore: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.CoverageScore, entry => entry.Fight), 1),
+                    AverageDemandWeightPercent: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.DemandWeightPercent, entry => entry.Fight), 1),
+                    AverageStrengthPercent: Math.Round(CleanupAdjustedAverage(laneEntries, entry => entry.Lane.StrengthPercent, entry => entry.Fight), 1),
+                    Samples: laneEntries.Length);
+            })
+            .Where(lane => lane.AverageCoverageScore > 0.0 || lane.AverageStrengthPercent > 0.0)
+            .OrderByDescending(lane => lane.AverageCoverageScore)
+            .ThenByDescending(lane => lane.AverageDemandWeightPercent)
+            .ThenByDescending(lane => lane.AverageStrengthPercent)
             .ThenBy(lane => lane.LaneLabel, StringComparer.OrdinalIgnoreCase)
             .Take(maxCount)
             .ToArray();
@@ -2014,6 +2137,22 @@ public sealed class FightAnalysisService
         }
 
         return result;
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildTotalClassSampleCounts(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .SelectMany(fight => (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .Where(player => !string.IsNullOrWhiteSpace(BuildClassLabel(player)))
+                .Select(player => new PlayerFightSample(fight, player)))
+            .GroupBy(entry => BuildClassLabel(entry.Player) ?? "Unknown class", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .GroupBy(entry => BuildPlayerIdentityKey(entry.Player), StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(playerGroup => MergePlayerFightSamplesByFight(playerGroup.ToArray()))
+                    .Count(),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyDictionary<string, int> BuildTotalClassPlayerFightCounts(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -2469,6 +2608,22 @@ public sealed class FightAnalysisService
             return weightedSum / totalPositioningSamples;
         }
 
+        double MergeFightImpactScore()
+        {
+            var impactEntries = entries
+                .Where(entry => entry.Player.FightImpactScore > 0.0)
+                .Select(entry => new
+                {
+                    Score = entry.Player.FightImpactScore,
+                    Weight = Math.Max(1.0, Math.Max(entry.Player.ActiveSeconds, entry.Player.CombatSeconds))
+                })
+                .ToArray();
+            double totalWeight = impactEntries.Sum(entry => entry.Weight);
+            return impactEntries.Length == 0 || totalWeight <= 0.0
+                ? 0.0
+                : Math.Round(impactEntries.Sum(entry => entry.Score * entry.Weight) / totalWeight, 1);
+        }
+
         return new MergedPlayerFightSample(
             Fight: anchor.Fight,
             Account: PickMostCommonNonEmpty(entries.Select(entry => entry.Player.Account))
@@ -2507,7 +2662,52 @@ public sealed class FightAnalysisService
                 .Where(line => !string.IsNullOrWhiteSpace(line))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
+            FightImpactScore: MergeFightImpactScore(),
+            FightImpactLanes: MergePlayerFightImpactLanes(entries),
             Lanes: MergePlayerFightLanes(entries));
+    }
+
+    private static IReadOnlyList<MergedPlayerFightImpactLaneSample> MergePlayerFightImpactLanes(IReadOnlyList<PlayerFightSample> entries)
+    {
+        return entries
+            .SelectMany(entry => (entry.Player.FightImpactLanes ?? Array.Empty<FightPlayerFightImpactLaneIndexDto>())
+                .Where(lane => !string.IsNullOrWhiteSpace(lane.Label))
+                .Select(lane => new
+                {
+                    Lane = lane,
+                    Weight = Math.Max(1.0, Math.Max(entry.Player.ActiveSeconds, entry.Player.CombatSeconds))
+                }))
+            .GroupBy(entry => string.IsNullOrWhiteSpace(entry.Lane.Key) ? entry.Lane.Label : entry.Lane.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var laneEntries = group.ToArray();
+                double totalWeight = laneEntries.Sum(entry => entry.Weight);
+                if (totalWeight <= 0.0)
+                {
+                    totalWeight = laneEntries.Length;
+                }
+
+                double WeightedAverage(Func<FightPlayerFightImpactLaneIndexDto, double> selector)
+                {
+                    return laneEntries.Sum(entry => selector(entry.Lane) * entry.Weight) / totalWeight;
+                }
+
+                var sample = laneEntries[0].Lane;
+                return new MergedPlayerFightImpactLaneSample(
+                    Key: group.Key,
+                    Label: PickMostCommonNonEmpty(laneEntries.Select(entry => entry.Lane.Label)) ?? sample.Label ?? group.Key,
+                    StrengthPercent: Math.Round(WeightedAverage(lane => lane.StrengthPercent), 1),
+                    SharePercent: Math.Round(WeightedAverage(lane => lane.SharePercent), 1),
+                    DemandScorePercent: Math.Round(WeightedAverage(lane => lane.DemandScorePercent), 1),
+                    DemandLabel: PickMostCommonNonEmpty(laneEntries.Select(entry => entry.Lane.DemandLabel)),
+                    DemandWeightPercent: Math.Round(WeightedAverage(lane => lane.DemandWeightPercent), 1),
+                    ImpactScore: Math.Round(WeightedAverage(lane => lane.ImpactScore), 1),
+                    EvidenceLine: PickMostCommonNonEmpty(laneEntries.Select(entry => entry.Lane.EvidenceLine)));
+            })
+            .OrderByDescending(lane => lane.ImpactScore)
+            .ThenByDescending(lane => lane.DemandScorePercent)
+            .ThenByDescending(lane => lane.StrengthPercent)
+            .ToArray();
     }
 
     private static IReadOnlyList<MergedPlayerLaneSample> MergePlayerFightLanes(IReadOnlyList<PlayerFightSample> entries)
@@ -3226,7 +3426,24 @@ internal sealed record MergedPlayerFightSample(
     string? EvaluationConfidenceLabel,
     string? EvaluationConfidenceDetail,
     IReadOnlyList<string> EvidenceSnapshot,
+    double FightImpactScore,
+    IReadOnlyList<MergedPlayerFightImpactLaneSample> FightImpactLanes,
     IReadOnlyList<MergedPlayerLaneSample> Lanes);
+
+internal sealed record MergedPlayerFightImpactLaneSample(
+    string Key,
+    string Label,
+    double StrengthPercent,
+    double SharePercent,
+    double DemandScorePercent,
+    string? DemandLabel,
+    double DemandWeightPercent,
+    double ImpactScore,
+    string? EvidenceLine);
+
+internal sealed record ClassFightCoverageSample(
+    FightArtifactSummaryDto Fight,
+    FightSideClassIndexDto ClassEntry);
 
 internal sealed record MergedPlayerFightProvidedBoonSample(
     FightArtifactSummaryDto Fight,

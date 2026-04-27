@@ -690,7 +690,13 @@ public sealed class FightCatalogService
             .Select(group => new FightSideClassIndexDto(
                 ClassLabel: group.Key,
                 Icon: group.Select(item => item.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
-                Count: group.Count()))
+                Count: group.Count(),
+                FightCoverageScore: 0.0,
+                FightCoverageLabel: null,
+                FightCoverageSummary: null,
+                FightCoverageDetail: null,
+                FightCoverageCaveats: Array.Empty<string>(),
+                FightCoverageLanes: Array.Empty<FightSideClassCoverageLaneIndexDto>()))
             .OrderBy(item => item.ClassLabel, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
