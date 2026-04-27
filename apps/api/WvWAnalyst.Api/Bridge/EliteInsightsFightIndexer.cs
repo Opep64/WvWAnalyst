@@ -54,6 +54,7 @@ public sealed class EliteInsightsFightIndexer
             var outcome = BuildOutcomeFromAnalystPayload(payload);
             var execution = BuildExecutionFromAnalystPayload(payload);
             var players = BuildPlayersFromAnalystPayload(payload.Players);
+            var enemyPlayers = BuildEnemyPlayersFromAnalystPayload(payload.EnemyPlayers);
             var squadSide = BuildSideFromAnalystPayload(squad, players);
             var enemySide = BuildSideFromAnalystPayload(enemy);
 
@@ -77,7 +78,9 @@ public sealed class EliteInsightsFightIndexer
                 FightShape: BuildFightShapeFromAnalystPayload(payload.FightShape),
                 ThreatBoons: BuildThreatBoonsFromAnalystPayload(payload.ThreatBoons),
                 TopBursts: BuildTopBurstsFromAnalystPayload(payload.TopBursts),
+                EnemyTopBursts: BuildTopBurstsFromAnalystPayload(payload.EnemyTopBursts),
                 Players: players,
+                EnemyPlayers: enemyPlayers,
                 Execution: execution,
                 Duration: BuildDurationLabel(payload.Fight.DurationMs),
                 DurationMilliseconds: payload.Fight.DurationMs,
@@ -224,7 +227,9 @@ public sealed class EliteInsightsFightIndexer
             FightShape: null,
             ThreatBoons: Array.Empty<FightThreatBoonIndexDto>(),
             TopBursts: Array.Empty<FightTopBurstIndexDto>(),
+            EnemyTopBursts: Array.Empty<FightTopBurstIndexDto>(),
             Players: Array.Empty<FightPlayerIndexDto>(),
+            EnemyPlayers: Array.Empty<FightEnemyPlayerIndexDto>(),
             Execution: null,
             Duration: GetString(root, "duration") ?? "Unknown",
             DurationMilliseconds: GetLong(root, "durationMS"),
@@ -702,6 +707,29 @@ public sealed class EliteInsightsFightIndexer
             .ToArray();
     }
 
+    private static IReadOnlyList<FightEnemyPlayerIndexDto> BuildEnemyPlayersFromAnalystPayload(IReadOnlyList<WvWAnalystEnemyPlayerSummaryDto>? players)
+    {
+        if (players is null || players.Count == 0)
+        {
+            return Array.Empty<FightEnemyPlayerIndexDto>();
+        }
+
+        return players
+            .Where(player => player.ActorId != 0 || player.Damage > 0 || player.Strips > 0)
+            .Select(player => new FightEnemyPlayerIndexDto(
+                ActorId: player.ActorId,
+                Profession: NullIfWhiteSpace(player.Profession),
+                EliteSpec: NullIfWhiteSpace(player.EliteSpec),
+                Icon: NullIfWhiteSpace(player.Icon),
+                ActiveSeconds: player.ActiveSeconds,
+                CombatSeconds: player.CombatSeconds,
+                Damage: player.Damage,
+                Dps: player.Dps,
+                Strips: player.Strips,
+                StripsPerMinute: player.StripsPerMinute))
+            .ToArray();
+    }
+
     private static string? BuildPlayerClassLabel(FightPlayerIndexDto player)
     {
         return !string.IsNullOrWhiteSpace(player.EliteSpec)
@@ -747,8 +775,31 @@ public sealed class EliteInsightsFightIndexer
                 Downs: burst.Downs,
                 Kills: burst.Kills,
                 TopPressure: BuildTopBurstActorFromAnalystPayload(burst.TopPressure),
-                TopStrips: BuildTopBurstActorFromAnalystPayload(burst.TopStrips)))
+                TopStrips: BuildTopBurstActorFromAnalystPayload(burst.TopStrips),
+                TopPressureActors: BuildTopBurstActorsFromAnalystPayload(burst.TopPressureActors, burst.TopPressure),
+                TopStripActors: BuildTopBurstActorsFromAnalystPayload(burst.TopStripActors, burst.TopStrips)))
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightTopBurstActorIndexDto> BuildTopBurstActorsFromAnalystPayload(
+        IReadOnlyList<WvWAnalystTopBurstActorDto>? actors,
+        WvWAnalystTopBurstActorDto? fallbackActor)
+    {
+        var retained = (actors ?? Array.Empty<WvWAnalystTopBurstActorDto>())
+            .Select(BuildTopBurstActorFromAnalystPayload)
+            .Where(actor => actor is not null)
+            .Select(actor => actor!)
+            .ToArray();
+
+        if (retained.Length > 0)
+        {
+            return retained;
+        }
+
+        var fallback = BuildTopBurstActorFromAnalystPayload(fallbackActor);
+        return fallback is null
+            ? Array.Empty<FightTopBurstActorIndexDto>()
+            : new[] { fallback };
     }
 
     private static FightTopBurstActorIndexDto? BuildTopBurstActorFromAnalystPayload(WvWAnalystTopBurstActorDto? actor)

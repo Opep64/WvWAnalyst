@@ -8,6 +8,7 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisTrendPointDto> Trends,
     IReadOnlyList<FightAnalysisPlayerRowDto> TopPlayers,
     IReadOnlyList<FightAnalysisClassRowDto> TopClasses,
+    IReadOnlyList<FightAnalysisEnemyClassRowDto> TopEnemyClasses,
     IReadOnlyList<FightAnalysisLaneRowDto> TopLanes,
     IReadOnlyList<FightAnalysisBoonTrendDto> BoonTrends,
     IReadOnlyList<FightAnalysisBoonRowDto> TopBoons);
@@ -246,6 +247,20 @@ public sealed record FightAnalysisClassRowDto(
     IReadOnlyList<PatchImpactDto> PatchImpacts,
     IReadOnlyList<FightAnalysisClassPlayerRowDto> Players,
     IReadOnlyList<FightAnalysisCharacterImpactTrendDto> CharacterImpactTrends);
+
+public sealed record FightAnalysisEnemyClassRowDto(
+    string ClassLabel,
+    string? Icon,
+    int TotalCount,
+    int FightCount,
+    int PerformanceSampleCount,
+    double? ThreatScore,
+    double? AverageDps,
+    double? BestDps,
+    double? AverageStripsPerMinute,
+    double? BestStripsPerMinute,
+    int DamageBurstTopCount,
+    int StripBurstTopCount);
 
 public sealed record FightAnalysisCharacterImpactTrendDto(
     string Key,

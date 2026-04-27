@@ -146,6 +146,7 @@ public sealed class FightAnalysisService
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
             TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
+            TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
             TopBoons: BuildTopBoons(filteredFights));
@@ -1038,6 +1039,168 @@ public sealed class FightAnalysisService
             .ThenByDescending(row => row.SampleCount)
             .ThenBy(row => row.ClassLabel, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisEnemyClassRowDto> BuildTopEnemyClasses(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var aggregates = new Dictionary<string, EnemyClassPerformanceAggregate>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var fight in fights)
+        {
+            var fightIndex = fight.FightIndex;
+            if (fightIndex is null)
+            {
+                continue;
+            }
+
+            foreach (var classRow in fightIndex.EnemySide?.Classes ?? Array.Empty<FightSideClassIndexDto>())
+            {
+                if (string.IsNullOrWhiteSpace(classRow.ClassLabel) || classRow.Count <= 0)
+                {
+                    continue;
+                }
+
+                var aggregate = GetEnemyClassAggregate(aggregates, classRow.ClassLabel);
+                aggregate.Icon ??= classRow.Icon;
+                aggregate.TotalCount += classRow.Count;
+                aggregate.FightIds.Add(fight.FightId);
+            }
+
+            foreach (var enemyPlayer in fightIndex.EnemyPlayers ?? Array.Empty<FightEnemyPlayerIndexDto>())
+            {
+                var classLabel = BuildClassLabel(enemyPlayer.Profession, enemyPlayer.EliteSpec);
+                if (string.IsNullOrWhiteSpace(classLabel))
+                {
+                    continue;
+                }
+
+                var aggregate = GetEnemyClassAggregate(aggregates, classLabel);
+                aggregate.Icon ??= enemyPlayer.Icon;
+                aggregate.FightIds.Add(fight.FightId);
+                aggregate.PerformanceSampleCount++;
+                aggregate.TotalDps += enemyPlayer.Dps;
+                aggregate.BestDps = Math.Max(aggregate.BestDps, enemyPlayer.Dps);
+                aggregate.TotalStripsPerMinute += enemyPlayer.StripsPerMinute;
+                aggregate.BestStripsPerMinute = Math.Max(aggregate.BestStripsPerMinute, enemyPlayer.StripsPerMinute);
+            }
+
+            foreach (var burst in fightIndex.EnemyTopBursts ?? Array.Empty<FightTopBurstIndexDto>())
+            {
+                foreach (var classLabel in GetDistinctBurstClassLabels(burst.TopPressureActors))
+                {
+                    var aggregate = GetEnemyClassAggregate(aggregates, classLabel);
+                    aggregate.FightIds.Add(fight.FightId);
+                    aggregate.DamageBurstTopCount++;
+                }
+
+                foreach (var classLabel in GetDistinctBurstClassLabels(burst.TopStripActors))
+                {
+                    var aggregate = GetEnemyClassAggregate(aggregates, classLabel);
+                    aggregate.FightIds.Add(fight.FightId);
+                    aggregate.StripBurstTopCount++;
+                }
+            }
+        }
+
+        var rows = aggregates.Values
+            .Select(aggregate => aggregate.ToRow())
+            .ToArray();
+        return ApplyEnemyThreatScores(rows)
+            .OrderByDescending(row => row.TotalCount)
+            .ThenByDescending(row => row.FightCount)
+            .ThenBy(row => row.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static EnemyClassPerformanceAggregate GetEnemyClassAggregate(
+        Dictionary<string, EnemyClassPerformanceAggregate> aggregates,
+        string classLabel)
+    {
+        var normalized = classLabel.Trim();
+        if (!aggregates.TryGetValue(normalized, out var aggregate))
+        {
+            aggregate = new EnemyClassPerformanceAggregate(normalized);
+            aggregates[normalized] = aggregate;
+        }
+
+        return aggregate;
+    }
+
+    private static IReadOnlyList<string> GetDistinctBurstClassLabels(IReadOnlyList<FightTopBurstActorIndexDto>? actors)
+    {
+        return (actors ?? Array.Empty<FightTopBurstActorIndexDto>())
+            .Select(actor => BuildClassLabel(actor.Profession, actor.EliteSpec))
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Select(label => label!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisEnemyClassRowDto> ApplyEnemyThreatScores(IReadOnlyList<FightAnalysisEnemyClassRowDto> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return rows;
+        }
+
+        double maxAverageDps = rows.Max(row => row.AverageDps ?? 0.0);
+        double maxBestDps = rows.Max(row => row.BestDps ?? 0.0);
+        double maxAverageStrips = rows.Max(row => row.AverageStripsPerMinute ?? 0.0);
+        double maxBestStrips = rows.Max(row => row.BestStripsPerMinute ?? 0.0);
+        double maxDamageBurstRate = rows.Max(GetDamageBurstRate);
+        double maxStripBurstRate = rows.Max(GetStripBurstRate);
+
+        return rows
+            .Select(row =>
+            {
+                if (row.PerformanceSampleCount <= 0 &&
+                    row.DamageBurstTopCount <= 0 &&
+                    row.StripBurstTopCount <= 0)
+                {
+                    return row with { ThreatScore = null };
+                }
+
+                double score =
+                    0.35 * NormalizeEnemyThreatMetric(row.AverageDps, maxAverageDps) +
+                    0.20 * NormalizeEnemyThreatMetric(row.BestDps, maxBestDps) +
+                    0.20 * NormalizeEnemyThreatMetric(row.AverageStripsPerMinute, maxAverageStrips) +
+                    0.10 * NormalizeEnemyThreatMetric(row.BestStripsPerMinute, maxBestStrips) +
+                    0.10 * NormalizeEnemyThreatMetric(GetDamageBurstRate(row), maxDamageBurstRate) +
+                    0.05 * NormalizeEnemyThreatMetric(GetStripBurstRate(row), maxStripBurstRate);
+
+                return row with { ThreatScore = Math.Round(score * 100.0, 1) };
+            })
+            .ToArray();
+    }
+
+    private static double GetDamageBurstRate(FightAnalysisEnemyClassRowDto row)
+    {
+        return row.TotalCount <= 0 ? 0.0 : row.DamageBurstTopCount / (double)row.TotalCount;
+    }
+
+    private static double GetStripBurstRate(FightAnalysisEnemyClassRowDto row)
+    {
+        return row.TotalCount <= 0 ? 0.0 : row.StripBurstTopCount / (double)row.TotalCount;
+    }
+
+    private static double NormalizeEnemyThreatMetric(double? value, double maxValue)
+    {
+        if (!value.HasValue || value.Value <= 0 || maxValue <= 0)
+        {
+            return 0.0;
+        }
+
+        return Math.Clamp(value.Value / maxValue, 0.0, 1.0);
+    }
+
+    private static double NormalizeEnemyThreatMetric(double value, double maxValue)
+    {
+        if (value <= 0 || maxValue <= 0)
+        {
+            return 0.0;
+        }
+
+        return Math.Clamp(value / maxValue, 0.0, 1.0);
     }
 
     private static IReadOnlyList<FightAnalysisLaneRowDto> BuildTopLanes(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -2482,9 +2645,18 @@ public sealed class FightAnalysisService
 
     private static string? BuildClassLabel(FightPlayerIndexDto player)
     {
-        return !string.IsNullOrWhiteSpace(player.EliteSpec)
-            ? player.EliteSpec
-            : player.Profession;
+        return BuildClassLabel(player.Profession, player.EliteSpec);
+    }
+
+    private static string? BuildClassLabel(string? profession, string? eliteSpec)
+    {
+        if (!string.IsNullOrWhiteSpace(eliteSpec) &&
+            !string.Equals(eliteSpec, profession, StringComparison.OrdinalIgnoreCase))
+        {
+            return eliteSpec.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(profession) ? null : profession.Trim();
     }
 
     private static string? NormalizeAnalysisCharacterName(string? value)
@@ -2963,6 +3135,50 @@ internal sealed record FightExpectedScoreSample(
     string DataProfileKey,
     HashSet<string> ContextAttributeKeys,
     IReadOnlyDictionary<string, double> SquadClassProfile);
+
+internal sealed class EnemyClassPerformanceAggregate
+{
+    public EnemyClassPerformanceAggregate(string classLabel)
+    {
+        ClassLabel = classLabel;
+    }
+
+    public string ClassLabel { get; }
+    public string? Icon { get; set; }
+    public int TotalCount { get; set; }
+    public HashSet<string> FightIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public int PerformanceSampleCount { get; set; }
+    public double TotalDps { get; set; }
+    public double BestDps { get; set; }
+    public double TotalStripsPerMinute { get; set; }
+    public double BestStripsPerMinute { get; set; }
+    public int DamageBurstTopCount { get; set; }
+    public int StripBurstTopCount { get; set; }
+
+    public FightAnalysisEnemyClassRowDto ToRow()
+    {
+        double? averageDps = PerformanceSampleCount <= 0
+            ? null
+            : Math.Round(TotalDps / PerformanceSampleCount, 1);
+        double? averageStripsPerMinute = PerformanceSampleCount <= 0
+            ? null
+            : Math.Round(TotalStripsPerMinute / PerformanceSampleCount, 1);
+
+        return new FightAnalysisEnemyClassRowDto(
+            ClassLabel: ClassLabel,
+            Icon: Icon,
+            TotalCount: TotalCount > 0 ? TotalCount : PerformanceSampleCount,
+            FightCount: FightIds.Count,
+            PerformanceSampleCount: PerformanceSampleCount,
+            ThreatScore: null,
+            AverageDps: averageDps,
+            BestDps: PerformanceSampleCount <= 0 ? null : Math.Round(BestDps, 1),
+            AverageStripsPerMinute: averageStripsPerMinute,
+            BestStripsPerMinute: PerformanceSampleCount <= 0 ? null : Math.Round(BestStripsPerMinute, 1),
+            DamageBurstTopCount: DamageBurstTopCount,
+            StripBurstTopCount: StripBurstTopCount);
+    }
+}
 
 internal sealed record FightExpectedScoreResult(
     double ExpectedScore,

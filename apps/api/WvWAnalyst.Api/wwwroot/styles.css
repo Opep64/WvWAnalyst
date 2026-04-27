@@ -1539,6 +1539,28 @@ h1 {
     min-width: 0;
 }
 
+.analysis-enemy-class-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.analysis-enemy-class-icon {
+    width: 24px !important;
+    min-width: 24px;
+    max-width: 24px;
+    height: 24px !important;
+    min-height: 24px;
+    max-height: 24px;
+    flex: 0 0 24px;
+    border-radius: 7px;
+    object-fit: cover;
+    display: block;
+    background: rgba(159, 176, 195, 0.08);
+    border: 1px solid rgba(159, 176, 195, 0.12);
+}
+
 .analysis-boons-layout {
     display: grid;
     grid-template-columns: minmax(520px, 0.9fr) minmax(520px, 1fr);
@@ -1740,6 +1762,14 @@ h1 {
 
 .table-shell-analysis-candidates {
     max-height: 420px;
+}
+
+.table-shell-analysis-enemies {
+    max-height: 640px;
+}
+
+.table-shell-analysis-enemies .data-table {
+    min-width: 1320px;
 }
 
 .data-table {

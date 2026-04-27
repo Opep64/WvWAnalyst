@@ -647,7 +647,9 @@ public sealed class FightCatalogService
             Obliterate = null,
             ThreatBoons = Array.Empty<FightThreatBoonIndexDto>(),
             TopBursts = BuildDashboardTopBursts(fightIndex.TopBursts),
+            EnemyTopBursts = Array.Empty<FightTopBurstIndexDto>(),
             Players = Array.Empty<FightPlayerIndexDto>(),
+            EnemyPlayers = Array.Empty<FightEnemyPlayerIndexDto>(),
             Execution = BuildDashboardExecution(fightIndex.Execution),
             ActiveExtensions = Array.Empty<string>()
         };
@@ -720,7 +722,9 @@ public sealed class FightCatalogService
             .Select(burst => burst with
             {
                 TopPressure = BuildDashboardTopBurstActor(burst.TopPressure),
-                TopStrips = BuildDashboardTopBurstActor(burst.TopStrips)
+                TopStrips = BuildDashboardTopBurstActor(burst.TopStrips),
+                TopPressureActors = Array.Empty<FightTopBurstActorIndexDto>(),
+                TopStripActors = Array.Empty<FightTopBurstActorIndexDto>()
             })
             .ToArray();
     }

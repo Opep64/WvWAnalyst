@@ -209,7 +209,9 @@ public sealed record FightIndexDto(
     FightShapeIndexDto? FightShape,
     IReadOnlyList<FightThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightTopBurstIndexDto> TopBursts,
+    IReadOnlyList<FightTopBurstIndexDto> EnemyTopBursts,
     IReadOnlyList<FightPlayerIndexDto> Players,
+    IReadOnlyList<FightEnemyPlayerIndexDto> EnemyPlayers,
     FightExecutionIndexDto? Execution,
     string Duration,
     long? DurationMilliseconds,
@@ -440,6 +442,18 @@ public sealed record FightPlayerIndexDto(
     IReadOnlyList<FightPlayerThreatBoonIndexDto> ThreatBoons,
     IReadOnlyList<FightPlayerProvidedBoonIndexDto> ProvidedBoons);
 
+public sealed record FightEnemyPlayerIndexDto(
+    int ActorId,
+    string? Profession,
+    string? EliteSpec,
+    string? Icon,
+    double ActiveSeconds,
+    double CombatSeconds,
+    long Damage,
+    double Dps,
+    int Strips,
+    double StripsPerMinute);
+
 public sealed record FightPlayerRoleMixIndexDto(
     string Label,
     double Percent);
@@ -481,7 +495,9 @@ public sealed record FightTopBurstIndexDto(
     int Downs,
     int Kills,
     FightTopBurstActorIndexDto? TopPressure,
-    FightTopBurstActorIndexDto? TopStrips);
+    FightTopBurstActorIndexDto? TopStrips,
+    IReadOnlyList<FightTopBurstActorIndexDto> TopPressureActors,
+    IReadOnlyList<FightTopBurstActorIndexDto> TopStripActors);
 
 public sealed record FightTopBurstActorIndexDto(
     int ActorId,

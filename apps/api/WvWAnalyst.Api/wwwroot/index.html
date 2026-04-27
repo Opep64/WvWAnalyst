@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260427wide10">
+    <link rel="stylesheet" href="/styles.css?v=20260427enemies4">
 </head>
 <body>
     <div class="page-shell">
@@ -624,6 +624,7 @@
                         <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
                         <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
                         <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
+                        <button class="analysis-tab" id="analysis-tab-enemies" type="button" data-analysis-tab="enemies" role="tab" aria-selected="false">Enemies</button>
                     </div>
                 </div>
                 <div class="analysis-panel analysis-panel-overview is-active" id="analysis-panel-overview" data-analysis-panel="overview" role="tabpanel" aria-labelledby="analysis-tab-overview">
@@ -852,11 +853,33 @@
                     </div>
                     <div id="analysis-comp-helper-suggestions"></div>
                 </div>
+                <div class="analysis-panel" id="analysis-panel-enemies" data-analysis-panel="enemies" role="tabpanel" aria-labelledby="analysis-tab-enemies" hidden>
+                    <p class="workspace-note analysis-panel-note" id="analysis-enemies-summary">Enemy class counts across the selected fights.</p>
+                    <div class="table-shell table-shell-scroll table-shell-analysis-enemies">
+                        <table class="data-table data-table-compact">
+                            <thead>
+                                <tr>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="class">Class</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="total">Total faced</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="fights">Fights</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="threat">Threat</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="avg-dps" title="Average DPS per enemy player instance of this class.">Avg DPS</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="best-dps" title="Best single enemy player DPS instance for this class.">Best DPS</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="avg-strips" title="Average boon strips per minute per enemy player instance of this class.">Avg strips/min</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="best-strips" title="Best single enemy player strips per minute instance for this class.">Best strips/min</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="damage-bursts" title="Enemy burst windows where this class appeared in the top 5 damage contributors.">Dmg burst tops</button></th>
+                                    <th><button class="sort-header" type="button" data-analysis-enemy-sort="strip-bursts" title="Enemy burst windows where this class appeared in the top 5 strip contributors.">Strip burst tops</button></th>
+                                </tr>
+                            </thead>
+                            <tbody id="analysis-enemies-body"></tbody>
+                        </table>
+                    </div>
+                </div>
             </section>
 
         </main>
     </div>
 
-    <script src="/app.js?v=20260427wide10" defer></script>
+    <script src="/app.js?v=20260427enemies4" defer></script>
 </body>
 </html>

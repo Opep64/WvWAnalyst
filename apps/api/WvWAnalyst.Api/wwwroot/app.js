@@ -23,6 +23,7 @@ let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "impact", direction: "desc" };
 let analysisClassSortState = { key: "impact", direction: "desc" };
 let analysisClassPlayerSortState = { key: "impact", direction: "desc" };
+let analysisEnemySortState = { key: "total", direction: "desc" };
 let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
@@ -2536,6 +2537,69 @@ function setAnalysisClassPlayerSort(sortKey) {
     }
 }
 
+function getAnalysisEnemySortValue(row, sortKey) {
+    switch (sortKey) {
+        case "class":
+            return String(row.classLabel ?? "").toLowerCase();
+        case "fights":
+            return Number(row.fightCount ?? 0);
+        case "threat":
+            return Number(row.threatScore ?? Number.NEGATIVE_INFINITY);
+        case "avg-dps":
+            return Number(row.averageDps ?? Number.NEGATIVE_INFINITY);
+        case "best-dps":
+            return Number(row.bestDps ?? Number.NEGATIVE_INFINITY);
+        case "avg-strips":
+            return Number(row.averageStripsPerMinute ?? Number.NEGATIVE_INFINITY);
+        case "best-strips":
+            return Number(row.bestStripsPerMinute ?? Number.NEGATIVE_INFINITY);
+        case "damage-bursts":
+            return Number(row.damageBurstTopCount ?? 0);
+        case "strip-bursts":
+            return Number(row.stripBurstTopCount ?? 0);
+        case "total":
+        default:
+            return Number(row.totalCount ?? 0);
+    }
+}
+
+function getDefaultAnalysisEnemySortDirection(sortKey) {
+    return sortKey === "class" ? "asc" : "desc";
+}
+
+function updateAnalysisEnemySortHeaders() {
+    document.querySelectorAll("[data-analysis-enemy-sort]").forEach(button => {
+        const isActive = button.dataset.analysisEnemySort === analysisEnemySortState.key;
+        button.classList.toggle("is-active", isActive);
+        button.dataset.sortDirection = isActive ? analysisEnemySortState.direction : "";
+        button.setAttribute("aria-sort", isActive ? (analysisEnemySortState.direction === "asc" ? "ascending" : "descending") : "none");
+    });
+}
+
+function setAnalysisEnemySort(sortKey) {
+    if (!sortKey) {
+        return;
+    }
+
+    if (analysisEnemySortState.key === sortKey) {
+        analysisEnemySortState = {
+            key: sortKey,
+            direction: analysisEnemySortState.direction === "asc" ? "desc" : "asc"
+        };
+    } else {
+        analysisEnemySortState = {
+            key: sortKey,
+            direction: getDefaultAnalysisEnemySortDirection(sortKey)
+        };
+    }
+
+    if (currentAnalysisSnapshot) {
+        renderAnalysisEnemies(currentAnalysisSnapshot);
+    } else {
+        updateAnalysisEnemySortHeaders();
+    }
+}
+
 function getSelectedAnalysisPlayerLaneKey() {
     return document.querySelector("#analysis-player-lane-filter")?.value ?? "all";
 }
@@ -5015,6 +5079,77 @@ function renderAnalysisClasses(snapshot) {
     renderAnalysisClassDetail(selectedClass);
 }
 
+function buildAnalysisEnemyClassRow(row) {
+    const iconMarkup = row.icon
+        ? `<img class="analysis-enemy-class-icon" src="${escapeHtml(row.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+        : `<span class="analysis-enemy-class-icon" aria-hidden="true"></span>`;
+
+    return `
+        <tr>
+            <td>
+                <div class="analysis-enemy-class-cell">
+                    ${iconMarkup}
+                    <strong>${escapeHtml(row.classLabel ?? "Unknown class")}</strong>
+                </div>
+            </td>
+            <td><strong>${escapeHtml(formatNumber(row.totalCount ?? 0))}</strong></td>
+            <td>${escapeHtml(formatNumber(row.fightCount ?? 0))}</td>
+            <td>${escapeHtml(formatNumber(row.threatScore, 1))}</td>
+            <td>${escapeHtml(formatNumber(row.averageDps, 1))}</td>
+            <td>${escapeHtml(formatNumber(row.bestDps, 1))}</td>
+            <td>${escapeHtml(formatNumber(row.averageStripsPerMinute, 1))}</td>
+            <td>${escapeHtml(formatNumber(row.bestStripsPerMinute, 1))}</td>
+            <td>${escapeHtml(formatNumber(row.damageBurstTopCount ?? 0))}</td>
+            <td>${escapeHtml(formatNumber(row.stripBurstTopCount ?? 0))}</td>
+        </tr>
+    `;
+}
+
+function getSortedAnalysisEnemies(snapshot) {
+    const rows = [...(snapshot.topEnemyClasses ?? [])];
+    rows.sort((left, right) => {
+        const primary = compareFightBrowserValues(
+            getAnalysisEnemySortValue(left, analysisEnemySortState.key),
+            getAnalysisEnemySortValue(right, analysisEnemySortState.key));
+        if (primary !== 0) {
+            return analysisEnemySortState.direction === "asc" ? primary : -primary;
+        }
+
+        return Number(right.totalCount ?? 0) - Number(left.totalCount ?? 0)
+            || Number(right.fightCount ?? 0) - Number(left.fightCount ?? 0)
+            || compareFightBrowserValues(String(left.classLabel ?? "").toLowerCase(), String(right.classLabel ?? "").toLowerCase());
+    });
+
+    return rows;
+}
+
+function renderAnalysisEnemies(snapshot) {
+    const rows = getSortedAnalysisEnemies(snapshot);
+    const summary = document.querySelector("#analysis-enemies-summary");
+    const body = document.querySelector("#analysis-enemies-body");
+    const totalCount = rows.reduce((sum, row) => sum + Number(row.totalCount ?? 0), 0);
+    const performanceCount = rows.reduce((sum, row) => sum + Number(row.performanceSampleCount ?? 0), 0);
+    updateAnalysisEnemySortHeaders();
+
+    if (summary) {
+        if (rows.length === 0) {
+            summary.textContent = "No enemy class summaries matched the current filters.";
+        } else if (performanceCount > 0) {
+            summary.textContent = `${rows.length} enemy classes across ${formatNumber(totalCount)} total faced class entries. Performance metrics cover ${formatNumber(performanceCount)} enemy player instances.`;
+        } else {
+            summary.textContent = `${rows.length} enemy classes across ${formatNumber(totalCount)} total faced class entries. Reparse with the updated EI parser to populate DPS, strips, burst, and threat metrics.`;
+        }
+    }
+
+    if (!body) {
+        return;
+    }
+
+    body.innerHTML = rows.length > 0
+        ? rows.map(buildAnalysisEnemyClassRow).join("")
+        : `<tr><td colspan="10">No enemy class summaries matched the current filters.</td></tr>`;
+}
+
 function renderAnalysisLanes(snapshot) {
     const laneSelectionContainer = document.querySelector("#analysis-lane-selection");
     const orderedLanes = getOrderedAnalysisLanes(snapshot.topLanes ?? []);
@@ -5753,7 +5888,9 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-player-detail", "");
     setInnerHtml("#analysis-classes-body", `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-class-detail", "");
-    setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
+    document.querySelector("#analysis-enemies-summary").textContent = message;
+    setInnerHtml("#analysis-enemies-body", `<tr><td colspan="10">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-lanes-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-lane-selection", "");
     setInnerHtml("#analysis-lane-detail", "");
     document.querySelector("#analysis-boon-trend-summary").textContent = message;
@@ -5787,6 +5924,7 @@ function renderAnalysis(snapshot) {
 
     renderAnalysisPlayers(snapshot);
     renderAnalysisClasses(snapshot);
+    renderAnalysisEnemies(snapshot);
     renderAnalysisLanes(snapshot);
     renderAnalysisBoons(snapshot);
     renderAnalysisCompHelper(snapshot);
@@ -7969,6 +8107,9 @@ document.querySelectorAll("[data-analysis-player-sort]").forEach(button => {
 });
 document.querySelectorAll("[data-analysis-class-sort]").forEach(button => {
     button.addEventListener("click", () => setAnalysisClassSort(button.dataset.analysisClassSort));
+});
+document.querySelectorAll("[data-analysis-enemy-sort]").forEach(button => {
+    button.addEventListener("click", () => setAnalysisEnemySort(button.dataset.analysisEnemySort));
 });
 document.querySelectorAll("[data-analysis-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab, { resetScroll: true }));

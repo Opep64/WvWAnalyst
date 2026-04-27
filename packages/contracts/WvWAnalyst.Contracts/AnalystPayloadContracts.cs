@@ -30,7 +30,11 @@ public sealed class WvWAnalystFightPayloadDto
 
     public IReadOnlyList<WvWAnalystTopBurstDto> TopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
 
+    public IReadOnlyList<WvWAnalystTopBurstDto> EnemyTopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
+
     public IReadOnlyList<WvWAnalystPlayerSummaryDto> Players { get; set; } = Array.Empty<WvWAnalystPlayerSummaryDto>();
+
+    public IReadOnlyList<WvWAnalystEnemyPlayerSummaryDto> EnemyPlayers { get; set; } = Array.Empty<WvWAnalystEnemyPlayerSummaryDto>();
 }
 
 public sealed class WvWAnalystFightShapeDto
@@ -636,6 +640,29 @@ public sealed class WvWAnalystPlayerSummaryDto
     public IReadOnlyList<WvWAnalystPlayerProvidedBoonSummaryDto> ProvidedBoons { get; set; } = Array.Empty<WvWAnalystPlayerProvidedBoonSummaryDto>();
 }
 
+public sealed class WvWAnalystEnemyPlayerSummaryDto
+{
+    public int ActorId { get; set; }
+
+    public string Profession { get; set; } = string.Empty;
+
+    public string EliteSpec { get; set; } = string.Empty;
+
+    public string Icon { get; set; } = string.Empty;
+
+    public double ActiveSeconds { get; set; }
+
+    public double CombatSeconds { get; set; }
+
+    public long Damage { get; set; }
+
+    public double Dps { get; set; }
+
+    public int Strips { get; set; }
+
+    public double StripsPerMinute { get; set; }
+}
+
 public sealed class WvWAnalystPlayerRoleMixEntryDto
 {
     public string Label { get; set; } = string.Empty;
@@ -715,6 +742,10 @@ public sealed class WvWAnalystTopBurstDto
     public WvWAnalystTopBurstActorDto TopPressure { get; set; } = new();
 
     public WvWAnalystTopBurstActorDto TopStrips { get; set; } = new();
+
+    public IReadOnlyList<WvWAnalystTopBurstActorDto> TopPressureActors { get; set; } = Array.Empty<WvWAnalystTopBurstActorDto>();
+
+    public IReadOnlyList<WvWAnalystTopBurstActorDto> TopStripActors { get; set; } = Array.Empty<WvWAnalystTopBurstActorDto>();
 }
 
 public sealed class WvWAnalystTopBurstActorDto
