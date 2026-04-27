@@ -157,7 +157,8 @@ public sealed record FightAnalysisPlayerRowDto(
     double? AverageInPositionRate,
     string? ContributionSummary,
     IReadOnlyList<string> CharacterNames,
-    IReadOnlyList<FightAnalysisPlayerCharacterDto> Characters);
+    IReadOnlyList<FightAnalysisPlayerCharacterDto> Characters,
+    IReadOnlyList<FightAnalysisCharacterImpactTrendDto> CharacterImpactTrends);
 
 public sealed record FightAnalysisPlayerCharacterDto(
     string CharacterName,
@@ -243,7 +244,23 @@ public sealed record FightAnalysisClassRowDto(
     double AverageWeightedLaneScore,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions,
     IReadOnlyList<PatchImpactDto> PatchImpacts,
-    IReadOnlyList<FightAnalysisClassPlayerRowDto> Players);
+    IReadOnlyList<FightAnalysisClassPlayerRowDto> Players,
+    IReadOnlyList<FightAnalysisCharacterImpactTrendDto> CharacterImpactTrends);
+
+public sealed record FightAnalysisCharacterImpactTrendDto(
+    string Key,
+    string CharacterName,
+    string ClassLabel,
+    string? Account,
+    string Label,
+    int FightCount,
+    IReadOnlyList<FightAnalysisCharacterImpactTrendPointDto> Points);
+
+public sealed record FightAnalysisCharacterImpactTrendPointDto(
+    string DateKey,
+    string DateLabel,
+    int FightCount,
+    double ImpactScore);
 
 public sealed record FightAnalysisClassPlayerRowDto(
     string Account,

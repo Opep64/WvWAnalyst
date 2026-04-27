@@ -28,6 +28,10 @@ let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
 let selectedAnalysisBoonId = null;
 let selectedAnalysisBoonTrendIds = null;
+let selectedAnalysisPlayerImpactTrendIds = null;
+let selectedAnalysisPlayerImpactTrendOwner = null;
+let selectedAnalysisClassImpactTrendIds = null;
+let selectedAnalysisClassImpactTrendOwner = null;
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
 let compHelperCandidateTierKey = "best";
@@ -4005,6 +4009,423 @@ function buildCharacterLaneCard(lane, totalFights) {
     `;
 }
 
+function getAnalysisImpactTrendIds(trends) {
+    return (trends ?? []).map(trend => String(trend.key ?? ""));
+}
+
+function getAnalysisImpactTrendsByPointCount(trends) {
+    return [...(trends ?? [])].sort((left, right) =>
+        Number((right.points ?? []).length) - Number((left.points ?? []).length)
+        || Number(right.fightCount ?? 0) - Number(left.fightCount ?? 0)
+        || compareFightBrowserValues(String(left.label ?? left.characterName ?? "").toLowerCase(), String(right.label ?? right.characterName ?? "").toLowerCase()));
+}
+
+function getDefaultAnalysisImpactTrendIds(trends, maximumCount = null) {
+    const ordered = getAnalysisImpactTrendsByPointCount(trends);
+    const retained = maximumCount == null
+        ? ordered
+        : ordered.slice(0, Math.max(0, maximumCount));
+
+    return retained.map(trend => String(trend.key ?? ""));
+}
+
+function getAnalysisImpactTrendColor(index) {
+    return ANALYSIS_BOON_TREND_COLORS[index % ANALYSIS_BOON_TREND_COLORS.length];
+}
+
+function getAnalysisImpactTrendSelection(context) {
+    return context === "class"
+        ? selectedAnalysisClassImpactTrendIds
+        : selectedAnalysisPlayerImpactTrendIds;
+}
+
+function setAnalysisImpactTrendSelection(context, ids) {
+    if (context === "class") {
+        selectedAnalysisClassImpactTrendIds = new Set(ids);
+        return;
+    }
+
+    selectedAnalysisPlayerImpactTrendIds = new Set(ids);
+}
+
+function ensureAnalysisPlayerImpactTrendSelection(player, trends) {
+    const ids = getAnalysisImpactTrendIds(trends);
+    const owner = String(player?.account ?? "");
+    if (selectedAnalysisPlayerImpactTrendIds === null || !stringEqualsIgnoreCase(selectedAnalysisPlayerImpactTrendOwner, owner)) {
+        selectedAnalysisPlayerImpactTrendOwner = owner;
+        selectedAnalysisPlayerImpactTrendIds = new Set(getDefaultAnalysisImpactTrendIds(trends));
+        return;
+    }
+
+    const validIds = new Set(ids);
+    selectedAnalysisPlayerImpactTrendIds = new Set(
+        Array.from(selectedAnalysisPlayerImpactTrendIds)
+            .filter(id => validIds.has(id)));
+}
+
+function ensureAnalysisClassImpactTrendSelection(classRow, trends) {
+    const ids = getAnalysisImpactTrendIds(trends);
+    const owner = String(classRow?.classLabel ?? "");
+    if (selectedAnalysisClassImpactTrendIds === null || !stringEqualsIgnoreCase(selectedAnalysisClassImpactTrendOwner, owner)) {
+        selectedAnalysisClassImpactTrendOwner = owner;
+        selectedAnalysisClassImpactTrendIds = new Set(getDefaultAnalysisImpactTrendIds(trends, 5));
+        return;
+    }
+
+    const validIds = new Set(ids);
+    selectedAnalysisClassImpactTrendIds = new Set(
+        Array.from(selectedAnalysisClassImpactTrendIds)
+            .filter(id => validIds.has(id)));
+}
+
+function getAnalysisImpactTrendNights(trends) {
+    const nightMap = new Map();
+    (trends ?? []).forEach(trend => {
+        (trend.points ?? []).forEach(point => {
+            if (!point?.dateKey || nightMap.has(point.dateKey)) {
+                return;
+            }
+
+            nightMap.set(point.dateKey, point.dateLabel ?? point.dateKey);
+        });
+    });
+
+    return Array.from(nightMap.entries())
+        .sort((left, right) => left[0].localeCompare(right[0]))
+        .map(([dateKey, dateLabel]) => ({ dateKey, dateLabel }));
+}
+
+function buildAnalysisImpactTrendSummary(trends, selectedIds) {
+    const nightCount = getAnalysisImpactTrendNights(trends).length;
+    const selectedCount = Array.from(selectedIds ?? []).length;
+    const characterCount = trends?.length ?? 0;
+
+    if (characterCount === 0 || nightCount === 0) {
+        return "No character impact trend data matched the current filters.";
+    }
+
+    return `${selectedCount} of ${characterCount} characters selected | ${nightCount} ${nightCount === 1 ? "night" : "nights"}`;
+}
+
+function buildAnalysisImpactTrendLegend(trends, selectedIds, context) {
+    return getAnalysisImpactTrendsByPointCount(trends).map(trend => {
+        const id = String(trend.key ?? "");
+        const checked = selectedIds?.has(id) ? "checked" : "";
+        const trendIndex = (trends ?? []).findIndex(item => String(item.key ?? "") === id);
+        const color = getAnalysisImpactTrendColor(Math.max(0, trendIndex));
+        const accountMarkup = trend.account
+            ? `<span class="analysis-impact-trend-account">${escapeHtml(trend.account)}</span>`
+            : "";
+        return `
+            <label class="analysis-boon-trend-option ${checked ? "is-active" : ""}">
+                <input type="checkbox" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-id="${escapeHtml(id)}" ${checked}>
+                <span class="analysis-boon-trend-swatch" style="--boon-color: ${escapeHtml(color)}"></span>
+                <span class="analysis-impact-trend-label">${escapeHtml(trend.label ?? trend.characterName ?? id)}</span>
+                ${accountMarkup}
+            </label>
+        `;
+    }).join("");
+}
+
+function getAnalysisImpactTrendAxis(trends) {
+    const values = (trends ?? [])
+        .flatMap(trend => trend.points ?? [])
+        .map(point => Number(point.impactScore))
+        .filter(value => !Number.isNaN(value));
+
+    if (values.length === 0) {
+        return { min: 0, max: 100 };
+    }
+
+    const minimum = Math.max(0, Math.min(...values) - 10);
+    const maximum = Math.min(100, Math.max(...values) + 10);
+
+    if (maximum - minimum < 1) {
+        return {
+            min: Math.max(0, minimum - 5),
+            max: Math.min(100, maximum + 5)
+        };
+    }
+
+    return { min: minimum, max: maximum };
+}
+
+function getAnalysisImpactTrendGridValues(axis) {
+    const range = Math.max(1, axis.max - axis.min);
+    return Array.from({ length: 5 }, (_, index) =>
+        Math.round((axis.max - (range * index / 4)) * 10) / 10);
+}
+
+function buildAnalysisImpactTrendPath(trend, nightIndex, chart) {
+    const pointByNight = new Map((trend.points ?? []).map(point => [point.dateKey, point]));
+    let started = false;
+
+    return Array.from(nightIndex.entries())
+        .map(([dateKey, index]) => {
+            const point = pointByNight.get(dateKey);
+            if (!point) {
+                started = false;
+                return "";
+            }
+
+            const x = chart.xForIndex(index);
+            const y = chart.yForValue(point.impactScore);
+            const command = started ? "L" : "M";
+            started = true;
+            return `${command} ${x} ${y}`;
+        })
+        .filter(Boolean)
+        .join(" ");
+}
+
+function buildAnalysisImpactTrendChart(trends, selectedIds, context) {
+    const nights = getAnalysisImpactTrendNights(trends);
+    const selectedTrends = (trends ?? [])
+        .filter(trend => selectedIds?.has(String(trend.key ?? "")));
+
+    if (nights.length === 0) {
+        return `<div class="analysis-boon-trend-empty">No character impact trend data available.</div>`;
+    }
+
+    if (selectedTrends.length === 0) {
+        return `<div class="analysis-boon-trend-empty">No characters selected.</div>`;
+    }
+
+    const width = 760;
+    const height = 260;
+    const plot = { left: 44, top: 18, right: 18, bottom: 38 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const nightIndex = new Map(nights.map((night, index) => [night.dateKey, index]));
+    const axis = getAnalysisImpactTrendAxis(selectedTrends);
+    const axisRange = Math.max(1, axis.max - axis.min);
+    const chart = {
+        xForIndex: index => Math.round((plot.left + (nights.length <= 1 ? plotWidth / 2 : index * plotWidth / (nights.length - 1))) * 100) / 100,
+        yForValue: value => {
+            const clamped = Math.max(axis.min, Math.min(axis.max, Number(value) || 0));
+            return Math.round((plot.top + (axis.max - clamped) * plotHeight / axisRange) * 100) / 100;
+        }
+    };
+    const gridValues = getAnalysisImpactTrendGridValues(axis);
+    const axisIndexes = getAnalysisBoonTrendAxisIndexes(nights.length);
+
+    const gridMarkup = gridValues.map(value => {
+        const y = chart.yForValue(value);
+        return `
+            <line class="grid-line" x1="${plot.left}" y1="${y}" x2="${width - plot.right}" y2="${y}"></line>
+            <text class="axis-label y-axis-label" x="${plot.left - 10}" y="${y + 4}">${escapeHtml(formatNumber(value, axisRange <= 20 ? 1 : 0))}</text>
+        `;
+    }).join("");
+
+    const axisMarkup = axisIndexes.map(index => {
+        const night = nights[index];
+        const x = chart.xForIndex(index);
+        return `<text class="axis-label x-axis-label" x="${x}" y="${height - 12}">${escapeHtml(night.dateLabel)}</text>`;
+    }).join("");
+
+    const seriesMarkup = selectedTrends.map(trend => {
+        const trendIndex = (trends ?? []).findIndex(item => String(item.key ?? "") === String(trend.key ?? ""));
+        const color = getAnalysisImpactTrendColor(Math.max(0, trendIndex));
+        const path = buildAnalysisImpactTrendPath(trend, nightIndex, chart);
+        const points = (trend.points ?? []).map(point => {
+            if (!nightIndex.has(point.dateKey)) {
+                return "";
+            }
+
+            const x = chart.xForIndex(nightIndex.get(point.dateKey));
+            const y = chart.yForValue(point.impactScore);
+            const label = `${trend.label ?? trend.characterName} ${point.dateLabel}: Impact ${formatNumber(point.impactScore, 1)}`;
+            return `
+                <circle class="analysis-boon-trend-point"
+                    cx="${x}"
+                    cy="${y}"
+                    r="4.2"
+                    style="--boon-color: ${escapeHtml(color)}"
+                    tabindex="0"
+                    role="img"
+                    aria-label="${escapeHtml(label)}"
+                    data-analysis-impact-trend-point
+                    data-analysis-impact-context="${escapeHtml(context)}"
+                    data-trend-key="${escapeHtml(String(trend.key ?? ""))}"
+                    data-date-key="${escapeHtml(point.dateKey)}"></circle>
+            `;
+        }).join("");
+
+        return `
+            ${path ? `<path class="analysis-boon-trend-line" d="${escapeHtml(path)}" style="--boon-color: ${escapeHtml(color)}"></path>` : ""}
+            ${points}
+        `;
+    }).join("");
+
+    return `
+        <svg class="analysis-boon-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="false">
+            ${gridMarkup}
+            ${axisMarkup}
+            ${seriesMarkup}
+        </svg>
+    `;
+}
+
+function buildAnalysisImpactTrendCard(context, title, trends, selectedIds) {
+    const prefix = context === "class" ? "analysis-class-impact-trend" : "analysis-player-impact-trend";
+    return `
+        <section class="analysis-card analysis-card--wide analysis-boon-trend-card analysis-impact-trend-card">
+            <div class="section-heading">
+                <div>
+                    <h3>${escapeHtml(title)}</h3>
+                    <p id="${prefix}-summary">${escapeHtml(buildAnalysisImpactTrendSummary(trends, selectedIds))}</p>
+                </div>
+                <div class="analysis-boon-trend-actions">
+                    <button class="action-link action-link-button" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-action="all">Add all</button>
+                    <button class="action-link action-link-button" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-action="none">Clear all</button>
+                </div>
+            </div>
+            <div class="analysis-boon-trend-legend" id="${prefix}-legend">
+                ${buildAnalysisImpactTrendLegend(trends, selectedIds, context)}
+            </div>
+            <div class="analysis-boon-trend-chart-wrap" id="${prefix}-wrap">
+                <div class="analysis-boon-trend-tooltip" id="${prefix}-tooltip" hidden></div>
+                <div id="${prefix}-chart">${buildAnalysisImpactTrendChart(trends, selectedIds, context)}</div>
+            </div>
+        </section>
+    `;
+}
+
+function getCurrentAnalysisImpactTrends(context) {
+    if (!currentAnalysisSnapshot) {
+        return [];
+    }
+
+    if (context === "class") {
+        const classRow = (currentAnalysisSnapshot.topClasses ?? [])
+            .find(row => stringEqualsIgnoreCase(row.classLabel, selectedAnalysisClassLabel));
+        return classRow?.characterImpactTrends ?? [];
+    }
+
+    const player = (currentAnalysisSnapshot.topPlayers ?? [])
+        .find(row => stringEqualsIgnoreCase(row.account, selectedAnalysisPlayerAccount));
+    return player?.characterImpactTrends ?? [];
+}
+
+function findAnalysisImpactTrendPoint(context, trendKey, dateKey) {
+    const trend = getCurrentAnalysisImpactTrends(context)
+        .find(item => String(item.key ?? "") === String(trendKey ?? ""));
+    const point = trend?.points?.find(item => item.dateKey === dateKey) ?? null;
+    return { trend, point };
+}
+
+function buildAnalysisImpactTrendTooltipHtml(context, trend, point) {
+    const detailParts = [trend.classLabel];
+    if (context === "class" && trend.account) {
+        detailParts.push(trend.account);
+    }
+
+    return `
+        <strong>${escapeHtml(trend.label ?? trend.characterName ?? "Character")}</strong>
+        <div class="analysis-boon-trend-tooltip-value">${escapeHtml(formatNumber(point.impactScore, 1))}</div>
+        <div class="table-inline-note">${escapeHtml(`${point.dateLabel ?? point.dateKey} | ${point.fightCount} ${point.fightCount === 1 ? "fight" : "fights"}`)}</div>
+        <div class="table-inline-note">${escapeHtml(detailParts.filter(Boolean).join(" | "))}</div>
+    `;
+}
+
+function showAnalysisImpactTrendTooltip(event) {
+    const target = event.target.closest("[data-analysis-impact-trend-point]");
+    if (!target) {
+        return;
+    }
+
+    const context = target.dataset.analysisImpactContext === "class" ? "class" : "player";
+    const tooltip = document.querySelector(`#analysis-${context}-impact-trend-tooltip`);
+    const wrap = document.querySelector(`#analysis-${context}-impact-trend-wrap`);
+    if (!tooltip || !wrap) {
+        return;
+    }
+
+    const { trend, point } = findAnalysisImpactTrendPoint(context, target.dataset.trendKey, target.dataset.dateKey);
+    if (!trend || !point) {
+        return;
+    }
+
+    tooltip.innerHTML = buildAnalysisImpactTrendTooltipHtml(context, trend, point);
+    tooltip.hidden = false;
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetX = targetRect.left + (targetRect.width / 2) - wrapRect.left;
+    const targetY = targetRect.top - wrapRect.top;
+    const tooltipWidth = tooltip.offsetWidth || 260;
+    const tooltipHeight = tooltip.offsetHeight || 120;
+    const left = Math.max(8, Math.min(wrapRect.width - tooltipWidth - 8, targetX + 12));
+    const top = Math.max(8, Math.min(wrapRect.height - tooltipHeight - 8, targetY - tooltipHeight - 10));
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+}
+
+function hideAnalysisImpactTrendTooltip(context) {
+    const contexts = context ? [context] : ["player", "class"];
+    contexts.forEach(item => {
+        const tooltip = document.querySelector(`#analysis-${item}-impact-trend-tooltip`);
+        if (!tooltip) {
+            return;
+        }
+
+        tooltip.hidden = true;
+        tooltip.innerHTML = "";
+    });
+}
+
+function renderAnalysisImpactTrendContext(context) {
+    if (!currentAnalysisSnapshot) {
+        return;
+    }
+
+    if (context === "class") {
+        const classRow = (currentAnalysisSnapshot.topClasses ?? [])
+            .find(row => stringEqualsIgnoreCase(row.classLabel, selectedAnalysisClassLabel));
+        renderAnalysisClassDetail(classRow ?? null);
+        return;
+    }
+
+    const player = (currentAnalysisSnapshot.topPlayers ?? [])
+        .find(row => stringEqualsIgnoreCase(row.account, selectedAnalysisPlayerAccount));
+    renderAnalysisPlayerDetail(player ?? null);
+}
+
+function handleAnalysisImpactTrendSelectionChange(event) {
+    const input = event.target.closest("[data-analysis-impact-trend-id]");
+    if (!input || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    const context = input.dataset.analysisImpactTrendContext === "class" ? "class" : "player";
+    const id = String(input.dataset.analysisImpactTrendId ?? "");
+    const selectedIds = new Set(getAnalysisImpactTrendSelection(context) ?? []);
+    if (input.checked) {
+        selectedIds.add(id);
+    } else {
+        selectedIds.delete(id);
+    }
+
+    setAnalysisImpactTrendSelection(context, selectedIds);
+    renderAnalysisImpactTrendContext(context);
+}
+
+function handleAnalysisImpactTrendActionClick(event) {
+    const button = event.target.closest("[data-analysis-impact-trend-action]");
+    if (!button || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    const context = button.dataset.analysisImpactTrendContext === "class" ? "class" : "player";
+    const trends = getCurrentAnalysisImpactTrends(context);
+    const ids = button.dataset.analysisImpactTrendAction === "all"
+        ? getAnalysisImpactTrendIds(trends)
+        : [];
+    setAnalysisImpactTrendSelection(context, ids);
+    renderAnalysisImpactTrendContext(context);
+}
+
 function buildAnalysisCharacterCard(character) {
     const disciplineValue = character.averageInPositionRate != null
         ? `${formatPercent(character.averageInPositionRate)} in position`
@@ -4064,6 +4485,10 @@ function renderAnalysisPlayerDetail(player) {
         return;
     }
 
+    const impactTrends = player.characterImpactTrends ?? [];
+    ensureAnalysisPlayerImpactTrendSelection(player, impactTrends);
+    const selectedIds = selectedAnalysisPlayerImpactTrendIds ?? new Set();
+
     container.className = "analysis-player-detail";
     container.innerHTML = `
         <div class="section-heading">
@@ -4072,10 +4497,12 @@ function renderAnalysisPlayerDetail(player) {
                 <p>Character/class breakdown across the current analysis filter.</p>
             </div>
         </div>
+        ${buildAnalysisImpactTrendCard("player", "Character Impact", impactTrends, selectedIds)}
         <div class="analysis-character-grid">
             ${(player.characters ?? []).map(buildAnalysisCharacterCard).join("")}
         </div>
     `;
+    hideAnalysisImpactTrendTooltip("player");
 }
 
 function renderAnalysisPlayers(snapshot) {
@@ -4272,6 +4699,9 @@ function renderAnalysisClassDetail(classRow) {
             || Number(right.fightCount ?? 0) - Number(left.fightCount ?? 0)
             || compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase());
     });
+    const impactTrends = classRow.characterImpactTrends ?? [];
+    ensureAnalysisClassImpactTrendSelection(classRow, impactTrends);
+    const selectedIds = selectedAnalysisClassImpactTrendIds ?? new Set();
 
     container.className = "analysis-player-detail";
     container.innerHTML = `
@@ -4281,6 +4711,7 @@ function renderAnalysisClassDetail(classRow) {
                 <p>${escapeHtml(`${classRow.sampleCount} class samples across ${classRow.distinctAccounts} accounts. ${topPlayerCopy}`)}</p>
             </div>
         </div>
+        ${buildAnalysisImpactTrendCard("class", "Character Impact", impactTrends, selectedIds)}
         <div class="analysis-character-grid">
             <article class="analysis-character-card">
                 <div class="analysis-character-header">
@@ -4331,6 +4762,7 @@ function renderAnalysisClassDetail(classRow) {
     `;
 
     updateAnalysisClassPlayerSortHeaders();
+    hideAnalysisImpactTrendTooltip("class");
 }
 
 function renderAnalysisClasses(snapshot) {
@@ -7239,6 +7671,26 @@ document.querySelector("#analysis-boon-trend-chart").addEventListener("mouseout"
     }
 });
 document.querySelector("#analysis-boon-trend-chart").addEventListener("focusout", hideAnalysisBoonTrendTooltip);
+document.querySelector("#analysis-player-detail").addEventListener("change", handleAnalysisImpactTrendSelectionChange);
+document.querySelector("#analysis-class-detail").addEventListener("change", handleAnalysisImpactTrendSelectionChange);
+document.querySelector("#analysis-player-detail").addEventListener("click", handleAnalysisImpactTrendActionClick);
+document.querySelector("#analysis-class-detail").addEventListener("click", handleAnalysisImpactTrendActionClick);
+document.querySelector("#analysis-player-detail").addEventListener("mouseover", showAnalysisImpactTrendTooltip);
+document.querySelector("#analysis-class-detail").addEventListener("mouseover", showAnalysisImpactTrendTooltip);
+document.querySelector("#analysis-player-detail").addEventListener("focusin", showAnalysisImpactTrendTooltip);
+document.querySelector("#analysis-class-detail").addEventListener("focusin", showAnalysisImpactTrendTooltip);
+document.querySelector("#analysis-player-detail").addEventListener("mouseout", event => {
+    if (event.target.closest("[data-analysis-impact-trend-point]")) {
+        hideAnalysisImpactTrendTooltip("player");
+    }
+});
+document.querySelector("#analysis-class-detail").addEventListener("mouseout", event => {
+    if (event.target.closest("[data-analysis-impact-trend-point]")) {
+        hideAnalysisImpactTrendTooltip("class");
+    }
+});
+document.querySelector("#analysis-player-detail").addEventListener("focusout", () => hideAnalysisImpactTrendTooltip("player"));
+document.querySelector("#analysis-class-detail").addEventListener("focusout", () => hideAnalysisImpactTrendTooltip("class"));
 document.querySelector("#analysis-class-detail").addEventListener("click", event => {
     const button = event.target.closest("[data-analysis-class-player-sort]");
     if (!button) {

@@ -1762,6 +1762,17 @@ h1 {
     background: color-mix(in srgb, var(--boon-color, var(--accent)) 16%, transparent);
 }
 
+.analysis-impact-trend-label,
+.analysis-impact-trend-account {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.analysis-impact-trend-account {
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+
 .analysis-boon-trend-swatch {
     width: 10px;
     height: 10px;

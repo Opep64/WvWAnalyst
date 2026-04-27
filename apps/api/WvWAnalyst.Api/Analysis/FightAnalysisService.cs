@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using WvWAnalyst.Api.Bridge;
 using WvWAnalyst.Api.Services;
 using WvWAnalyst.Contracts;
@@ -825,6 +826,7 @@ public sealed class FightAnalysisService
                     ? totalFightCount
                     : sampleCount;
                 var characters = BuildPlayerCharacterSummaries(group.Key, orderedPlayers, totalCharacterFightCounts, totalCharacterLaneSampleCounts);
+                var characterImpactTrends = BuildCharacterImpactTrends(orderedPlayers, includeAccountForDuplicateLabels: false);
                 var primaryCharacter = characters
                     .OrderByDescending(character => character.FightCount)
                     .ThenByDescending(character => character.ImpactScore)
@@ -932,7 +934,8 @@ public sealed class FightAnalysisService
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                         .ToArray(),
-                    Characters: characters);
+                    Characters: characters,
+                    CharacterImpactTrends: characterImpactTrends);
             })
             .OrderByDescending(player => player.ImpactScore)
             .ThenByDescending(player => player.AverageWeightedLaneScore)
@@ -984,6 +987,7 @@ public sealed class FightAnalysisService
                 var averageRecoveries = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Recoveries, entry => entry.Fight), 1);
                 double? averageInPositionRate = CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.InPositionRate, entry => entry.Fight);
                 var classPlayers = BuildClassPlayerSummaries(group.Key, entries, totalClassPlayerFightCounts);
+                var characterImpactTrends = BuildCharacterImpactTrends(entries, includeAccountForDuplicateLabels: true);
                 var topPlayerDisplayName = classPlayers
                     .OrderByDescending(player => player.ImpactScore)
                     .ThenByDescending(player => player.FightCount)
@@ -1025,7 +1029,8 @@ public sealed class FightAnalysisService
                         : Math.Round(CleanupAdjustedAverage(laneScores, score => score.Score.Weighted, score => score.Fight), 1),
                     LaneContributions: laneContributions,
                     PatchImpacts: GetPatchImpactsForClass(group.Key, patchImpacts),
-                    Players: classPlayers);
+                    Players: classPlayers,
+                    CharacterImpactTrends: characterImpactTrends);
             })
             .Where(row => row.SampleCount >= MinimumClassSampleCount)
             .OrderByDescending(row => row.ContributionScore)
@@ -1537,6 +1542,95 @@ public sealed class FightAnalysisService
             .ToArray();
     }
 
+    private static IReadOnlyList<FightAnalysisCharacterImpactTrendDto> BuildCharacterImpactTrends(
+        IReadOnlyList<PlayerFightSample> entries,
+        bool includeAccountForDuplicateLabels)
+    {
+        var trendGroups = entries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Account = BuildPlayerIdentityKey(entry.Player),
+                CharacterName = NormalizeAnalysisCharacterName(entry.Player.Character) ?? "(unknown character)",
+                ClassLabel = BuildClassLabel(entry.Player) ?? "Unknown class"
+            })
+            .GroupBy(
+                entry => BuildCharacterImpactTrendKey(entry.Account, entry.CharacterName, entry.ClassLabel),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var first = group.First();
+                var characterEntries = group.Select(entry => entry.Entry).ToArray();
+                var mergedFightEntries = MergePlayerFightSamplesByFight(characterEntries, first.CharacterName);
+                return new
+                {
+                    first.Account,
+                    first.CharacterName,
+                    first.ClassLabel,
+                    MergedFightEntries = mergedFightEntries,
+                    Points = BuildCharacterImpactTrendPoints(mergedFightEntries)
+                };
+            })
+            .Where(trend => trend.Points.Count > 0)
+            .ToArray();
+
+        var duplicateCharacterNames = trendGroups
+            .GroupBy(trend => trend.CharacterName, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return trendGroups
+            .Select(trend =>
+            {
+                var label = trend.CharacterName;
+                if (duplicateCharacterNames.Contains(trend.CharacterName))
+                {
+                    var discriminator = includeAccountForDuplicateLabels && !string.IsNullOrWhiteSpace(trend.Account)
+                        ? trend.Account
+                        : trend.ClassLabel;
+                    label = $"{trend.CharacterName} ({discriminator})";
+                }
+
+                return new FightAnalysisCharacterImpactTrendDto(
+                    Key: BuildCharacterImpactTrendKey(trend.Account, trend.CharacterName, trend.ClassLabel),
+                    CharacterName: trend.CharacterName,
+                    ClassLabel: trend.ClassLabel,
+                    Account: trend.Account,
+                    Label: label,
+                    FightCount: trend.MergedFightEntries.Count,
+                    Points: trend.Points);
+            })
+            .OrderByDescending(trend => trend.FightCount)
+            .ThenByDescending(trend => trend.Points.Average(point => point.ImpactScore))
+            .ThenBy(trend => trend.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisCharacterImpactTrendPointDto> BuildCharacterImpactTrendPoints(
+        IReadOnlyList<MergedPlayerFightSample> mergedFightEntries)
+    {
+        return mergedFightEntries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Date = GetFightLocalDate(entry.Fight)
+            })
+            .Where(entry => entry.Date.HasValue)
+            .GroupBy(entry => entry.Date!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var nightEntries = group.Select(entry => entry.Entry).ToArray();
+                return new FightAnalysisCharacterImpactTrendPointDto(
+                    DateKey: group.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    DateLabel: group.Key.ToString("MMM d", CultureInfo.InvariantCulture),
+                    FightCount: nightEntries.Length,
+                    ImpactScore: ComputeImpactScoreForMergedEntries(nightEntries));
+            })
+            .ToArray();
+    }
+
     private static IReadOnlyList<FightAnalysisClassPlayerRowDto> BuildClassPlayerSummaries(
         string classLabel,
         IReadOnlyList<PlayerFightSample> entries,
@@ -1794,6 +1888,15 @@ public sealed class FightAnalysisService
     private static string BuildCharacterAggregateKey(string account, string characterName, string classLabel)
     {
         return $"{account}\u001F{characterName}\u001F{classLabel}";
+    }
+
+    private static string BuildCharacterImpactTrendKey(string account, string characterName, string classLabel)
+    {
+        var rawKey = BuildCharacterAggregateKey(account, characterName, classLabel);
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(rawKey))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     private static string BuildCharacterLaneAggregateKey(string account, string characterName, string classLabel, string laneKey)
@@ -2416,6 +2519,54 @@ public sealed class FightAnalysisService
         }
 
         return withoutMarker;
+    }
+
+    private static double ComputeImpactScoreForMergedEntries(IReadOnlyList<MergedPlayerFightSample> mergedFightEntries)
+    {
+        var sampleCount = mergedFightEntries.Count;
+        if (sampleCount == 0)
+        {
+            return 0.0;
+        }
+
+        var laneScores = mergedFightEntries
+            .Select(entry => new
+            {
+                entry.Fight,
+                Score = ComputePlayerLaneScores(entry.Lanes)
+            })
+            .Where(score => score.Score.Primary > 0.0 || score.Score.Weighted > 0.0)
+            .ToArray();
+        var winCount = mergedFightEntries.Count(entry => string.Equals(entry.Fight.FightIndex?.Outcome.OutcomeCode, "squad", StringComparison.OrdinalIgnoreCase));
+        var winRatePercent = Math.Round(winCount * 100.0 / sampleCount, 1);
+        var averageDamage = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Damage, entry => entry.Fight), 0);
+        var averageDowns = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
+        var averageKills = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
+        var averageStrips = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Strips, entry => entry.Fight), 1);
+        var averageCleanses = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.OutgoingCleanses, entry => entry.Fight), 1);
+        var averageHealing = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Healing, entry => entry.Fight), 0);
+        var averageBarrier = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Barrier, entry => entry.Fight), 0);
+        var averageResurrects = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Resurrects, entry => entry.Fight), 1);
+        var averageDeaths = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Deaths, entry => entry.Fight), 1);
+        var averageRecoveries = Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Recoveries, entry => entry.Fight), 1);
+        double? averageInPositionRate = RoundNullable(CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.InPositionRate, entry => entry.Fight), 1);
+
+        return ComputeImpactScore(
+            averageWeightedLaneScore: laneScores.Length == 0
+                ? 0.0
+                : CleanupAdjustedAverage(laneScores, score => score.Score.Weighted, score => score.Fight),
+            winRatePercent: winRatePercent,
+            averageDamage: averageDamage,
+            averageDowns: averageDowns,
+            averageKills: averageKills,
+            averageStrips: averageStrips,
+            averageCleanses: averageCleanses,
+            averageHealing: averageHealing,
+            averageBarrier: averageBarrier,
+            averageResurrects: averageResurrects,
+            averageDeaths: averageDeaths,
+            averageRecoveries: averageRecoveries,
+            averageInPositionRate: averageInPositionRate);
     }
 
     private static double ComputeImpactScore(
