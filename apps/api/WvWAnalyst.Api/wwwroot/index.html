@@ -711,6 +711,23 @@
                 </div>
                 <div class="analysis-panel" id="analysis-panel-boons" data-analysis-panel="boons" role="tabpanel" aria-labelledby="analysis-tab-boons" hidden>
                     <p class="workspace-note analysis-panel-note">Threat-boon relevance around pressured squad samples, with selected-boon detail showing which classes generated that boon best across the filtered fights.</p>
+                    <section class="analysis-card analysis-card--wide analysis-boon-trend-card">
+                        <div class="section-heading">
+                            <div>
+                                <h3>Boon Uptime</h3>
+                                <p id="analysis-boon-trend-summary"></p>
+                            </div>
+                            <div class="analysis-boon-trend-actions">
+                                <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="all">Add all</button>
+                                <button class="action-link action-link-button" type="button" data-analysis-boon-trend-action="none">Clear all</button>
+                            </div>
+                        </div>
+                        <div class="analysis-boon-trend-legend" id="analysis-boon-trend-legend"></div>
+                        <div class="analysis-boon-trend-chart-wrap">
+                            <div class="analysis-boon-trend-tooltip" id="analysis-boon-trend-tooltip" hidden></div>
+                            <div id="analysis-boon-trend-chart"></div>
+                        </div>
+                    </section>
                     <div class="table-shell">
                         <table class="data-table">
                             <thead>

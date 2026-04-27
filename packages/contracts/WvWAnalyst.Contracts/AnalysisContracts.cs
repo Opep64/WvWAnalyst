@@ -9,6 +9,7 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisPlayerRowDto> TopPlayers,
     IReadOnlyList<FightAnalysisClassRowDto> TopClasses,
     IReadOnlyList<FightAnalysisLaneRowDto> TopLanes,
+    IReadOnlyList<FightAnalysisBoonTrendDto> BoonTrends,
     IReadOnlyList<FightAnalysisBoonRowDto> TopBoons);
 
 public sealed record FightAnalysisFilterOptionsDto(
@@ -283,6 +284,32 @@ public sealed record FightAnalysisBoonRowDto(
     double? AverageOverapplication,
     string? TopClassLabel,
     IReadOnlyList<FightAnalysisBoonClassProviderDto> ClassProviders);
+
+public sealed record FightAnalysisBoonTrendDto(
+    long Id,
+    string Name,
+    string? Icon,
+    bool StackBased,
+    IReadOnlyList<FightAnalysisBoonTrendPointDto> Points);
+
+public sealed record FightAnalysisBoonTrendPointDto(
+    string DateKey,
+    string DateLabel,
+    int FightCount,
+    double AverageCoverage,
+    double? AverageStacks,
+    IReadOnlyList<FightAnalysisBoonTrendProviderDto> TopProviders);
+
+public sealed record FightAnalysisBoonTrendProviderDto(
+    string Label,
+    string? Account,
+    string? ClassLabel,
+    int SampleCount,
+    int ProviderAppearanceCount,
+    double AverageGeneration,
+    double? AverageGenerationPresence,
+    double AverageOverstack,
+    double ProviderScore);
 
 public sealed record FightAnalysisBoonClassProviderDto(
     string ClassLabel,

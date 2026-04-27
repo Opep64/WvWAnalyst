@@ -28,6 +28,18 @@ public sealed class FightAnalysisService
         "elite-tight-enemy"
     ];
 
+    private static readonly FightAnalysisTrackedBoon[] BoonTrendDefinitions =
+    [
+        new(1122, "Stability", true),
+        new(717, "Protection", false),
+        new(873, "Resolution", false),
+        new(26980, "Resistance", false),
+        new(743, "Aegis", false),
+        new(740, "Might", true),
+        new(725, "Fury", false),
+        new(1187, "Quickness", false)
+    ];
+
     private readonly FightCatalogService _fightCatalog;
     private readonly PatchMetadataService _patchMetadata;
     private readonly FightAttributeService _fightAttributes;
@@ -134,6 +146,7 @@ public sealed class FightAnalysisService
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
             TopClasses: BuildTopClasses(filteredFights, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
             TopLanes: BuildTopLanes(filteredFights),
+            BoonTrends: BuildBoonTrends(filteredFights),
             TopBoons: BuildTopBoons(filteredFights));
     }
 
@@ -1124,6 +1137,158 @@ public sealed class FightAnalysisService
             .ThenByDescending(row => row.FightCount)
             .Take(20)
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisBoonTrendDto> BuildBoonTrends(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var nightGroups = fights
+            .Select(fight => new
+            {
+                Fight = fight,
+                Date = GetFightLocalDate(fight)
+            })
+            .Where(entry => entry.Date.HasValue)
+            .GroupBy(entry => entry.Date!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Fights = group.Select(entry => entry.Fight).ToArray()
+            })
+            .ToArray();
+
+        var providerSamples = BuildMergedBoonProviderSamples(fights);
+        var providerSamplesByDate = providerSamples
+            .Select(sample => new
+            {
+                Sample = sample,
+                Date = GetFightLocalDate(sample.Fight)
+            })
+            .Where(entry => entry.Date.HasValue)
+            .GroupBy(entry => entry.Date!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<MergedPlayerFightProvidedBoonSample>)group.Select(entry => entry.Sample).ToArray());
+
+        return BoonTrendDefinitions
+            .Select(definition => new FightAnalysisBoonTrendDto(
+                Id: definition.Id,
+                Name: definition.Name,
+                Icon: FindBoonTrendIcon(definition, fights, providerSamples),
+                StackBased: definition.StackBased,
+                Points: nightGroups
+                    .Select(night =>
+                    {
+                        providerSamplesByDate.TryGetValue(night.Date, out var nightProviderSamples);
+                        nightProviderSamples ??= Array.Empty<MergedPlayerFightProvidedBoonSample>();
+                        return BuildBoonTrendPoint(definition, night.Date, night.Fights, nightProviderSamples);
+                    })
+                    .Where(point => point is not null)
+                    .Cast<FightAnalysisBoonTrendPointDto>()
+                    .ToArray()))
+            .ToArray();
+    }
+
+    private static FightAnalysisBoonTrendPointDto? BuildBoonTrendPoint(
+        FightAnalysisTrackedBoon definition,
+        DateOnly date,
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyList<MergedPlayerFightProvidedBoonSample> providerSamples)
+    {
+        var fightsWithBoonData = fights
+            .Where(fight => (fight.FightIndex?.ThreatBoons?.Count ?? 0) > 0)
+            .ToArray();
+        if (fightsWithBoonData.Length == 0)
+        {
+            return null;
+        }
+
+        var boonValues = fightsWithBoonData
+            .Select(fight => (fight.FightIndex?.ThreatBoons ?? Array.Empty<FightThreatBoonIndexDto>())
+                .FirstOrDefault(boon => boon.Id == definition.Id))
+            .ToArray();
+        double averageCoverage = Math.Round(boonValues.Average(boon => boon?.Coverage ?? 0.0), 1);
+        double? averageStacks = definition.StackBased
+            ? Math.Round(boonValues.Average(boon => boon?.AverageStacks ?? 0.0), 1)
+            : null;
+
+        return new FightAnalysisBoonTrendPointDto(
+            DateKey: date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DateLabel: date.ToString("MMM d", CultureInfo.InvariantCulture),
+            FightCount: fightsWithBoonData.Length,
+            AverageCoverage: averageCoverage,
+            AverageStacks: averageStacks,
+            TopProviders: BuildBoonTrendProviders(definition, providerSamples));
+    }
+
+    private static IReadOnlyList<FightAnalysisBoonTrendProviderDto> BuildBoonTrendProviders(
+        FightAnalysisTrackedBoon definition,
+        IReadOnlyList<MergedPlayerFightProvidedBoonSample> providerSamples)
+    {
+        return providerSamples
+            .SelectMany(sample => sample.ProvidedBoons
+                .Where(boon => boon.Id == definition.Id)
+                .Select(boon => new
+                {
+                    sample.ClassLabel,
+                    Boon = boon
+                }))
+            .GroupBy(entry => entry.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                var first = entries[0];
+                int sampleCount = entries.Length;
+                int providerAppearanceCount = entries.Count(entry =>
+                    entry.Boon.Generation > 0.0
+                    || entry.Boon.GenerationPresence > 0.0
+                    || entry.Boon.Overstack > 0.0);
+                double averageGeneration = sampleCount == 0 ? 0.0 : Math.Round(entries.Average(entry => entry.Boon.Generation), 1);
+                double? averageGenerationPresence = definition.StackBased
+                    ? Math.Round(entries.Average(entry => entry.Boon.GenerationPresence), 1)
+                    : null;
+                double averageOverstack = sampleCount == 0 ? 0.0 : Math.Round(entries.Average(entry => entry.Boon.Overstack), 1);
+
+                return new FightAnalysisBoonTrendProviderDto(
+                    Label: string.IsNullOrWhiteSpace(first.ClassLabel) ? "Unknown class" : first.ClassLabel,
+                    Account: null,
+                    ClassLabel: first.ClassLabel,
+                    SampleCount: sampleCount,
+                    ProviderAppearanceCount: providerAppearanceCount,
+                    AverageGeneration: averageGeneration,
+                    AverageGenerationPresence: averageGenerationPresence,
+                    AverageOverstack: averageOverstack,
+                    ProviderScore: averageGeneration);
+            })
+            .Where(provider => provider.ProviderAppearanceCount > 0 || provider.AverageGeneration > 0.0 || provider.AverageGenerationPresence.GetValueOrDefault() > 0.0)
+            .OrderByDescending(provider => provider.ProviderScore)
+            .ThenByDescending(provider => provider.AverageGenerationPresence ?? 0.0)
+            .ThenByDescending(provider => provider.ProviderAppearanceCount)
+            .ThenBy(provider => provider.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToArray();
+    }
+
+    private static string? FindBoonTrendIcon(
+        FightAnalysisTrackedBoon definition,
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyList<MergedPlayerFightProvidedBoonSample> providerSamples)
+    {
+        var threatIcon = fights
+            .SelectMany(fight => fight.FightIndex?.ThreatBoons ?? Array.Empty<FightThreatBoonIndexDto>())
+            .Where(boon => boon.Id == definition.Id)
+            .Select(boon => boon.Icon)
+            .FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon));
+        if (!string.IsNullOrWhiteSpace(threatIcon))
+        {
+            return threatIcon;
+        }
+
+        return providerSamples
+            .SelectMany(sample => sample.ProvidedBoons)
+            .Where(boon => boon.Id == definition.Id)
+            .Select(boon => boon.Icon)
+            .FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon));
     }
 
     private static IReadOnlyDictionary<long, IReadOnlyList<FightAnalysisBoonClassProviderDto>> BuildBoonProviderLookup(
@@ -2654,6 +2819,11 @@ internal sealed record FightExpectedScoreResult(
     int SampleCount,
     string ConfidenceLabel,
     string Detail);
+
+internal sealed record FightAnalysisTrackedBoon(
+    long Id,
+    string Name,
+    bool StackBased);
 
 internal sealed record PlayerFightSample(
     FightArtifactSummaryDto Fight,

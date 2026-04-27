@@ -1706,6 +1706,175 @@ h1 {
     fill: var(--accent);
 }
 
+.analysis-boon-trend-card {
+    min-height: 0;
+    margin-bottom: 14px;
+}
+
+.analysis-boon-trend-card .section-heading {
+    align-items: start;
+}
+
+.analysis-boon-trend-card .section-heading h3 {
+    margin: 0;
+}
+
+.analysis-boon-trend-card .section-heading p {
+    margin: 4px 0 0;
+    color: var(--muted);
+}
+
+.analysis-boon-trend-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.analysis-boon-trend-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.analysis-boon-trend-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(159, 176, 195, 0.16);
+    background: rgba(159, 176, 195, 0.07);
+    color: var(--ink);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.analysis-boon-trend-option input {
+    margin: 0;
+    accent-color: var(--boon-color, var(--accent));
+}
+
+.analysis-boon-trend-option.is-active {
+    border-color: color-mix(in srgb, var(--boon-color, var(--accent)) 54%, transparent);
+    background: color-mix(in srgb, var(--boon-color, var(--accent)) 16%, transparent);
+}
+
+.analysis-boon-trend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--boon-color, var(--accent));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--boon-color, var(--accent)) 18%, transparent);
+}
+
+.analysis-boon-trend-chart-wrap {
+    position: relative;
+    min-height: 292px;
+    overflow: visible;
+}
+
+.analysis-boon-trend-chart {
+    width: 100%;
+    min-height: 260px;
+    display: block;
+}
+
+.analysis-boon-trend-chart .grid-line {
+    stroke: rgba(159, 176, 195, 0.18);
+    stroke-width: 1;
+}
+
+.analysis-boon-trend-chart .axis-label {
+    fill: var(--muted);
+    font-size: 11px;
+}
+
+.analysis-boon-trend-chart .y-axis-label {
+    text-anchor: end;
+}
+
+.analysis-boon-trend-chart .x-axis-label {
+    text-anchor: middle;
+}
+
+.analysis-boon-trend-line {
+    fill: none;
+    stroke: var(--boon-color, var(--accent));
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.analysis-boon-trend-point {
+    fill: var(--boon-color, var(--accent));
+    stroke: rgba(8, 13, 20, 0.92);
+    stroke-width: 2;
+    cursor: pointer;
+}
+
+.analysis-boon-trend-point:focus {
+    outline: none;
+    stroke: var(--ink);
+}
+
+.analysis-boon-trend-empty {
+    min-height: 260px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    border: 1px dashed rgba(159, 176, 195, 0.22);
+    border-radius: 8px;
+    background: rgba(8, 13, 20, 0.36);
+}
+
+.analysis-boon-trend-tooltip {
+    position: absolute;
+    z-index: 4;
+    width: min(320px, calc(100% - 16px));
+    padding: 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: rgba(9, 14, 22, 0.98);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+    pointer-events: none;
+}
+
+.analysis-boon-trend-tooltip-value {
+    margin: 4px 0;
+    color: var(--ink);
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.analysis-boon-trend-provider-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.analysis-boon-trend-provider {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+}
+
+.analysis-boon-trend-provider span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: 0.84rem;
+}
+
+.analysis-boon-trend-provider strong {
+    color: var(--ink);
+    font-size: 0.84rem;
+    white-space: nowrap;
+}
+
 .analysis-player-toolbar {
     margin-bottom: 10px;
 }

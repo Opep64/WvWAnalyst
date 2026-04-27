@@ -27,6 +27,7 @@ let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
 let selectedAnalysisBoonId = null;
+let selectedAnalysisBoonTrendIds = null;
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
 let compHelperCandidateTierKey = "best";
@@ -77,6 +78,7 @@ const ANALYSIS_TREND_METRICS = [
     { key: "downstateScore", title: "Downstate trend", averageKey: "averageDownstateScore", fallbackValue: "n/a", detail: "Downstate control pillar.", comparisonLabel: "Downstate" },
     { key: "resilienceScore", title: "Resilience trend", averageKey: "averageResilienceScore", fallbackValue: "n/a", detail: "Resilience & stabilization pillar.", comparisonLabel: "Resilience" }
 ];
+const ANALYSIS_BOON_TREND_COLORS = ["#5eead4", "#facc15", "#a78bfa", "#fb7185", "#60a5fa", "#f97316", "#34d399", "#f472b6"];
 const COMP_HELPER_TEAM_SIZE = 5;
 const COMP_HELPER_MAX_LOCKED_CARDS = 5;
 const COMP_HELPER_MIN_TOTAL_FIGHTS = 20;
@@ -4599,6 +4601,291 @@ function renderAnalysisLaneDetail(snapshot) {
     setActiveAnalysisLaneDetailTab(activeAnalysisLaneDetailTab);
 }
 
+function getAnalysisBoonTrendColor(index) {
+    return ANALYSIS_BOON_TREND_COLORS[index % ANALYSIS_BOON_TREND_COLORS.length];
+}
+
+function getAnalysisBoonTrendIds(trends) {
+    return (trends ?? []).map(trend => String(trend.id ?? ""));
+}
+
+function ensureAnalysisBoonTrendSelection(trends) {
+    const ids = getAnalysisBoonTrendIds(trends);
+    if (selectedAnalysisBoonTrendIds === null) {
+        selectedAnalysisBoonTrendIds = new Set(ids);
+        return;
+    }
+
+    const validIds = new Set(ids);
+    selectedAnalysisBoonTrendIds = new Set(
+        Array.from(selectedAnalysisBoonTrendIds)
+            .filter(id => validIds.has(id)));
+}
+
+function buildAnalysisBoonTrendSummary(trends) {
+    const nightCount = new Set(
+        (trends ?? [])
+            .flatMap(trend => trend.points ?? [])
+            .map(point => point.dateKey)
+            .filter(Boolean)).size;
+    const selectedCount = Array.from(selectedAnalysisBoonTrendIds ?? []).length;
+    const boonCount = trends?.length ?? 0;
+
+    if (boonCount === 0 || nightCount === 0) {
+        return "No boon trend data matched the current filters.";
+    }
+
+    return `${selectedCount} of ${boonCount} boons selected | ${nightCount} ${nightCount === 1 ? "night" : "nights"}`;
+}
+
+function buildAnalysisBoonTrendLegend(trends) {
+    return (trends ?? []).map((trend, index) => {
+        const id = String(trend.id ?? "");
+        const checked = selectedAnalysisBoonTrendIds?.has(id) ? "checked" : "";
+        const color = getAnalysisBoonTrendColor(index);
+        return `
+            <label class="analysis-boon-trend-option ${checked ? "is-active" : ""}">
+                <input type="checkbox" data-analysis-boon-trend-id="${escapeHtml(id)}" ${checked}>
+                <span class="analysis-boon-trend-swatch" style="--boon-color: ${escapeHtml(color)}"></span>
+                <span>${escapeHtml(trend.name ?? id)}</span>
+            </label>
+        `;
+    }).join("");
+}
+
+function getAnalysisBoonTrendNights(trends) {
+    const nightMap = new Map();
+    (trends ?? []).forEach(trend => {
+        (trend.points ?? []).forEach(point => {
+            if (!point?.dateKey || nightMap.has(point.dateKey)) {
+                return;
+            }
+
+            nightMap.set(point.dateKey, point.dateLabel ?? point.dateKey);
+        });
+    });
+
+    return Array.from(nightMap.entries())
+        .sort((left, right) => left[0].localeCompare(right[0]))
+        .map(([dateKey, dateLabel]) => ({ dateKey, dateLabel }));
+}
+
+function getAnalysisBoonTrendAxisIndexes(length) {
+    if (length <= 0) {
+        return [];
+    }
+
+    if (length <= 6) {
+        return Array.from({ length }, (_, index) => index);
+    }
+
+    const indexes = new Set([0, length - 1]);
+    const targetCount = 6;
+    for (let index = 1; index < targetCount - 1; index += 1) {
+        indexes.add(Math.round(index * (length - 1) / (targetCount - 1)));
+    }
+
+    return Array.from(indexes).sort((left, right) => left - right);
+}
+
+function buildAnalysisBoonTrendPath(trend, nightIndex, chart) {
+    const pointByNight = new Map((trend.points ?? []).map(point => [point.dateKey, point]));
+    let started = false;
+
+    return Array.from(nightIndex.entries())
+        .map(([dateKey, index]) => {
+            const point = pointByNight.get(dateKey);
+            if (!point) {
+                started = false;
+                return "";
+            }
+
+            const x = chart.xForIndex(index);
+            const y = chart.yForValue(point.averageCoverage);
+            const command = started ? "L" : "M";
+            started = true;
+            return `${command} ${x} ${y}`;
+        })
+        .filter(Boolean)
+        .join(" ");
+}
+
+function buildAnalysisBoonTrendProvidersHtml(boon, providers) {
+    if (!providers?.length) {
+        return `<div class="table-inline-note">No provider data for this night.</div>`;
+    }
+
+    return providers.slice(0, 3).map((provider, index) => {
+        const value = boon?.stackBased
+            ? `${formatNumber(provider.averageGeneration, 1)} gen${provider.averageGenerationPresence != null ? ` | ${formatPercent(provider.averageGenerationPresence)} presence` : ""}`
+            : formatPercent(provider.averageGeneration);
+        return `
+            <div class="analysis-boon-trend-provider">
+                <span>${escapeHtml(String(index + 1))}. ${escapeHtml(provider.label ?? "Unknown provider")}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `;
+    }).join("");
+}
+
+function buildAnalysisBoonTrendTooltipHtml(boon, point) {
+    const stackLine = boon?.stackBased && point.averageStacks != null
+        ? `<div class="table-inline-note">${escapeHtml(`Average stacks ${formatNumber(point.averageStacks, 1)}`)}</div>`
+        : "";
+
+    return `
+        <strong>${escapeHtml(boon?.name ?? "Boon")}</strong>
+        <div class="analysis-boon-trend-tooltip-value">${escapeHtml(formatPercent(point.averageCoverage))}</div>
+        <div class="table-inline-note">${escapeHtml(`${point.dateLabel ?? point.dateKey} | ${point.fightCount} ${point.fightCount === 1 ? "fight" : "fights"}`)}</div>
+        ${stackLine}
+        <div class="analysis-boon-trend-provider-list">
+            ${buildAnalysisBoonTrendProvidersHtml(boon, point.topProviders ?? [])}
+        </div>
+    `;
+}
+
+function findAnalysisBoonTrendPoint(boonId, dateKey) {
+    const boon = (currentAnalysisSnapshot?.boonTrends ?? [])
+        .find(trend => String(trend.id ?? "") === String(boonId ?? ""));
+    const point = boon?.points?.find(item => item.dateKey === dateKey) ?? null;
+    return { boon, point };
+}
+
+function showAnalysisBoonTrendTooltip(event) {
+    const target = event.target.closest("[data-analysis-boon-trend-point]");
+    const tooltip = document.querySelector("#analysis-boon-trend-tooltip");
+    const wrap = document.querySelector(".analysis-boon-trend-chart-wrap");
+    if (!target || !tooltip || !wrap) {
+        return;
+    }
+
+    const { boon, point } = findAnalysisBoonTrendPoint(target.dataset.boonId, target.dataset.dateKey);
+    if (!boon || !point) {
+        return;
+    }
+
+    tooltip.innerHTML = buildAnalysisBoonTrendTooltipHtml(boon, point);
+    tooltip.hidden = false;
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetX = targetRect.left + (targetRect.width / 2) - wrapRect.left;
+    const targetY = targetRect.top - wrapRect.top;
+    const tooltipWidth = tooltip.offsetWidth || 260;
+    const tooltipHeight = tooltip.offsetHeight || 150;
+    const left = Math.max(8, Math.min(wrapRect.width - tooltipWidth - 8, targetX + 12));
+    const top = Math.max(8, Math.min(wrapRect.height - tooltipHeight - 8, targetY - tooltipHeight - 10));
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+}
+
+function hideAnalysisBoonTrendTooltip() {
+    const tooltip = document.querySelector("#analysis-boon-trend-tooltip");
+    if (!tooltip) {
+        return;
+    }
+
+    tooltip.hidden = true;
+    tooltip.innerHTML = "";
+}
+
+function buildAnalysisBoonTrendChart(trends) {
+    const nights = getAnalysisBoonTrendNights(trends);
+    const selectedTrends = (trends ?? [])
+        .filter(trend => selectedAnalysisBoonTrendIds?.has(String(trend.id ?? "")));
+
+    if (nights.length === 0) {
+        return `<div class="analysis-boon-trend-empty">No boon trend data available.</div>`;
+    }
+
+    if (selectedTrends.length === 0) {
+        return `<div class="analysis-boon-trend-empty">No boons selected.</div>`;
+    }
+
+    const width = 760;
+    const height = 260;
+    const plot = { left: 44, top: 18, right: 18, bottom: 38 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const nightIndex = new Map(nights.map((night, index) => [night.dateKey, index]));
+    const chart = {
+        xForIndex: index => Math.round((plot.left + (nights.length <= 1 ? plotWidth / 2 : index * plotWidth / (nights.length - 1))) * 100) / 100,
+        yForValue: value => Math.round((plot.top + (100 - Math.max(0, Math.min(100, Number(value) || 0))) * plotHeight / 100) * 100) / 100
+    };
+    const gridValues = [100, 75, 50, 25, 0];
+    const axisIndexes = getAnalysisBoonTrendAxisIndexes(nights.length);
+
+    const gridMarkup = gridValues.map(value => {
+        const y = chart.yForValue(value);
+        return `
+            <line class="grid-line" x1="${plot.left}" y1="${y}" x2="${width - plot.right}" y2="${y}"></line>
+            <text class="axis-label y-axis-label" x="${plot.left - 10}" y="${y + 4}">${escapeHtml(String(value))}</text>
+        `;
+    }).join("");
+
+    const axisMarkup = axisIndexes.map(index => {
+        const night = nights[index];
+        const x = chart.xForIndex(index);
+        return `<text class="axis-label x-axis-label" x="${x}" y="${height - 12}">${escapeHtml(night.dateLabel)}</text>`;
+    }).join("");
+
+    const seriesMarkup = selectedTrends.map(trend => {
+        const trendIndex = (trends ?? []).findIndex(item => String(item.id ?? "") === String(trend.id ?? ""));
+        const color = getAnalysisBoonTrendColor(Math.max(0, trendIndex));
+        const path = buildAnalysisBoonTrendPath(trend, nightIndex, chart);
+        const points = (trend.points ?? []).map(point => {
+            if (!nightIndex.has(point.dateKey)) {
+                return "";
+            }
+
+            const x = chart.xForIndex(nightIndex.get(point.dateKey));
+            const y = chart.yForValue(point.averageCoverage);
+            const label = `${trend.name} ${point.dateLabel}: ${formatPercent(point.averageCoverage)}`;
+            return `
+                <circle class="analysis-boon-trend-point"
+                    cx="${x}"
+                    cy="${y}"
+                    r="4.2"
+                    style="--boon-color: ${escapeHtml(color)}"
+                    tabindex="0"
+                    role="img"
+                    aria-label="${escapeHtml(label)}"
+                    data-analysis-boon-trend-point
+                    data-boon-id="${escapeHtml(String(trend.id ?? ""))}"
+                    data-date-key="${escapeHtml(point.dateKey)}"></circle>
+            `;
+        }).join("");
+
+        return `
+            ${path ? `<path class="analysis-boon-trend-line" d="${escapeHtml(path)}" style="--boon-color: ${escapeHtml(color)}"></path>` : ""}
+            ${points}
+        `;
+    }).join("");
+
+    return `
+        <svg class="analysis-boon-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="false">
+            ${gridMarkup}
+            ${axisMarkup}
+            ${seriesMarkup}
+        </svg>
+    `;
+}
+
+function renderAnalysisBoonTrends(snapshot) {
+    const trends = snapshot.boonTrends ?? [];
+    ensureAnalysisBoonTrendSelection(trends);
+
+    const summary = document.querySelector("#analysis-boon-trend-summary");
+    if (summary) {
+        summary.textContent = buildAnalysisBoonTrendSummary(trends);
+    }
+
+    setInnerHtml("#analysis-boon-trend-legend", buildAnalysisBoonTrendLegend(trends));
+    setInnerHtml("#analysis-boon-trend-chart", buildAnalysisBoonTrendChart(trends));
+    hideAnalysisBoonTrendTooltip();
+}
+
 function buildAnalysisBoonRow(boon) {
     const rowClasses = ["is-clickable"];
     if (String(boon.id ?? "") === String(selectedAnalysisBoonId ?? "")) {
@@ -4724,6 +5011,8 @@ function renderAnalysisBoonDetail(boon) {
 }
 
 function renderAnalysisBoons(snapshot) {
+    renderAnalysisBoonTrends(snapshot);
+
     const boons = snapshot.topBoons ?? [];
     const body = document.querySelector("#analysis-boons-body");
 
@@ -4775,6 +5064,10 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-lanes-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-lane-selection", "");
     setInnerHtml("#analysis-lane-detail", "");
+    document.querySelector("#analysis-boon-trend-summary").textContent = message;
+    setInnerHtml("#analysis-boon-trend-legend", "");
+    setInnerHtml("#analysis-boon-trend-chart", "");
+    setInnerHtml("#analysis-boon-trend-tooltip", "");
     setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-boon-detail", "");
     document.querySelector("#analysis-comp-helper-summary").textContent = message;
@@ -6903,6 +7196,49 @@ document.querySelector("#analysis-boons-body").addEventListener("click", event =
         renderAnalysisBoons(currentAnalysisSnapshot);
     }
 });
+document.querySelector("#analysis-boon-trend-legend").addEventListener("change", event => {
+    const input = event.target.closest("[data-analysis-boon-trend-id]");
+    if (!input || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    const id = String(input.dataset.analysisBoonTrendId ?? "");
+    if (!selectedAnalysisBoonTrendIds) {
+        selectedAnalysisBoonTrendIds = new Set();
+    }
+
+    if (input.checked) {
+        selectedAnalysisBoonTrendIds.add(id);
+    } else {
+        selectedAnalysisBoonTrendIds.delete(id);
+    }
+
+    renderAnalysisBoonTrends(currentAnalysisSnapshot);
+});
+document.querySelector("[data-analysis-boon-trend-action='all']").addEventListener("click", () => {
+    if (!currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisBoonTrendIds = new Set(getAnalysisBoonTrendIds(currentAnalysisSnapshot.boonTrends ?? []));
+    renderAnalysisBoonTrends(currentAnalysisSnapshot);
+});
+document.querySelector("[data-analysis-boon-trend-action='none']").addEventListener("click", () => {
+    if (!currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisBoonTrendIds = new Set();
+    renderAnalysisBoonTrends(currentAnalysisSnapshot);
+});
+document.querySelector("#analysis-boon-trend-chart").addEventListener("mouseover", showAnalysisBoonTrendTooltip);
+document.querySelector("#analysis-boon-trend-chart").addEventListener("focusin", showAnalysisBoonTrendTooltip);
+document.querySelector("#analysis-boon-trend-chart").addEventListener("mouseout", event => {
+    if (event.target.closest("[data-analysis-boon-trend-point]")) {
+        hideAnalysisBoonTrendTooltip();
+    }
+});
+document.querySelector("#analysis-boon-trend-chart").addEventListener("focusout", hideAnalysisBoonTrendTooltip);
 document.querySelector("#analysis-class-detail").addEventListener("click", event => {
     const button = event.target.closest("[data-analysis-class-player-sort]");
     if (!button) {
