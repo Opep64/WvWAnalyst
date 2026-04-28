@@ -2139,9 +2139,13 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
     const negatedSummaries = Array.isArray(summary.negatedHitSummaries) ? summary.negatedHitSummaries : [];
     const negatedHitCount = negatedSummaries.reduce((total, entry) => total + Number(entry.negatedHitCount ?? 0), 0);
     const fallbackCount = negatedSummaries.reduce((total, entry) => total + Number(entry.fallbackEstimateCount ?? 0), 0);
+    const negatedHitDamage = negatedSummaries.reduce((total, entry) => total + Number(entry.estimatedPreventedDamage ?? 0), 0);
+    const savedCaseNegatedDamage = Number(summary.totalEstimatedNegatedDamage ?? 0);
+    const hasNegatedHitSummary = negatedSummaries.length > 0;
+    const displayedNegatedDamage = hasNegatedHitSummary ? negatedHitDamage : savedCaseNegatedDamage;
     const totalPrevention = Number(summary.totalBarrierAbsorbed ?? 0)
         + Number(summary.totalEstimatedDamageReduction ?? 0)
-        + Number(summary.totalEstimatedNegatedDamage ?? 0)
+        + displayedNegatedDamage
         + Number(summary.totalPetMinionAbsorption ?? 0);
     const availabilityDetail = summary.availableFightCount === filteredFightCount
         ? "Aggregated across all filtered fights."
@@ -2164,7 +2168,7 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
             label: "Total prevention",
             value: formatNumber(totalPrevention, 0),
             meta: `${formatNumber(summary.totalSaves)} saves`,
-            notes: "Barrier, reduction, negated hits, and pet/minion absorption combined."
+            notes: "Full-fight barrier, negated hits, pet/minion absorption, plus saved-case damage reduction."
         },
         {
             label: "Barrier absorbed",
@@ -2175,19 +2179,30 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
                 : "Barrier absorbed on squad players."
         },
         {
-            label: "Damage reduction",
+            label: "Saved-case damage reduction",
             value: formatNumber(summary.totalEstimatedDamageReduction, 0),
             meta: `${formatNumber(summary.totalDamageReductionSaves)} reduction saves`,
-            notes: "Estimated prevented damage from reduction-style effects."
+            notes: "Estimated prevented damage from reduction-style effects inside saved-player windows."
         },
         {
-            label: "Negated damage",
-            value: formatNumber(summary.totalEstimatedNegatedDamage, 0),
-            meta: `${formatNumber(summary.totalNegatedDamageSaves)} negation saves | ${formatNumber(negatedHitCount)} hits`,
+            label: hasNegatedHitSummary ? "Negated hits" : "Saved-case negation",
+            value: formatNumber(displayedNegatedDamage, 0),
+            meta: hasNegatedHitSummary
+                ? `${formatNumber(negatedHitCount)} hits`
+                : `${formatNumber(summary.totalNegatedDamageSaves)} negation saves`,
             notes: fallbackCount > 0
                 ? `${formatNumber(fallbackCount)} fallback negation estimates were used.`
-                : "All negated hits used tracked skill-based estimates."
+                : hasNegatedHitSummary
+                    ? "All negated hits used tracked skill-based estimates."
+                    : "Estimated negated damage inside saved-player windows."
         },
+        ...negatedSummaries.map(entry => ({
+            label: entry.label,
+            value: formatNumber(entry.estimatedPreventedDamage, 0),
+            meta: `${formatNumber(entry.negatedHitCount)} hits`,
+            notes: `${formatNumber(entry.fallbackEstimateCount)} fallbacks | Effects: ${formatMitigationEffectCounts(entry.contributingEffects)}`,
+            isSubrow: true
+        })),
         {
             label: "Pet / minion absorption",
             value: formatNumber(summary.totalPetMinionAbsorption, 0),
@@ -2204,13 +2219,13 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
                 ? `${formatPercent(summary.averageLowestHealthPercent)} average lowest health | ${formatPercent(summary.lowestLowestHealthPercent)} lowest observed`
                 : "No saved-player low-health detail retained."
         },
-        ...negatedSummaries.map(entry => ({
-            label: entry.label,
-            value: formatNumber(entry.estimatedPreventedDamage, 0),
-            meta: `${formatNumber(entry.negatedHitCount)} hits`,
-            notes: `${formatNumber(entry.fallbackEstimateCount)} fallbacks | Effects: ${formatMitigationEffectCounts(entry.contributingEffects)}`,
+        ...(hasNegatedHitSummary && (savedCaseNegatedDamage > 0 || Number(summary.totalNegatedDamageSaves ?? 0) > 0) ? [{
+            label: "Saved-case negation",
+            value: formatNumber(savedCaseNegatedDamage, 0),
+            meta: `${formatNumber(summary.totalNegatedDamageSaves)} negation saves`,
+            notes: "Subset of negated damage that occurred inside saved-player windows.",
             isSubrow: true
-        }))
+        }] : [])
     ];
 
     return `
