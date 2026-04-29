@@ -101,7 +101,6 @@ public sealed class FightAttributeService
         var enemySize = Math.Max(1.0, GetEnemySize(fightIndex));
         var squadSize = Math.Max(1.0, GetSquadSize(fightIndex));
         var pressureScore = GetPillarScore(fightIndex, "pressure-burst");
-        var resilienceScore = GetPillarScore(fightIndex, "resilience-stabilization");
         var bestBurst = topBursts
             .OrderByDescending(burst => burst.Downs * 4 + burst.Kills * 6)
             .ThenByDescending(burst => burst.Damage)
@@ -137,7 +136,7 @@ public sealed class FightAttributeService
         }
 
         var enemyBombDownThreshold = Math.Max(3, (int)Math.Ceiling(squadSize * 0.10));
-        if (squadDowns >= enemyBombDownThreshold && (resilienceScore <= 50 || squadDeaths >= Math.Max(2, squadDowns / 2)))
+        if (squadDowns >= enemyBombDownThreshold && squadDeaths >= Math.Max(2, squadDowns / 2))
         {
             attributes.Add(Create("enemy-bomb-landed", 0.78, 3, $"{squadDowns} squad downs and {squadDeaths} deaths under enemy pressure."));
         }

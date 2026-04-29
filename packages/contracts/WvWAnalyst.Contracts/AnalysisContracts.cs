@@ -60,7 +60,7 @@ public sealed record FightAnalysisOverviewDto(
     double? AverageCohesionScore,
     double? AveragePressureScore,
     double? AverageDownstateScore,
-    double? AverageResilienceScore,
+    double? AverageSupportScore,
     double AverageSquadSize,
     double AverageEnemySize,
     double AverageDurationSeconds,
@@ -128,7 +128,7 @@ public sealed record FightAnalysisTrendPointDto(
     int? CohesionScore,
     int? PressureScore,
     int? DownstateScore,
-    int? ResilienceScore);
+    int? SupportScore);
 
 public sealed record FightAnalysisPlayerRowDto(
     string Account,

@@ -82,7 +82,7 @@ const ANALYSIS_TREND_METRICS = [
     { key: "cohesionScore", title: "Cohesion trend", averageKey: "averageCohesionScore", fallbackValue: "n/a", detail: "Cohesion & positioning pillar.", comparisonLabel: "Cohesion" },
     { key: "pressureScore", title: "Pressure trend", averageKey: "averagePressureScore", fallbackValue: "n/a", detail: "Pressure & burst pillar.", comparisonLabel: "Pressure" },
     { key: "downstateScore", title: "Downstate trend", averageKey: "averageDownstateScore", fallbackValue: "n/a", detail: "Downstate control pillar.", comparisonLabel: "Downstate" },
-    { key: "resilienceScore", title: "Resilience trend", averageKey: "averageResilienceScore", fallbackValue: "n/a", detail: "Resilience & stabilization pillar.", comparisonLabel: "Resilience" }
+    { key: "supportScore", title: "Support trend", averageKey: "averageSupportScore", fallbackValue: "n/a", detail: "Support & mitigation pillar.", comparisonLabel: "Support" }
 ];
 const ANALYSIS_BOON_TREND_COLORS = ["#5eead4", "#facc15", "#a78bfa", "#fb7185", "#60a5fa", "#f97316", "#34d399", "#f472b6"];
 const COMP_HELPER_TEAM_SIZE = 5;
@@ -676,7 +676,7 @@ function buildAggregatedTrendPoints(points, mode) {
             cohesionScore: calculateMedian(bucket.points.map(point => point.cohesionScore)),
             pressureScore: calculateMedian(bucket.points.map(point => point.pressureScore)),
             downstateScore: calculateMedian(bucket.points.map(point => point.downstateScore)),
-            resilienceScore: calculateMedian(bucket.points.map(point => point.resilienceScore))
+            supportScore: calculateMedian(bucket.points.map(point => point.supportScore))
         }));
 }
 
@@ -2306,9 +2306,9 @@ function buildAnalysisOverviewCards(snapshot) {
             detail: "Kill conversion, recovery, and down-window control."
         },
         {
-            title: "Average resilience",
-            value: overview.averageResilienceScore != null ? formatNumber(overview.averageResilienceScore, 1) : "n/a",
-            detail: "Burst survival and stabilization under enemy pressure."
+            title: "Average support",
+            value: overview.averageSupportScore != null ? formatNumber(overview.averageSupportScore, 1) : "n/a",
+            detail: "Healing, cleanses, boons, prevention, and saved-player mitigation."
         },
         {
             title: "Average sizes",
@@ -6704,6 +6704,8 @@ function renderFightDossier(detail) {
     const execution = fightIndex?.execution;
     const executionContext = execution?.context;
     const executionOutcome = execution?.outcome;
+    const executionPillars = (execution?.pillars ?? [])
+        .filter(pillar => pillar?.pillarId !== "resilience-stabilization");
     const fightShape = fightIndex?.fightShape;
     const squadSide = fightIndex?.squadSide;
     const enemySide = fightIndex?.enemySide;
@@ -6751,6 +6753,8 @@ function renderFightDossier(detail) {
         outcome?.detail ?? null,
         executionOutcome ? `Enemy down conversion: ${formatPercent(executionOutcome.enemyDownConversionRate)}` : null,
         executionOutcome ? `Squad recovery: ${formatPercent(executionOutcome.squadRecoveryRate)}` : null,
+        executionOutcome?.crowdControlDataAvailable ? `Incoming CC: ${formatNumber(executionOutcome.incomingCrowdControl)}` : null,
+        executionOutcome?.crowdControlDataAvailable ? `Outgoing CC: ${formatNumber(executionOutcome.outgoingCrowdControl)}` : null,
         executionOutcome?.wipeLabel ? `Wipe: ${executionOutcome.wipeLabel}` : null
     ].filter(Boolean);
 
@@ -6909,8 +6913,8 @@ function renderFightDossier(detail) {
         `);
     setInnerHtml(
         "#dossier-pillar-grid",
-        execution?.pillars?.length
-            ? execution.pillars.map(buildPillarCard).join("")
+        executionPillars.length
+            ? executionPillars.map(buildPillarCard).join("")
             : `
                 <article class="pillar-card">
                     <strong>Execution pillars</strong>

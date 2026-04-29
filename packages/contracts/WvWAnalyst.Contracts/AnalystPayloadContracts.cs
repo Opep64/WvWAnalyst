@@ -405,6 +405,12 @@ public sealed class WvWAnalystExecutionOutcomeDto
 
     public double SquadRecoveryRate { get; set; }
 
+    public bool CrowdControlDataAvailable { get; set; }
+
+    public int IncomingCrowdControl { get; set; }
+
+    public int OutgoingCrowdControl { get; set; }
+
     public string WipeLabel { get; set; } = string.Empty;
 }
 

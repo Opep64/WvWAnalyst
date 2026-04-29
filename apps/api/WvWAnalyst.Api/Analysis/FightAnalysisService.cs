@@ -287,7 +287,7 @@ public sealed class FightAnalysisService
             AverageCohesionScore: GetPillarAverage(pillarLookup, "cohesion-positioning"),
             AveragePressureScore: GetPillarAverage(pillarLookup, "pressure-burst"),
             AverageDownstateScore: GetPillarAverage(pillarLookup, "downstate-control"),
-            AverageResilienceScore: GetPillarAverage(pillarLookup, "resilience-stabilization"),
+            AverageSupportScore: GetPillarAverage(pillarLookup, "support-mitigation"),
             AverageSquadSize: averageSquadSize,
             AverageEnemySize: averageEnemySize,
             AverageDurationSeconds: averageDurationSeconds,
@@ -452,7 +452,7 @@ public sealed class FightAnalysisService
                     CohesionScore: pillars.TryGetValue("cohesion-positioning", out int cohesion) ? cohesion : null,
                     PressureScore: pillars.TryGetValue("pressure-burst", out int pressure) ? pressure : null,
                     DownstateScore: pillars.TryGetValue("downstate-control", out int downstate) ? downstate : null,
-                    ResilienceScore: pillars.TryGetValue("resilience-stabilization", out int resilience) ? resilience : null);
+                    SupportScore: pillars.TryGetValue("support-mitigation", out int support) ? support : null);
             })
             .ToArray();
     }

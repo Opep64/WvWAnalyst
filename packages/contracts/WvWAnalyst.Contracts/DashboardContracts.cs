@@ -302,6 +302,9 @@ public sealed record FightExecutionOutcomeIndexDto(
     int EnemyDeaths,
     double EnemyDownConversionRate,
     double SquadRecoveryRate,
+    bool CrowdControlDataAvailable,
+    int IncomingCrowdControl,
+    int OutgoingCrowdControl,
     string? WipeLabel);
 
 public sealed record FightSideIndexDto(

@@ -24,6 +24,7 @@ public sealed class FightTeamScorecardBlueprintFactory
                 "Squad deaths and enemy deaths",
                 "Enemy down conversion rate",
                 "Squad recovery rate",
+                "Incoming and outgoing CC",
                 "Wipe / no wipe"
             ],
             PrimaryPillars:
@@ -35,9 +36,10 @@ public sealed class FightTeamScorecardBlueprintFactory
                     Metrics:
                     [
                         new ScorecardMetricDto("In-position rate", "higher", "eligible replay samples", true, true),
+                        new ScorecardMetricDto("Pressure positioning", "higher", "eligible pressure samples", true, true),
                         new ScorecardMetricDto("Too-far rate", "lower", "eligible replay samples", true, true),
-                        new ScorecardMetricDto("Overextended rate", "lower", "eligible replay samples", true, true),
-                        new ScorecardMetricDto("Lateral-risk rate", "lower", "eligible replay samples", true, true)
+                        new ScorecardMetricDto("Lateral-risk rate", "lower", "eligible replay samples", true, true),
+                        new ScorecardMetricDto("Overextended rate", "lower", "eligible replay samples", true, true)
                     ]),
                 new ScorecardPillarDto(
                     Name: "Pressure & Burst",
@@ -46,7 +48,7 @@ public sealed class FightTeamScorecardBlueprintFactory
                     Metrics:
                     [
                         new ScorecardMetricDto("Downs per active player", "higher", "active player", true, true),
-                        new ScorecardMetricDto("Burst-window success rate", "higher", "burst window", true, true),
+                        new ScorecardMetricDto("Burst pressure yield", "higher", "burst window", true, true),
                         new ScorecardMetricDto("Strips per active player per minute", "higher", "active player minute", true, true)
                     ]),
                 new ScorecardPillarDto(
@@ -61,14 +63,16 @@ public sealed class FightTeamScorecardBlueprintFactory
                         new ScorecardMetricDto("Own average down-to-recover time", "lower", "own recoveries", true, true)
                     ]),
                 new ScorecardPillarDto(
-                    Name: "Resilience & Stabilization",
+                    Name: "Support & Mitigation",
                     WeightPercent: 25,
-                    Summary: "Captures whether the squad survives burst pressure, absorbs CC, and stabilizes instead of cascading.",
+                    Summary: "Measures how well support tools answer incoming pressure without treating final deaths as a separate score.",
                     Metrics:
                     [
-                        new ScorecardMetricDto("Deaths per active player", "lower", "active player", true, true),
-                        new ScorecardMetricDto("Held-burst rate", "higher", "enemy burst window", true, true),
-                        new ScorecardMetricDto("Received CC per active player", "lower", "active player", true, true)
+                        new ScorecardMetricDto("Healing coverage", "higher", "health damage", true, true),
+                        new ScorecardMetricDto("Cleanse pressure response", "higher", "condition pressure", true, true),
+                        new ScorecardMetricDto("Weighted support boon coverage", "higher", "threatened boon coverage", true, true),
+                        new ScorecardMetricDto("Prevention value", "higher", "incoming pressure", true, true),
+                        new ScorecardMetricDto("Saved-player balance", "higher", "squad downs", true, true)
                     ])
             ],
             SupportingExplanationMetrics:

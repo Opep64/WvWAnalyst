@@ -948,6 +948,7 @@ public sealed class EliteInsightsFightIndexer
             Context: BuildExecutionContextFromAnalystPayload(payload.Execution.Context),
             Outcome: BuildExecutionOutcomeFromAnalystPayload(payload.Execution.Outcome),
             Pillars: payload.Execution.Pillars?
+                .Where(pillar => !string.Equals(pillar.PillarId, "resilience-stabilization", StringComparison.OrdinalIgnoreCase))
                 .Select(pillar => new FightExecutionPillarIndexDto(
                     PillarId: NullIfWhiteSpace(pillar.PillarId) ?? string.Empty,
                     Label: NullIfWhiteSpace(pillar.Label) ?? string.Empty,
@@ -1019,6 +1020,9 @@ public sealed class EliteInsightsFightIndexer
             EnemyDeaths: outcome.EnemyDeaths,
             EnemyDownConversionRate: outcome.EnemyDownConversionRate,
             SquadRecoveryRate: outcome.SquadRecoveryRate,
+            CrowdControlDataAvailable: outcome.CrowdControlDataAvailable,
+            IncomingCrowdControl: outcome.IncomingCrowdControl,
+            OutgoingCrowdControl: outcome.OutgoingCrowdControl,
             WipeLabel: NullIfWhiteSpace(outcome.WipeLabel));
     }
 
