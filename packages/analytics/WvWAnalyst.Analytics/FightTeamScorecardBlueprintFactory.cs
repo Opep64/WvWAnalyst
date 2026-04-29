@@ -49,6 +49,7 @@ public sealed class FightTeamScorecardBlueprintFactory
                     [
                         new ScorecardMetricDto("Downs per active player", "higher", "active player", true, true),
                         new ScorecardMetricDto("Burst pressure yield", "higher", "burst window", true, true),
+                        new ScorecardMetricDto("Offensive boon coverage", "higher", "squad pressure window", true, true),
                         new ScorecardMetricDto("Strips per active player per minute", "higher", "active player minute", true, true)
                     ]),
                 new ScorecardPillarDto(
@@ -68,9 +69,9 @@ public sealed class FightTeamScorecardBlueprintFactory
                     Summary: "Measures how well support tools answer incoming pressure without treating final deaths as a separate score.",
                     Metrics:
                     [
-                        new ScorecardMetricDto("Healing coverage", "higher", "health damage", true, true),
+                        new ScorecardMetricDto("Observed healing coverage", "higher", "health damage", true, true),
                         new ScorecardMetricDto("Cleanse pressure response", "higher", "condition pressure", true, true),
-                        new ScorecardMetricDto("Weighted support boon coverage", "higher", "threatened boon coverage", true, true),
+                        new ScorecardMetricDto("Defensive boon coverage", "higher", "threatened defensive boon coverage", true, true),
                         new ScorecardMetricDto("Prevention value", "higher", "incoming pressure", true, true),
                         new ScorecardMetricDto("Saved-player balance", "higher", "squad downs", true, true)
                     ])
