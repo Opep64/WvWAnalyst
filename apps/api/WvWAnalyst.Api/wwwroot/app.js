@@ -4444,6 +4444,33 @@ function getAnalysisCharacterPackageItems(compCandidate) {
         }));
 }
 
+function getAnalysisCharacterContextFitItems(character, direction) {
+    const isPositive = direction === "positive";
+    return [...(character.contextFits ?? [])]
+        .filter(fit => Number.isFinite(Number(fit.delta)))
+        .filter(fit => isPositive ? Number(fit.delta ?? 0) > 0 : Number(fit.delta ?? 0) < 0)
+        .sort((left, right) => isPositive
+            ? Number(right.delta ?? 0) - Number(left.delta ?? 0)
+                || Number(right.sampleCount ?? 0) - Number(left.sampleCount ?? 0)
+                || compareFightBrowserValues(String(left.label ?? "").toLowerCase(), String(right.label ?? "").toLowerCase())
+            : Number(left.delta ?? 0) - Number(right.delta ?? 0)
+                || Number(right.sampleCount ?? 0) - Number(left.sampleCount ?? 0)
+                || compareFightBrowserValues(String(left.label ?? "").toLowerCase(), String(right.label ?? "").toLowerCase()))
+        .slice(0, 2)
+        .map(fit => {
+            const delta = Number(fit.delta ?? 0);
+            const sampleCount = Number(fit.sampleCount ?? 0);
+            const detail = fit.detail
+                || `${fit.label}: ${formatSignedNumber(delta, 1)} Fight Impact delta over ${formatNumber(sampleCount)} fights`;
+            return {
+                label: fit.label ?? "Context",
+                value: `${formatSignedNumber(delta, 1)} ${formatNumber(sampleCount, 0)}f`,
+                title: detail,
+                className: isPositive ? "attribute-pill-positive" : "attribute-pill-negative"
+            };
+        });
+}
+
 function buildAnalysisCharacterContextRow(label, items) {
     if (!items.length) {
         return "";
@@ -4455,7 +4482,8 @@ function buildAnalysisCharacterContextRow(label, items) {
             <div class="attribute-pill-list">
                 ${items.map(item => {
                     const text = item.value ? `${item.label} ${item.value}` : item.label;
-                    return `<span class="attribute-pill" title="${escapeHtml(item.title ?? text)}">${escapeHtml(text)}</span>`;
+                    const classes = ["attribute-pill", item.className].filter(Boolean).join(" ");
+                    return `<span class="${escapeHtml(classes)}" title="${escapeHtml(item.title ?? text)}">${escapeHtml(text)}</span>`;
                 }).join("")}
             </div>
         </div>
@@ -4466,7 +4494,9 @@ function buildAnalysisCharacterContextPanel(character, compCandidate) {
     const rows = [
         buildAnalysisCharacterContextRow("Best lanes", getAnalysisCharacterBestLaneItems(character)),
         buildAnalysisCharacterContextRow("Reliable", getAnalysisCharacterReliableLaneItems(character)),
-        buildAnalysisCharacterContextRow("Packages", getAnalysisCharacterPackageItems(compCandidate))
+        buildAnalysisCharacterContextRow("Packages", getAnalysisCharacterPackageItems(compCandidate)),
+        buildAnalysisCharacterContextRow("Best fits", getAnalysisCharacterContextFitItems(character, "positive")),
+        buildAnalysisCharacterContextRow("Risk fits", getAnalysisCharacterContextFitItems(character, "negative"))
     ].filter(Boolean);
 
     if (rows.length === 0) {

@@ -14,6 +14,10 @@ public sealed class FightAnalysisService
     private const int MinimumExpectedScoreSampleCount = 5;
     private const int MediumExpectedScoreSampleCount = 15;
     private const int GoodExpectedScoreSampleCount = 30;
+    private const int MinimumCharacterContextBaselineSampleCount = 6;
+    private const int MinimumCharacterContextBucketSampleCount = 4;
+    private const double MinimumCharacterContextDeltaMagnitude = 2.0;
+    private const int MaximumCharacterContextFitCount = 6;
     private const double StrictExpectedScoreSizeRatioTolerance = 0.20;
     private const double BroadExpectedScoreSizeRatioTolerance = 0.35;
     private const double StrictExpectedScoreClassMixTolerance = 0.35;
@@ -1649,6 +1653,7 @@ public sealed class FightAnalysisService
                 double? averageLateralRiskRate = RoundNullable(CleanupAdjustedAverageOrNull(mergedFightEntries, entry => entry.LateralRiskRate, entry => entry.Fight), 1);
                 var fightImpact = ComputeAverageFightImpact(mergedFightEntries);
                 var fightImpactLanes = BuildFightImpactLanes(mergedFightEntries, 5);
+                var contextFits = BuildCharacterContextFits(mergedFightEntries);
                 var impactScore = ComputeImpactScore(
                     averageWeightedLaneScore: laneScores.Length == 0
                         ? 0.0
@@ -1722,6 +1727,7 @@ public sealed class FightAnalysisService
                     AverageFightImpactScore: fightImpact.Average,
                     FightImpactSampleCount: fightImpact.SampleCount,
                     FightImpactLanes: fightImpactLanes,
+                    ContextFits: contextFits,
                     LaneContributions: laneContributions);
             })
             .OrderByDescending(character => character.FightCount)
@@ -1977,6 +1983,137 @@ public sealed class FightAnalysisService
         return samples.Length == 0
             ? (0.0, 0)
             : (Math.Round(CleanupAdjustedAverage(samples, entry => entry.FightImpactScore, entry => entry.Fight), 1), samples.Length);
+    }
+
+    private static IReadOnlyList<FightAnalysisCharacterContextFitDto> BuildCharacterContextFits(IReadOnlyList<MergedPlayerFightSample> mergedFightEntries)
+    {
+        var baseline = ComputeAverageFightImpact(mergedFightEntries);
+        if (baseline.SampleCount < MinimumCharacterContextBaselineSampleCount || baseline.Average <= 0.0)
+        {
+            return Array.Empty<FightAnalysisCharacterContextFitDto>();
+        }
+
+        var fits = new List<FightAnalysisCharacterContextFitDto>();
+
+        foreach (var patchGroup in mergedFightEntries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Fight.PatchEra?.Id))
+            .GroupBy(entry => entry.Fight.PatchEra!.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            var patchEra = patchGroup.Select(entry => entry.Fight.PatchEra).FirstOrDefault(era => era is not null);
+            string label = patchEra?.IsCurrent == true
+                ? "Current patch"
+                : patchEra?.Label ?? patchGroup.Key;
+            AddCharacterContextFit(
+                fits,
+                $"patch:{patchGroup.Key}",
+                label,
+                "Patch",
+                patchGroup.ToArray(),
+                baseline);
+        }
+
+        foreach (var attributeGroup in mergedFightEntries
+            .SelectMany(entry => (entry.Fight.Attributes ?? Array.Empty<FightAttributeDto>())
+                .Where(attribute => !string.IsNullOrWhiteSpace(attribute.Key)
+                    && !string.Equals(attribute.Group, "Data Quality", StringComparison.OrdinalIgnoreCase))
+                .Select(attribute => new
+                {
+                    Entry = entry,
+                    Attribute = attribute
+                }))
+            .GroupBy(item => item.Attribute.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var attribute = attributeGroup.Select(item => item.Attribute).First();
+            AddCharacterContextFit(
+                fits,
+                $"attribute:{attributeGroup.Key}",
+                attribute.Label,
+                attribute.Group,
+                attributeGroup.Select(item => item.Entry).ToArray(),
+                baseline);
+        }
+
+        foreach (var commanderGroup in mergedFightEntries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Commander = entry.Fight.FightIndex?.CommanderDisplayNames?
+                    .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name))
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Commander))
+            .GroupBy(item => item.Commander!, StringComparer.OrdinalIgnoreCase))
+        {
+            AddCharacterContextFit(
+                fits,
+                $"commander:{NormalizeLookupKey(commanderGroup.Key)}",
+                commanderGroup.Key,
+                "Commander",
+                commanderGroup.Select(item => item.Entry).ToArray(),
+                baseline);
+        }
+
+        var positiveFits = fits
+            .Where(fit => fit.Delta > 0.0)
+            .OrderByDescending(fit => fit.Delta)
+            .ThenByDescending(fit => fit.SampleCount)
+            .ThenBy(fit => fit.Group, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(fit => fit.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumCharacterContextFitCount / 2);
+        var negativeFits = fits
+            .Where(fit => fit.Delta < 0.0)
+            .OrderBy(fit => fit.Delta)
+            .ThenByDescending(fit => fit.SampleCount)
+            .ThenBy(fit => fit.Group, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(fit => fit.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumCharacterContextFitCount / 2);
+
+        return positiveFits
+            .Concat(negativeFits)
+            .ToArray();
+    }
+
+    private static void AddCharacterContextFit(
+        List<FightAnalysisCharacterContextFitDto> fits,
+        string key,
+        string label,
+        string group,
+        IReadOnlyList<MergedPlayerFightSample> entries,
+        (double Average, int SampleCount) baseline)
+    {
+        var bucket = ComputeAverageFightImpact(entries);
+        if (bucket.SampleCount < MinimumCharacterContextBucketSampleCount || bucket.SampleCount >= baseline.SampleCount)
+        {
+            return;
+        }
+
+        double delta = Math.Round(bucket.Average - baseline.Average, 1);
+        if (Math.Abs(delta) < MinimumCharacterContextDeltaMagnitude)
+        {
+            return;
+        }
+
+        string confidenceLabel = DeriveCharacterContextConfidenceLabel(bucket.SampleCount);
+        string fightLabel = bucket.SampleCount == 1 ? "fight" : "fights";
+        fits.Add(new FightAnalysisCharacterContextFitDto(
+            Key: key,
+            Label: label,
+            Group: group,
+            Delta: delta,
+            AverageFightImpactScore: bucket.Average,
+            BaselineFightImpactScore: baseline.Average,
+            SampleCount: bucket.SampleCount,
+            ConfidenceLabel: confidenceLabel,
+            Detail: $"{label}: Fight Impact {bucket.Average.ToString("0.0", CultureInfo.InvariantCulture)}/100 vs baseline {baseline.Average.ToString("0.0", CultureInfo.InvariantCulture)}/100 across {bucket.SampleCount} {fightLabel} ({confidenceLabel.ToLowerInvariant()} confidence)."));
+    }
+
+    private static string DeriveCharacterContextConfidenceLabel(int sampleCount)
+    {
+        return sampleCount switch
+        {
+            >= 12 => "High",
+            >= 6 => "Medium",
+            _ => "Low"
+        };
     }
 
     private static IReadOnlyList<FightAnalysisFightImpactLaneDto> BuildFightImpactLanes(

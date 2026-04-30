@@ -194,7 +194,19 @@ public sealed record FightAnalysisPlayerCharacterDto(
     double AverageFightImpactScore,
     int FightImpactSampleCount,
     IReadOnlyList<FightAnalysisFightImpactLaneDto> FightImpactLanes,
+    IReadOnlyList<FightAnalysisCharacterContextFitDto> ContextFits,
     IReadOnlyList<FightAnalysisCharacterLaneContributionDto> LaneContributions);
+
+public sealed record FightAnalysisCharacterContextFitDto(
+    string Key,
+    string Label,
+    string Group,
+    double Delta,
+    double AverageFightImpactScore,
+    double BaselineFightImpactScore,
+    int SampleCount,
+    string ConfidenceLabel,
+    string Detail);
 
 public sealed record FightAnalysisFightImpactLaneDto(
     string LaneKey,
