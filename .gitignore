@@ -7,6 +7,7 @@ storage/db/*
 storage/fights/*
 storage/logs/*
 storage/patch-metadata.json
+storage/comp-helper-config.json
 
 !storage/cache/.gitkeep
 !storage/db/.gitkeep

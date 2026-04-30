@@ -19,6 +19,8 @@ public sealed class AppPathService
         _workspaceOptions = workspaceOptions.Value;
     }
 
+    public string ContentRootPath => _contentRootPath;
+
     public string StorageRootPath => ResolveConfiguredPath(_storageOptions.RootPath);
 
     public string DatabasePath => ResolveConfiguredPath(_storageOptions.DatabasePath);

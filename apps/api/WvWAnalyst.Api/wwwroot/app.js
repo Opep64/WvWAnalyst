@@ -8,6 +8,7 @@ const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browse
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
 let currentPatchMetadata = null;
+let currentCompHelperConfig = null;
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
@@ -113,7 +114,7 @@ const COMP_HELPER_CANDIDATE_TIER_OPTIONS = {
         summary: "Suggestions center on cards closest to the 50th-percentile fit band."
     }
 };
-const COMP_HELPER_LANE_TARGETS = [
+const DEFAULT_COMP_HELPER_LANE_TARGETS = [
     { key: "pressure", label: "Pressure", floor: 85, target: 125, weight: 1.30 },
     { key: "boonsupport", label: "Boon Support", floor: 80, target: 120, weight: 1.25 },
     { key: "recovery", label: "Recovery", floor: 70, target: 105, weight: 1.15 },
@@ -136,20 +137,22 @@ const ANALYSIS_LANE_DISPLAY_ORDER = [
 const ANALYSIS_LANE_ORDER_LOOKUP = new Map(ANALYSIS_LANE_DISPLAY_ORDER.flatMap((entry, index) =>
     [entry.key, entry.label, ...(entry.aliases ?? [])]
         .map(alias => [normalizeAnalysisLaneOrderToken(alias), { ...entry, index }])));
-const COMP_HELPER_PACKAGE_TARGETS = [
+const DEFAULT_COMP_HELPER_PACKAGE_TARGETS = [
     { key: "stability", label: "Stability", floor: 60, target: 95, weight: 1.50, mandatory: true, allowOvercap: false },
-    { key: "healing", label: "Healing", floor: 60, target: 95, weight: 1.45, mandatory: true },
-    { key: "cleanse", label: "Cleanse", floor: 55, target: 90, weight: 1.40, mandatory: true },
-    { key: "protection", label: "Protection", floor: 50, target: 85, weight: 1.20, mandatory: true },
-    { key: "pressure-package", label: "Pressure", floor: 75, target: 115, weight: 1.35, mandatory: true },
+    { key: "healing", label: "Healing", floor: 60, target: 95, weight: 1.45, mandatory: true, allowOvercap: true },
+    { key: "cleanse", label: "Cleanse", floor: 55, target: 90, weight: 1.40, mandatory: true, allowOvercap: true },
+    { key: "protection", label: "Protection", floor: 50, target: 85, weight: 1.20, mandatory: true, allowOvercap: true },
+    { key: "pressure-package", label: "Pressure", floor: 75, target: 115, weight: 1.35, mandatory: true, allowOvercap: true },
     { key: "barrier", label: "Barrier", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: false },
-    { key: "might", label: "Might", floor: 0, target: 85, weight: 0.70, mandatory: false },
-    { key: "strip-package", label: "Strip", floor: 40, target: 75, weight: 0.90, mandatory: false },
-    { key: "fury", label: "Fury", floor: 0, target: 65, weight: 0.55, mandatory: false },
-    { key: "quickness", label: "Quickness", floor: 0, target: 65, weight: 0.55, mandatory: false },
-    { key: "resistance", label: "Resistance", floor: 0, target: 45, weight: 0.35, mandatory: false },
-    { key: "cc", label: "CC (combined)", floor: 35, target: 65, weight: 0.70, mandatory: false }
+    { key: "might", label: "Might", floor: 0, target: 85, weight: 0.70, mandatory: false, allowOvercap: true },
+    { key: "strip-package", label: "Strip", floor: 40, target: 75, weight: 0.90, mandatory: false, allowOvercap: true },
+    { key: "fury", label: "Fury", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: true },
+    { key: "quickness", label: "Quickness", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: true },
+    { key: "resistance", label: "Resistance", floor: 0, target: 45, weight: 0.35, mandatory: false, allowOvercap: true },
+    { key: "cc", label: "CC (combined)", floor: 35, target: 65, weight: 0.70, mandatory: false, allowOvercap: true }
 ];
+let compHelperLaneTargets = cloneCompHelperTargets(DEFAULT_COMP_HELPER_LANE_TARGETS);
+let compHelperPackageTargets = cloneCompHelperTargets(DEFAULT_COMP_HELPER_PACKAGE_TARGETS);
 const COMP_HELPER_PROFILE_FAVORITES = {
     balanced: {
         lanes: [],
@@ -1095,6 +1098,41 @@ async function savePatchMetadata(metadata) {
     const payload = await readApiPayload(response);
     if (!response.ok) {
         throw new Error(payload?.message ?? `Patch metadata save failed with status ${response.status}`);
+    }
+
+    return payload;
+}
+
+async function loadCompHelperConfig() {
+    const response = await fetch("/api/comp-helper-config");
+    if (!response.ok) {
+        throw new Error(`Comp Helper config request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function saveCompHelperConfig(config) {
+    const response = await fetch("/api/comp-helper-config", {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(config)
+    });
+    const payload = await readApiPayload(response);
+    if (!response.ok) {
+        throw new Error(payload?.message ?? `Comp Helper config save failed with status ${response.status}`);
+    }
+
+    return payload;
+}
+
+async function resetCompHelperConfig() {
+    const response = await fetch("/api/comp-helper-config/reset", { method: "POST" });
+    const payload = await readApiPayload(response);
+    if (!response.ok) {
+        throw new Error(payload?.message ?? `Comp Helper config reset failed with status ${response.status}`);
     }
 
     return payload;
@@ -3273,6 +3311,34 @@ function buildCompHelperCandidateId(account, characterName, classLabel) {
     return `${account}::${characterName}::${classLabel}`;
 }
 
+function cloneCompHelperTargets(targets) {
+    return (targets ?? []).map(target => ({ ...target }));
+}
+
+function formatCompHelperConfigNumber(value, maximumFractionDigits = 1) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return "0";
+    }
+
+    return numeric.toFixed(maximumFractionDigits).replace(/\.?0+$/, "");
+}
+
+function cloneCompHelperConfig(config) {
+    return {
+        schemaVersion: config?.schemaVersion ?? "1.0",
+        updatedAtUtc: config?.updatedAtUtc ?? new Date().toISOString(),
+        laneTargets: cloneCompHelperTargets(config?.laneTargets ?? DEFAULT_COMP_HELPER_LANE_TARGETS),
+        packageTargets: cloneCompHelperTargets(config?.packageTargets ?? DEFAULT_COMP_HELPER_PACKAGE_TARGETS)
+    };
+}
+
+function applyCompHelperConfig(config) {
+    currentCompHelperConfig = cloneCompHelperConfig(config);
+    compHelperLaneTargets = cloneCompHelperTargets(currentCompHelperConfig.laneTargets);
+    compHelperPackageTargets = cloneCompHelperTargets(currentCompHelperConfig.packageTargets);
+}
+
 function getCompHelperProfileFavorites(profileKey) {
     return COMP_HELPER_PROFILE_FAVORITES[profileKey] ?? COMP_HELPER_PROFILE_FAVORITES.balanced;
 }
@@ -3344,7 +3410,7 @@ function toggleCompHelperFavorite(listKey, valueKey) {
 
 function buildCompHelperLaneTargets() {
     const favoredLaneKeySet = new Set(compHelperFavoredLaneKeys);
-    return COMP_HELPER_LANE_TARGETS.map(target => {
+    return compHelperLaneTargets.map(target => {
         if (!favoredLaneKeySet.has(target.key)) {
             return target;
         }
@@ -3360,7 +3426,7 @@ function buildCompHelperLaneTargets() {
 
 function buildCompHelperPackageTargets() {
     const favoredPackageKeySet = new Set(compHelperFavoredPackageKeys);
-    return COMP_HELPER_PACKAGE_TARGETS.map(target => {
+    return compHelperPackageTargets.map(target => {
         if (!favoredPackageKeySet.has(target.key)) {
             return target;
         }
@@ -3419,7 +3485,7 @@ function buildCompHelperCandidates(snapshot) {
             const reliability = Math.round(totalReliability * filteredReliability * 1000) / 1000;
 
             const laneMap = {};
-            for (const target of COMP_HELPER_LANE_TARGETS) {
+            for (const target of compHelperLaneTargets) {
                 laneMap[target.key] = {
                     key: target.key,
                     label: target.label,
@@ -3449,7 +3515,7 @@ function buildCompHelperCandidates(snapshot) {
             }
 
             const effectiveLaneScores = {};
-            for (const target of COMP_HELPER_LANE_TARGETS) {
+            for (const target of compHelperLaneTargets) {
                 effectiveLaneScores[target.key] = Math.round((laneMap[target.key]?.overallStrengthPercent ?? 0) * reliability * 10) / 10;
             }
 
@@ -4040,7 +4106,7 @@ function buildCompHelperCandidateRow(candidate, lockedCandidates) {
 }
 
 function getCompHelperTopPackageLabel(member) {
-    const ordered = COMP_HELPER_PACKAGE_TARGETS
+    const ordered = compHelperPackageTargets
         .map(pkg => ({
             label: pkg.label,
             score: Number(member.packageScores?.[pkg.key] ?? 0)
@@ -4138,6 +4204,115 @@ function buildCompHelperSuggestionCard(suggestion, lockedCandidates, displayInde
     `;
 }
 
+function renderCompHelperConfigEditor() {
+    const laneBody = document.querySelector("#analysis-comp-helper-config-lanes-body");
+    const packageBody = document.querySelector("#analysis-comp-helper-config-packages-body");
+    const updated = document.querySelector("#analysis-comp-helper-config-updated");
+    if (!laneBody || !packageBody || !currentCompHelperConfig) {
+        return;
+    }
+
+    const buildNumberInput = (kind, key, field, value, step = "1") => `
+        <input
+            class="compact-number-input"
+            type="number"
+            min="0"
+            step="${escapeHtml(step)}"
+            value="${escapeHtml(formatCompHelperConfigNumber(value, step === "0.01" ? 2 : 1))}"
+            data-comp-helper-config-kind="${escapeHtml(kind)}"
+            data-comp-helper-config-key="${escapeHtml(key)}"
+            data-comp-helper-config-field="${escapeHtml(field)}">
+    `;
+    const buildTextInput = (kind, key, field, value) => `
+        <input
+            class="compact-text-input"
+            type="text"
+            value="${escapeHtml(value)}"
+            data-comp-helper-config-kind="${escapeHtml(kind)}"
+            data-comp-helper-config-key="${escapeHtml(key)}"
+            data-comp-helper-config-field="${escapeHtml(field)}">
+    `;
+    const buildCheckbox = (kind, key, field, isChecked) => `
+        <input
+            type="checkbox"
+            ${isChecked ? "checked" : ""}
+            data-comp-helper-config-kind="${escapeHtml(kind)}"
+            data-comp-helper-config-key="${escapeHtml(key)}"
+            data-comp-helper-config-field="${escapeHtml(field)}">
+    `;
+
+    laneBody.innerHTML = (currentCompHelperConfig.laneTargets ?? [])
+        .map(target => `
+            <tr>
+                <td><code>${escapeHtml(target.key)}</code></td>
+                <td>${buildTextInput("lane", target.key, "label", target.label)}</td>
+                <td>${buildNumberInput("lane", target.key, "floor", target.floor)}</td>
+                <td>${buildNumberInput("lane", target.key, "target", target.target)}</td>
+                <td>${buildNumberInput("lane", target.key, "weight", target.weight, "0.01")}</td>
+            </tr>
+        `)
+        .join("");
+    packageBody.innerHTML = (currentCompHelperConfig.packageTargets ?? [])
+        .map(target => `
+            <tr>
+                <td><code>${escapeHtml(target.key)}</code></td>
+                <td>${buildTextInput("package", target.key, "label", target.label)}</td>
+                <td>${buildNumberInput("package", target.key, "floor", target.floor)}</td>
+                <td>${buildNumberInput("package", target.key, "target", target.target)}</td>
+                <td>${buildNumberInput("package", target.key, "weight", target.weight, "0.01")}</td>
+                <td>${buildCheckbox("package", target.key, "mandatory", target.mandatory === true)}</td>
+                <td>${buildCheckbox("package", target.key, "allowOvercap", target.allowOvercap !== false)}</td>
+            </tr>
+        `)
+        .join("");
+
+    if (updated) {
+        updated.textContent = currentCompHelperConfig.updatedAtUtc
+            ? `Loaded ${new Date(currentCompHelperConfig.updatedAtUtc).toLocaleString()}`
+            : "";
+    }
+}
+
+function renderCompHelperConfigStatus(message, success = true) {
+    const status = document.querySelector("#analysis-comp-helper-config-status");
+    if (!status) {
+        return;
+    }
+
+    status.classList.toggle("import-status-error", !success);
+    status.textContent = message;
+}
+
+function updateCompHelperConfigValue(input) {
+    if (!currentCompHelperConfig) {
+        return false;
+    }
+
+    const kind = input.dataset.compHelperConfigKind;
+    const key = input.dataset.compHelperConfigKey;
+    const field = input.dataset.compHelperConfigField;
+    const targets = kind === "lane"
+        ? currentCompHelperConfig.laneTargets
+        : currentCompHelperConfig.packageTargets;
+    const target = (targets ?? []).find(item => stringEqualsIgnoreCase(item.key, key));
+    if (!target || !field) {
+        return false;
+    }
+
+    if (input.type === "checkbox") {
+        target[field] = input.checked;
+    } else if (input.type === "number") {
+        const numeric = Number(input.value);
+        target[field] = Number.isFinite(numeric) ? numeric : 0;
+    } else {
+        target[field] = input.value.trim() || target.key;
+    }
+
+    applyCompHelperConfig(currentCompHelperConfig);
+    renderCompHelperConfigStatus("Unsaved Comp Helper config changes are active.");
+    return true;
+}
+
 function renderAnalysisCompHelper(snapshot) {
     const summary = document.querySelector("#analysis-comp-helper-summary");
     const locksContainer = document.querySelector("#analysis-comp-helper-locks");
@@ -4155,10 +4330,10 @@ function renderAnalysisCompHelper(snapshot) {
     const searchResult = searchCompHelperSuggestions(snapshot, candidates);
     syncCompHelperProfileControl();
     syncCompHelperCandidateTierControl();
-    favoredLanesContainer.innerHTML = COMP_HELPER_LANE_TARGETS
+    favoredLanesContainer.innerHTML = compHelperLaneTargets
         .map(target => buildCompHelperFavoriteToggle(target, "lanes", compHelperFavoredLaneKeys.includes(target.key)))
         .join("");
-    favoredPackagesContainer.innerHTML = COMP_HELPER_PACKAGE_TARGETS
+    favoredPackagesContainer.innerHTML = compHelperPackageTargets
         .map(target => buildCompHelperFavoriteToggle(target, "packages", compHelperFavoredPackageKeys.includes(target.key)))
         .join("");
     const lockedCopy = lockedCandidates.length === 0
@@ -4176,13 +4351,21 @@ function renderAnalysisCompHelper(snapshot) {
         ? candidateTier.summary
         : `${candidateTier.summary} The solver checks up to ${tierPoolCount} cards nearest that tier.`;
     const favoredLaneCopy = compHelperFavoredLaneKeys.length > 0
-        ? `Favored lanes: ${COMP_HELPER_LANE_TARGETS.filter(target => compHelperFavoredLaneKeys.includes(target.key)).map(target => target.label).join(", ")}.`
+        ? `Favored lanes: ${compHelperLaneTargets.filter(target => compHelperFavoredLaneKeys.includes(target.key)).map(target => target.label).join(", ")}.`
         : "No extra lanes are favored.";
     const favoredPackageCopy = compHelperFavoredPackageKeys.length > 0
-        ? `Favored packages: ${COMP_HELPER_PACKAGE_TARGETS.filter(target => compHelperFavoredPackageKeys.includes(target.key)).map(target => target.label).join(", ")}.`
+        ? `Favored packages: ${compHelperPackageTargets.filter(target => compHelperFavoredPackageKeys.includes(target.key)).map(target => target.label).join(", ")}.`
         : "No extra packages are favored.";
+    const mandatoryPackages = compHelperPackageTargets.filter(target => target.mandatory).map(target => target.label);
+    const secondaryPackages = compHelperPackageTargets.filter(target => !target.mandatory).map(target => target.label);
+    const mandatoryPackageCopy = mandatoryPackages.length
+        ? `Required packages: ${mandatoryPackages.join(", ")}.`
+        : "No packages are marked required.";
+    const secondaryPackageCopy = secondaryPackages.length
+        ? `Secondary packages include ${secondaryPackages.join(", ")}.`
+        : "No secondary packages are configured.";
 
-    summary.textContent = `${filteredCandidates.length} candidate cards available. ${profileCopy} ${tierCopy} ${lockedCopy} Mandatory packages: Stability, Healing, Cleanse, Protection, and Pressure. Secondary packages include Barrier, Might, Strip, Fury, Quickness, Resistance, and combined CC. ${favoredLaneCopy} ${favoredPackageCopy}${shortageCopy ? ` ${shortageCopy}` : ""}`;
+    summary.textContent = `${filteredCandidates.length} candidate cards available. ${profileCopy} ${tierCopy} ${lockedCopy} ${mandatoryPackageCopy} ${secondaryPackageCopy} ${favoredLaneCopy} ${favoredPackageCopy}${shortageCopy ? ` ${shortageCopy}` : ""}`;
 
     locksContainer.innerHTML = lockedCandidates.length > 0
         ? lockedCandidates.map(buildCompHelperLockPill).join("")
@@ -4427,7 +4610,7 @@ function getAnalysisCharacterPackageItems(compCandidate) {
         return [];
     }
 
-    return COMP_HELPER_PACKAGE_TARGETS
+    return compHelperPackageTargets
         .map(target => ({
             label: target.label,
             score: Number(scores[target.key] ?? 0),
@@ -7756,6 +7939,67 @@ async function handlePatchMetadataReload() {
     }
 }
 
+async function handleCompHelperConfigSave() {
+    const button = document.querySelector("#analysis-comp-helper-config-save");
+    if (!currentCompHelperConfig) {
+        return;
+    }
+
+    button.disabled = true;
+    renderCompHelperConfigStatus("Saving Comp Helper config...");
+    try {
+        const saved = await saveCompHelperConfig(currentCompHelperConfig);
+        applyCompHelperConfig(saved);
+        renderCompHelperConfigEditor();
+        renderCompHelperConfigStatus("Comp Helper config saved.");
+        if (currentAnalysisSnapshot) {
+            renderAnalysisCompHelper(currentAnalysisSnapshot);
+        }
+    } catch (error) {
+        renderCompHelperConfigStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function handleCompHelperConfigReload() {
+    const button = document.querySelector("#analysis-comp-helper-config-reload");
+    button.disabled = true;
+    renderCompHelperConfigStatus("Reloading saved Comp Helper config...");
+    try {
+        const config = await loadCompHelperConfig();
+        applyCompHelperConfig(config);
+        renderCompHelperConfigEditor();
+        renderCompHelperConfigStatus("Saved Comp Helper config reloaded.");
+        if (currentAnalysisSnapshot) {
+            renderAnalysisCompHelper(currentAnalysisSnapshot);
+        }
+    } catch (error) {
+        renderCompHelperConfigStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function handleCompHelperConfigReset() {
+    const button = document.querySelector("#analysis-comp-helper-config-reset");
+    button.disabled = true;
+    renderCompHelperConfigStatus("Reverting Comp Helper config to shipped defaults...");
+    try {
+        const config = await resetCompHelperConfig();
+        applyCompHelperConfig(config);
+        renderCompHelperConfigEditor();
+        renderCompHelperConfigStatus("Shipped Comp Helper defaults restored and saved.");
+        if (currentAnalysisSnapshot) {
+            renderAnalysisCompHelper(currentAnalysisSnapshot);
+        }
+    } catch (error) {
+        renderCompHelperConfigStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        button.disabled = false;
+    }
+}
+
 async function handleBatchSubmit(event) {
     event.preventDefault();
 
@@ -7989,10 +8233,15 @@ async function main() {
     currentAnalysisSnapshot = null;
 
     try {
-        const snapshot = await loadDashboard();
+        const [snapshot, compHelperConfig] = await Promise.all([
+            loadDashboard(),
+            loadCompHelperConfig()
+        ]);
         currentDashboardSnapshot = snapshot;
+        applyCompHelperConfig(compHelperConfig);
 
         renderWorkspace(snapshot);
+        renderCompHelperConfigEditor();
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
@@ -8099,6 +8348,29 @@ document.querySelector("#manage-show-fight-shape-diagnostics").addEventListener(
 });
 document.querySelector("#patch-metadata-save-button").addEventListener("click", () => void handlePatchMetadataSave());
 document.querySelector("#patch-metadata-reload-button").addEventListener("click", () => void handlePatchMetadataReload());
+document.querySelector("#analysis-comp-helper-config-save").addEventListener("click", () => void handleCompHelperConfigSave());
+document.querySelector("#analysis-comp-helper-config-reload").addEventListener("click", () => void handleCompHelperConfigReload());
+document.querySelector("#analysis-comp-helper-config-reset").addEventListener("click", () => void handleCompHelperConfigReset());
+document.querySelector(".comp-helper-config-editor").addEventListener("input", event => {
+    const input = event.target.closest("[data-comp-helper-config-field]");
+    if (!input) {
+        return;
+    }
+
+    if (updateCompHelperConfigValue(input) && currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
+document.querySelector(".comp-helper-config-editor").addEventListener("change", event => {
+    const input = event.target.closest("[data-comp-helper-config-field]");
+    if (!input) {
+        return;
+    }
+
+    if (updateCompHelperConfigValue(input) && currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    }
+});
 document.querySelector("#fight-browser-commander").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-start-date").addEventListener("change", handleFightBrowserChange);
 document.querySelector("#fight-browser-end-date").addEventListener("change", handleFightBrowserChange);

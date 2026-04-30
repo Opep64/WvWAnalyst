@@ -8,4 +8,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\packages\contracts\WvWAnalyst.Contracts\WvWAnalyst.Contracts.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="Configuration\comp-helper-defaults.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

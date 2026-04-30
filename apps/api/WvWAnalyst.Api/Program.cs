@@ -53,6 +53,7 @@ builder.Services.AddSingleton<DirectoryImportJobService>();
 builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
 builder.Services.AddSingleton<WorkspaceResetService>();
 builder.Services.AddSingleton<PatchMetadataService>();
+builder.Services.AddSingleton<CompHelperConfigService>();
 builder.Services.AddSingleton<FightAttributeService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
@@ -96,6 +97,13 @@ app.MapPut("/api/patch-metadata", (PatchMetadataDto request, PatchMetadataServic
     catalog.InvalidateCatalogCache();
     return Results.Ok(metadata);
 });
+app.MapGet("/api/comp-helper-config", (CompHelperConfigService service) => Results.Ok(service.GetConfig()));
+app.MapPut("/api/comp-helper-config", (CompHelperConfigDto request, CompHelperConfigService service) =>
+{
+    var config = service.SaveConfig(request);
+    return Results.Ok(config);
+});
+app.MapPost("/api/comp-helper-config/reset", (CompHelperConfigService service) => Results.Ok(service.ResetToDefault()));
 app.MapGet("/api/analysis/team-fight-scorecard", (PrototypeDashboardService service) => Results.Ok(service.GetTeamFightScorecardBlueprint()));
 app.MapGet("/api/analysis", (
     string? commander,

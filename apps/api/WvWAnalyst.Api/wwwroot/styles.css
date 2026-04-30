@@ -2318,6 +2318,79 @@ h1 {
     border-color: rgba(83, 183, 255, 0.18);
 }
 
+.comp-helper-config-editor {
+    margin-bottom: 18px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(12, 19, 27, 0.58);
+    padding: 0 14px;
+}
+
+.comp-helper-config-editor summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    min-height: 44px;
+    color: var(--ink);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.comp-helper-config-editor summary span:last-child {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.comp-helper-config-actions {
+    margin: 0 0 10px;
+}
+
+.comp-helper-config-table-shell {
+    max-height: 420px;
+    margin-bottom: 0;
+}
+
+.comp-helper-config-table {
+    font-size: 0.82rem;
+}
+
+.comp-helper-config-table-lanes {
+    min-width: 520px;
+}
+
+.comp-helper-config-table-packages {
+    min-width: 680px;
+}
+
+.comp-helper-config-table th,
+.comp-helper-config-table td {
+    padding: 8px;
+    vertical-align: middle;
+}
+
+.comp-helper-config-table th:nth-child(2),
+.comp-helper-config-table td:nth-child(2) {
+    min-width: 128px;
+}
+
+.compact-number-input,
+.compact-text-input {
+    width: 100%;
+    min-width: 0;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: rgba(8, 13, 20, 0.92);
+    color: var(--ink);
+    padding: 7px 8px;
+    font: inherit;
+}
+
+.compact-number-input {
+    max-width: 82px;
+}
+
 .comp-helper-lock {
     display: inline-flex;
     align-items: center;

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260430contextfits2">
+    <link rel="stylesheet" href="/styles.css?v=20260430compconfig1">
 </head>
 <body>
     <div class="page-shell">
@@ -830,6 +830,56 @@
                             <div class="comp-helper-favorites" id="analysis-comp-helper-favored-packages"></div>
                         </div>
                     </div>
+                    <details class="comp-helper-config-editor">
+                        <summary>
+                            <span>Comp Helper Config</span>
+                            <span id="analysis-comp-helper-config-updated"></span>
+                        </summary>
+                        <div class="metadata-actions comp-helper-config-actions">
+                            <button class="primary-button" id="analysis-comp-helper-config-save" type="button">Save config</button>
+                            <button class="action-link action-link-button" id="analysis-comp-helper-config-reload" type="button">Reload saved</button>
+                            <button class="action-link action-link-button" id="analysis-comp-helper-config-reset" type="button">Revert shipped defaults</button>
+                        </div>
+                        <div class="import-status" id="analysis-comp-helper-config-status">Comp Helper config is loaded from disk.</div>
+                        <div class="tag-block">
+                            <div>
+                                <h3>Lane Targets</h3>
+                                <div class="table-shell comp-helper-config-table-shell">
+                                    <table class="data-table data-table-compact comp-helper-config-table comp-helper-config-table-lanes">
+                                        <thead>
+                                            <tr>
+                                                <th>Key</th>
+                                                <th>Label</th>
+                                                <th>Floor</th>
+                                                <th>Target</th>
+                                                <th>Weight</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="analysis-comp-helper-config-lanes-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div>
+                                <h3>Package Targets</h3>
+                                <div class="table-shell comp-helper-config-table-shell">
+                                    <table class="data-table data-table-compact comp-helper-config-table comp-helper-config-table-packages">
+                                        <thead>
+                                            <tr>
+                                                <th>Key</th>
+                                                <th>Label</th>
+                                                <th>Floor</th>
+                                                <th>Target</th>
+                                                <th>Weight</th>
+                                                <th>Required</th>
+                                                <th>Overcap</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="analysis-comp-helper-config-packages-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
                     <p class="workspace-note analysis-panel-note" id="analysis-comp-helper-summary"></p>
                     <div class="tag-block">
                         <div>
@@ -882,6 +932,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260430contextfits2" defer></script>
+    <script src="/app.js?v=20260430compconfig1" defer></script>
 </body>
 </html>
