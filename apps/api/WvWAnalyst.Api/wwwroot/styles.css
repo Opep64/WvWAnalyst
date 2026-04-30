@@ -2519,11 +2519,96 @@ h1 {
     color: var(--muted);
 }
 
+.analysis-character-context {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(159, 176, 195, 0.14);
+}
+
+.analysis-character-context-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.analysis-character-context-row strong {
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.analysis-character-context .attribute-pill-list {
+    gap: 5px;
+}
+
+.analysis-character-context .attribute-pill {
+    min-height: 24px;
+    padding: 3px 7px;
+    font-size: 0.74rem;
+}
+
+.analysis-character-discipline {
+    margin-top: 12px;
+}
+
+.analysis-character-lane-details {
+    margin-top: 12px;
+    border-top: 1px solid rgba(159, 176, 195, 0.14);
+}
+
+.analysis-character-lane-details summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-height: 42px;
+    color: var(--accent);
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+}
+
+.analysis-character-lane-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.analysis-character-lane-details summary::before {
+    content: "+";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid rgba(83, 183, 255, 0.24);
+    color: var(--accent);
+    background: rgba(83, 183, 255, 0.08);
+}
+
+.analysis-character-lane-details[open] summary::before {
+    content: "-";
+}
+
+.analysis-character-lane-details summary span:first-child {
+    margin-right: auto;
+}
+
+.analysis-character-lane-details summary span:last-child {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
 .analysis-character-lane-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 12px;
-    margin: 16px 0;
+    margin: 0 0 16px;
 }
 
 .analysis-character-lane-card {
@@ -2626,6 +2711,11 @@ h1 {
 
     .dossier-class-list {
         grid-template-columns: 1fr;
+    }
+
+    .analysis-character-context-row {
+        grid-template-columns: 1fr;
+        gap: 5px;
     }
 
     .class-filter-grid {

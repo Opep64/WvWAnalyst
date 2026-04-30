@@ -4368,6 +4368,133 @@ function buildCharacterLaneMetricCopy(lane, totalFights) {
     }
 }
 
+function buildAnalysisPlayerCompCandidateLookup(snapshot) {
+    const lookup = new Map();
+    if (!snapshot) {
+        return lookup;
+    }
+
+    for (const candidate of buildCompHelperCandidates(snapshot)) {
+        lookup.set(candidate.id, candidate);
+    }
+
+    return lookup;
+}
+
+function getAnalysisCharacterCompCandidate(player, character, compCandidateLookup) {
+    if (!player || !character || !compCandidateLookup) {
+        return null;
+    }
+
+    const candidateId = buildCompHelperCandidateId(player.account, character.characterName, character.classLabel);
+    return compCandidateLookup.get(candidateId) ?? null;
+}
+
+function getAnalysisCharacterBestLaneItems(character) {
+    return [...(character.laneContributions ?? [])]
+        .filter(lane => Number(lane.overallStrengthPercent ?? 0) > 0)
+        .sort((left, right) => Number(right.overallStrengthPercent ?? 0) - Number(left.overallStrengthPercent ?? 0)
+            || Number(right.appearanceRatePercent ?? 0) - Number(left.appearanceRatePercent ?? 0)
+            || compareFightBrowserValues(String(left.laneLabel ?? left.laneKey ?? "").toLowerCase(), String(right.laneLabel ?? right.laneKey ?? "").toLowerCase()))
+        .slice(0, 3)
+        .map(lane => ({
+            label: lane.laneLabel ?? lane.laneKey ?? "Lane",
+            value: formatPercent(lane.overallStrengthPercent, 0),
+            title: `${lane.laneLabel ?? lane.laneKey ?? "Lane"} strength ${formatPercent(lane.overallStrengthPercent)} | ${formatPercent(lane.appearanceRatePercent)} appearance rate`
+        }));
+}
+
+function getAnalysisCharacterReliableLaneItems(character) {
+    return [...(character.laneContributions ?? [])]
+        .filter(lane => Number(lane.samples ?? 0) >= 5
+            && Number(lane.appearanceRatePercent ?? 0) >= 35
+            && Number(lane.overallStrengthPercent ?? 0) > 0)
+        .sort((left, right) => Number(right.appearanceRatePercent ?? 0) - Number(left.appearanceRatePercent ?? 0)
+            || Number(right.overallStrengthPercent ?? 0) - Number(left.overallStrengthPercent ?? 0)
+            || Number(right.samples ?? 0) - Number(left.samples ?? 0)
+            || compareFightBrowserValues(String(left.laneLabel ?? left.laneKey ?? "").toLowerCase(), String(right.laneLabel ?? right.laneKey ?? "").toLowerCase()))
+        .slice(0, 3)
+        .map(lane => ({
+            label: lane.laneLabel ?? lane.laneKey ?? "Lane",
+            value: `${formatPercent(lane.appearanceRatePercent, 0)} seen`,
+            title: `${lane.samples} filtered fight${Number(lane.samples ?? 0) === 1 ? "" : "s"} | ${formatPercent(lane.overallStrengthPercent)} strength`
+        }));
+}
+
+function getAnalysisCharacterPackageItems(compCandidate) {
+    const scores = compCandidate?.packageScores;
+    if (!scores) {
+        return [];
+    }
+
+    return COMP_HELPER_PACKAGE_TARGETS
+        .map(target => ({
+            label: target.label,
+            score: Number(scores[target.key] ?? 0),
+            title: `${target.label} package ${formatNumber(scores[target.key] ?? 0, 1)} | ${formatNumber(compCandidate.filteredFightCount)} filtered fights`
+        }))
+        .filter(item => item.score >= 35)
+        .sort((left, right) => right.score - left.score
+            || compareFightBrowserValues(left.label.toLowerCase(), right.label.toLowerCase()))
+        .slice(0, 4)
+        .map(item => ({
+            label: item.label,
+            value: formatNumber(item.score, 0),
+            title: item.title
+        }));
+}
+
+function buildAnalysisCharacterContextRow(label, items) {
+    if (!items.length) {
+        return "";
+    }
+
+    return `
+        <div class="analysis-character-context-row">
+            <strong>${escapeHtml(label)}</strong>
+            <div class="attribute-pill-list">
+                ${items.map(item => {
+                    const text = item.value ? `${item.label} ${item.value}` : item.label;
+                    return `<span class="attribute-pill" title="${escapeHtml(item.title ?? text)}">${escapeHtml(text)}</span>`;
+                }).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function buildAnalysisCharacterContextPanel(character, compCandidate) {
+    const rows = [
+        buildAnalysisCharacterContextRow("Best lanes", getAnalysisCharacterBestLaneItems(character)),
+        buildAnalysisCharacterContextRow("Reliable", getAnalysisCharacterReliableLaneItems(character)),
+        buildAnalysisCharacterContextRow("Packages", getAnalysisCharacterPackageItems(compCandidate))
+    ].filter(Boolean);
+
+    if (rows.length === 0) {
+        return "";
+    }
+
+    return `<div class="analysis-character-context">${rows.join("")}</div>`;
+}
+
+function buildAnalysisCharacterLaneDetails(character) {
+    const lanes = character.laneContributions ?? [];
+    const laneCount = lanes.length;
+
+    return `
+        <details class="analysis-character-lane-details">
+            <summary>
+                <span>Lane evidence</span>
+                <span>${escapeHtml(`${laneCount} lane${laneCount === 1 ? "" : "s"}`)}</span>
+            </summary>
+            <div class="analysis-character-lane-grid">
+                ${laneCount
+                    ? lanes.map(lane => buildCharacterLaneCard(lane, character.fightCount)).join("")
+                    : `<article class="analysis-character-lane-card"><p class="analysis-character-copy">No lane contribution cards were retained for this character.</p></article>`}
+            </div>
+        </details>
+    `;
+}
+
 function buildCharacterLaneCard(lane, totalFights) {
     const pillLabel = lane.rateBand || (lane.overallStrengthPercent >= 40 ? "High" : lane.overallStrengthPercent >= 15 ? "Medium" : "Low");
     const safeTotalFights = totalFights || lane.samples || 0;
@@ -4820,7 +4947,7 @@ function handleAnalysisImpactTrendActionClick(event) {
     renderAnalysisImpactTrendContext(context);
 }
 
-function buildAnalysisCharacterCard(character) {
+function buildAnalysisCharacterCard(character, player = null, compCandidateLookup = null) {
     const disciplineValue = character.averageInPositionRate != null
         ? `${formatPercent(character.averageInPositionRate)} in position`
         : "No positioning sample";
@@ -4830,6 +4957,8 @@ function buildAnalysisCharacterCard(character) {
     const classText = character.classLabel || "Unknown class";
     const fightImpactNote = buildFightImpactNote(character);
     const fightImpactPills = buildDemandAdjustedLanePills(character.fightImpactLanes, "averageImpactScore", "Fight Impact");
+    const compCandidate = getAnalysisCharacterCompCandidate(player, character, compCandidateLookup);
+    const contextPanel = buildAnalysisCharacterContextPanel(character, compCandidate);
 
     return `
         <article class="analysis-character-card">
@@ -4849,18 +4978,15 @@ function buildAnalysisCharacterCard(character) {
             <p class="analysis-character-lead">${escapeHtml(buildCharacterObservedLead(character))}</p>
             <p class="analysis-character-copy">${escapeHtml(buildCharacterObservedCopy(character))}</p>
             ${fightImpactNote ? `<p class="analysis-character-copy">${escapeHtml(fightImpactNote)}.</p>${fightImpactPills}` : ""}
-            ${character.confidenceDetail ? `<p class="table-inline-note">${escapeHtml(character.confidenceDetail)}</p>` : ""}
-            <div class="analysis-character-lane-grid">
-                ${(character.laneContributions ?? []).length
-                    ? character.laneContributions.map(lane => buildCharacterLaneCard(lane, character.fightCount)).join("")
-                    : `<article class="analysis-character-lane-card"><p class="analysis-character-copy">No lane contribution cards were retained for this character.</p></article>`}
+            ${contextPanel}
+            <div class="analysis-character-discipline analysis-character-stat">
+                <strong>Discipline</strong>
+                <div>${escapeHtml(disciplineValue)}</div>
+                <div class="table-inline-note">${escapeHtml(disciplineCopy)}</div>
             </div>
+            ${character.confidenceDetail ? `<p class="table-inline-note">${escapeHtml(character.confidenceDetail)}</p>` : ""}
+            ${buildAnalysisCharacterLaneDetails(character)}
             <div class="analysis-character-footer">
-                <div class="analysis-character-stat">
-                    <strong>Discipline</strong>
-                    <div>${escapeHtml(disciplineValue)}</div>
-                    <div class="table-inline-note">${escapeHtml(disciplineCopy)}</div>
-                </div>
                 <div class="analysis-character-stat">
                     <strong>Survival</strong>
                     <div>${escapeHtml(`${formatNumber(character.averageDeathsPerFight, 1)} deaths/fight`)}</div>
@@ -4886,6 +5012,7 @@ function renderAnalysisPlayerDetail(player) {
     const impactTrends = player.characterImpactTrends ?? [];
     ensureAnalysisPlayerImpactTrendSelection(player, impactTrends);
     const selectedIds = selectedAnalysisPlayerImpactTrendIds ?? new Set();
+    const compCandidateLookup = buildAnalysisPlayerCompCandidateLookup(currentAnalysisSnapshot);
 
     container.className = "analysis-player-detail";
     container.innerHTML = `
@@ -4897,7 +5024,7 @@ function renderAnalysisPlayerDetail(player) {
         </div>
         ${buildAnalysisImpactTrendCard("player", "Character Performance", impactTrends, selectedIds)}
         <div class="analysis-character-grid">
-            ${(player.characters ?? []).map(buildAnalysisCharacterCard).join("")}
+            ${(player.characters ?? []).map(character => buildAnalysisCharacterCard(character, player, compCandidateLookup)).join("")}
         </div>
     `;
     hideAnalysisImpactTrendTooltip("player");
