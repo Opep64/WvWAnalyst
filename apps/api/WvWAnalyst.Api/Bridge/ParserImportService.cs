@@ -13,7 +13,9 @@ public sealed class ParserImportService
     private const int DefaultMaxParallelism = 4;
     private const int MaxAllowedParallelism = 16;
     private const int MinimumIncludedParticipantsPerSide = 10;
+    private const int OrganizedEnemyMovementScoreThreshold = 72;
     private static readonly TimeSpan MinimumIncludedFightDuration = TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MinimumIncludedOrganizedEnemyFightDuration = TimeSpan.FromSeconds(45);
 
     private static readonly JsonSerializerOptions ConsoleResultSerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -927,17 +929,22 @@ public sealed class ParserImportService
         var reasons = new List<string>();
         var tooShort = false;
         var tooSmall = false;
+        var squadParticipants = Math.Max(0, fightIndex.SquadPlayerCount);
+        var enemyParticipants = Math.Max(0, fightIndex.EnemyPlayerCount > 0 ? fightIndex.EnemyPlayerCount : fightIndex.EnemyTargetCount);
+        var hasMinimumParticipants = squadParticipants >= MinimumIncludedParticipantsPerSide
+            && enemyParticipants >= MinimumIncludedParticipantsPerSide;
+        var organizedEnemyDurationMinimum = IsOrganizedEnemyFight(fightIndex) && hasMinimumParticipants
+            ? MinimumIncludedOrganizedEnemyFightDuration
+            : MinimumIncludedFightDuration;
 
         if (fightIndex.DurationMilliseconds is long durationMilliseconds &&
             durationMilliseconds > 0 &&
-            durationMilliseconds < MinimumIncludedFightDuration.TotalMilliseconds)
+            durationMilliseconds < organizedEnemyDurationMinimum.TotalMilliseconds)
         {
             tooShort = true;
-            reasons.Add($"the fight lasted {BuildCompactDurationLabel(durationMilliseconds)}, below the {BuildCompactDurationLabel((long)MinimumIncludedFightDuration.TotalMilliseconds)} minimum");
+            reasons.Add($"the fight lasted {BuildCompactDurationLabel(durationMilliseconds)}, below the {BuildCompactDurationLabel((long)organizedEnemyDurationMinimum.TotalMilliseconds)} minimum");
         }
 
-        var squadParticipants = Math.Max(0, fightIndex.SquadPlayerCount);
-        var enemyParticipants = Math.Max(0, fightIndex.EnemyPlayerCount > 0 ? fightIndex.EnemyPlayerCount : fightIndex.EnemyTargetCount);
         if (squadParticipants > 0 && enemyParticipants > 0 &&
             (squadParticipants < MinimumIncludedParticipantsPerSide || enemyParticipants < MinimumIncludedParticipantsPerSide))
         {
@@ -956,15 +963,21 @@ public sealed class ParserImportService
                 ? "too-short"
                 : "too-small";
         var status = tooShort && tooSmall
-            ? $"Excluded after parsing: shorter than {BuildCompactDurationLabel((long)MinimumIncludedFightDuration.TotalMilliseconds)} and fewer than {MinimumIncludedParticipantsPerSide} participants per side."
+            ? $"Excluded after parsing: shorter than {BuildCompactDurationLabel((long)organizedEnemyDurationMinimum.TotalMilliseconds)} and fewer than {MinimumIncludedParticipantsPerSide} participants per side."
             : tooShort
-                ? $"Excluded after parsing: shorter than {BuildCompactDurationLabel((long)MinimumIncludedFightDuration.TotalMilliseconds)}."
+                ? $"Excluded after parsing: shorter than {BuildCompactDurationLabel((long)organizedEnemyDurationMinimum.TotalMilliseconds)}."
                 : $"Excluded after parsing: fewer than {MinimumIncludedParticipantsPerSide} participants per side.";
 
         return new ExclusionDecision(
             ReasonCode: reasonCode,
             Status: status,
             Detail: string.Join(" and ", reasons));
+    }
+
+    private static bool IsOrganizedEnemyFight(FightIndexDto fightIndex)
+    {
+        return fightIndex.Execution?.Context?.EnemyMovementScore is int enemyMovementScore
+            && enemyMovementScore >= OrganizedEnemyMovementScoreThreshold;
     }
 
     private static string BuildCompactDurationLabel(long durationMilliseconds)
