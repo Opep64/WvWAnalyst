@@ -292,6 +292,7 @@ public sealed class FightAnalysisService
             Scope: BuildScope(allFights, filteredFights),
             Overview: BuildOverview(filteredFights, expectedScoreLookup),
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
+            BurstTrends: BuildBurstTrends(filteredFights),
             TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
@@ -1205,6 +1206,47 @@ public sealed class FightAnalysisService
             })
             .ToArray();
     }
+
+    private static IReadOnlyList<FightAnalysisBurstTrendPointDto> BuildBurstTrends(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .Select(fight =>
+            {
+                var fightTimestamp = GetFightDateTimeOffset(fight);
+                return new FightAnalysisBurstTrendPointDto(
+                    FightId: fight.FightId,
+                    FightName: fight.FightIndex?.FightName ?? fight.SourceFileName ?? fight.FightId,
+                    FightDateLabel: FormatFightDateLabel(fight),
+                    FightDateUtc: fightTimestamp?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+                    PatchEraId: fight.PatchEra?.Id,
+                    PatchEraLabel: fight.PatchEra?.Label,
+                    Squad: BuildBurstSideTrend(fight.FightIndex?.TopBursts),
+                    Enemy: BuildBurstSideTrend(fight.FightIndex?.EnemyTopBursts));
+            })
+            .Where(point => HasBurstTrendData(point.Squad) || HasBurstTrendData(point.Enemy))
+            .ToArray();
+    }
+
+    private static FightAnalysisBurstSideTrendDto BuildBurstSideTrend(IReadOnlyList<FightTopBurstIndexDto>? bursts)
+    {
+        var retainedBursts = (bursts ?? Array.Empty<FightTopBurstIndexDto>())
+            .Where(burst => burst.Damage > 0 || burst.Strips > 0 || burst.Downs > 0 || burst.Kills > 0)
+            .ToArray();
+
+        if (retainedBursts.Length == 0)
+        {
+            return new FightAnalysisBurstSideTrendDto(null, null, null, null);
+        }
+
+        return new FightAnalysisBurstSideTrendDto(
+            Damage: retainedBursts.Max(burst => burst.Damage),
+            Strips: retainedBursts.Max(burst => burst.Strips),
+            Downs: retainedBursts.Max(burst => burst.Downs),
+            Kills: retainedBursts.Max(burst => burst.Kills));
+    }
+
+    private static bool HasBurstTrendData(FightAnalysisBurstSideTrendDto side)
+        => side.Damage is not null || side.Strips is not null || side.Downs is not null || side.Kills is not null;
 
     private static IReadOnlyDictionary<string, FightExpectedScoreResult> BuildExpectedScoreLookup(
         IReadOnlyList<FightArtifactSummaryDto> fights)

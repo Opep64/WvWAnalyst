@@ -1906,6 +1906,161 @@ h1 {
     margin-bottom: 12px;
 }
 
+.analysis-burst-trend-section {
+    margin-top: 8px;
+}
+
+.analysis-burst-trend-section .section-heading {
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.analysis-burst-trend-section h3 {
+    margin: 0;
+}
+
+.analysis-burst-trend-section p {
+    color: var(--muted);
+    margin: 4px 0 0;
+}
+
+.analysis-burst-trend-legend,
+.analysis-burst-card-value {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+}
+
+.analysis-burst-trend-legend span,
+.analysis-burst-card-value span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.analysis-burst-trend-legend {
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.analysis-burst-swatch {
+    width: 18px;
+    height: 3px;
+    border-radius: 999px;
+    display: inline-block;
+}
+
+.analysis-burst-swatch-squad {
+    background: #38bdf8;
+}
+
+.analysis-burst-swatch-enemy {
+    background: #fb7185;
+}
+
+.analysis-burst-chart-card {
+    min-height: 0;
+}
+
+.analysis-burst-card-value {
+    font-size: 1.28rem;
+}
+
+.analysis-burst-comparison-card {
+    min-height: 0;
+    padding-bottom: 14px;
+}
+
+.analysis-burst-comparison-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.analysis-burst-comparison-scale {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.analysis-burst-comparison-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.analysis-burst-comparison-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--muted);
+    background: rgba(159, 176, 195, 0.08);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+.analysis-burst-comparison-option.is-active {
+    color: var(--ink);
+    background: rgba(35, 134, 255, 0.14);
+}
+
+.analysis-burst-comparison-option input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: var(--burst-color);
+}
+
+.analysis-burst-comparison-swatch {
+    width: 16px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--burst-color);
+}
+
+.analysis-burst-comparison-chart-wrap {
+    min-height: 280px;
+}
+
+.analysis-burst-comparison-chart {
+    width: 100%;
+    height: 280px;
+    display: block;
+}
+
+.analysis-burst-comparison-axis-label,
+.analysis-burst-comparison-axis-caption {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.analysis-burst-comparison-line {
+    fill: none;
+    stroke: var(--burst-color);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.4;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-burst-comparison-point {
+    fill: var(--burst-color);
+    stroke: rgba(5, 12, 20, 0.82);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
 .analysis-delta-card {
     min-height: 0;
 }
@@ -2150,8 +2305,70 @@ h1 {
     stroke-width: 1;
 }
 
+.analysis-chart .date-marker-line {
+    stroke: rgba(250, 204, 21, 0.62);
+    stroke-dasharray: 4 3;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-burst-comparison-chart .date-marker-line {
+    stroke: rgba(250, 204, 21, 0.62);
+    stroke-dasharray: 4 3;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-chart .date-marker-label {
+    fill: #fde68a;
+    font-size: 11px;
+    font-weight: 800;
+    paint-order: stroke;
+    stroke: rgba(5, 12, 20, 0.86);
+    stroke-linejoin: round;
+    stroke-width: 2.5px;
+}
+
+.analysis-burst-comparison-chart .date-marker-label {
+    fill: #fde68a;
+    font-size: 11px;
+    font-weight: 800;
+    paint-order: stroke;
+    stroke: rgba(5, 12, 20, 0.86);
+    stroke-linejoin: round;
+    stroke-width: 2.5px;
+}
+
 .analysis-chart .point {
     fill: var(--accent);
+}
+
+.analysis-chart .burst-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.2;
+}
+
+.analysis-chart .burst-line-squad {
+    stroke: #38bdf8;
+}
+
+.analysis-chart .burst-line-enemy {
+    stroke: #fb7185;
+}
+
+.analysis-chart .burst-line-raw {
+    opacity: 0.34;
+    stroke-width: 1.1;
+}
+
+.analysis-chart .burst-point-squad {
+    fill: #38bdf8;
+}
+
+.analysis-chart .burst-point-enemy {
+    fill: #fb7185;
 }
 
 .analysis-boon-trend-card {

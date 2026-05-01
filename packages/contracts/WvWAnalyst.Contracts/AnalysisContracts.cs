@@ -6,6 +6,7 @@ public sealed record FightAnalysisSnapshotDto(
     FightAnalysisScopeDto Scope,
     FightAnalysisOverviewDto Overview,
     IReadOnlyList<FightAnalysisTrendPointDto> Trends,
+    IReadOnlyList<FightAnalysisBurstTrendPointDto> BurstTrends,
     IReadOnlyList<FightAnalysisPlayerSummaryRowDto> TopPlayers,
     IReadOnlyList<FightAnalysisClassRowDto> TopClasses,
     IReadOnlyList<FightAnalysisEnemyClassRowDto> TopEnemyClasses,
@@ -178,6 +179,22 @@ public sealed record FightAnalysisTrendPointDto(
     int? PressureScore,
     int? DownstateScore,
     int? SupportScore);
+
+public sealed record FightAnalysisBurstTrendPointDto(
+    string FightId,
+    string FightName,
+    string FightDateLabel,
+    string? FightDateUtc,
+    string? PatchEraId,
+    string? PatchEraLabel,
+    FightAnalysisBurstSideTrendDto Squad,
+    FightAnalysisBurstSideTrendDto Enemy);
+
+public sealed record FightAnalysisBurstSideTrendDto(
+    long? Damage,
+    int? Strips,
+    int? Downs,
+    int? Kills);
 
 public sealed record FightAnalysisPlayerSummaryRowDto(
     string Account,

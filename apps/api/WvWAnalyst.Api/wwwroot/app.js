@@ -34,6 +34,7 @@ let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
 let selectedAnalysisBoonId = null;
 let selectedAnalysisBoonTrendIds = null;
+let selectedAnalysisBurstComparisonIds = null;
 let selectedAnalysisPlayerImpactTrendIds = null;
 let selectedAnalysisPlayerImpactTrendOwner = null;
 let selectedAnalysisClassImpactTrendIds = null;
@@ -88,6 +89,22 @@ const ANALYSIS_TREND_METRICS = [
     { key: "pressureScore", title: "Pressure trend", averageKey: "averagePressureScore", fallbackValue: "n/a", detail: "Pressure & burst pillar.", comparisonLabel: "Pressure" },
     { key: "downstateScore", title: "Downstate trend", averageKey: "averageDownstateScore", fallbackValue: "n/a", detail: "Downstate control pillar.", comparisonLabel: "Downstate" },
     { key: "supportScore", title: "Support trend", averageKey: "averageSupportScore", fallbackValue: "n/a", detail: "Support & mitigation pillar.", comparisonLabel: "Support" }
+];
+const ANALYSIS_BURST_TREND_METRICS = [
+    { key: "damage", title: "Best burst damage", unit: "damage", detail: "Highest retained burst damage from either side." },
+    { key: "strips", title: "Best burst strips", unit: "strips", detail: "Highest retained boon strips in a burst window." },
+    { key: "downs", title: "Best burst downs", unit: "downs", detail: "Highest retained downs created in a burst window." },
+    { key: "kills", title: "Best burst kills", unit: "kills", detail: "Highest retained kills secured in a burst window." }
+];
+const ANALYSIS_BURST_COMPARISON_SERIES = [
+    { id: "squad-damage", sideKey: "squad", metricKey: "damage", label: "Squad damage", color: "#38bdf8" },
+    { id: "enemy-damage", sideKey: "enemy", metricKey: "damage", label: "Enemy damage", color: "#fb7185" },
+    { id: "squad-strips", sideKey: "squad", metricKey: "strips", label: "Squad strips", color: "#22c55e" },
+    { id: "enemy-strips", sideKey: "enemy", metricKey: "strips", label: "Enemy strips", color: "#f97316" },
+    { id: "squad-downs", sideKey: "squad", metricKey: "downs", label: "Squad downs", color: "#a78bfa" },
+    { id: "enemy-downs", sideKey: "enemy", metricKey: "downs", label: "Enemy downs", color: "#f472b6" },
+    { id: "squad-kills", sideKey: "squad", metricKey: "kills", label: "Squad kills", color: "#facc15" },
+    { id: "enemy-kills", sideKey: "enemy", metricKey: "kills", label: "Enemy kills", color: "#94a3b8" }
 ];
 const ANALYSIS_BOON_TREND_COLORS = ["#5eead4", "#facc15", "#a78bfa", "#fb7185", "#60a5fa", "#f97316", "#34d399", "#f472b6"];
 const COMP_HELPER_TEAM_SIZE = 5;
@@ -528,6 +545,15 @@ function buildAnalysisPointMarkup(values, minValue = 0, maxValue = 100) {
         .join("");
 }
 
+function getAnalysisChartX(index, pointCount) {
+    const width = 320;
+    if (pointCount <= 1) {
+        return width / 2;
+    }
+
+    return index * (width / (pointCount - 1));
+}
+
 function buildRollingAverage(values, windowSize = ANALYSIS_TREND_ROLLING_WINDOW) {
     const normalizedValues = values.map(value => {
         if (value == null) {
@@ -609,6 +635,14 @@ function buildAnalysisTrendBucketKey(bucketStart, mode) {
     return `${bucketStart.getFullYear()}-${String(bucketStart.getMonth() + 1).padStart(2, "0")}-${String(bucketStart.getDate()).padStart(2, "0")}`;
 }
 
+function formatAnalysisLocalDateKey(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return "";
+    }
+
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function formatAnalysisTrendBucketLabel(bucketStart, mode) {
     const normalizedMode = normalizeAnalysisTrendMode(mode);
     if (normalizedMode === "month") {
@@ -676,6 +710,7 @@ function buildAggregatedTrendPoints(points, mode) {
         .map(bucket => ({
             bucketKey: bucket.bucketKey,
             bucketLabel: formatAnalysisTrendBucketLabel(bucket.bucketStart, normalizedMode),
+            bucketStartDateKey: formatAnalysisLocalDateKey(bucket.bucketStart),
             fightCount: bucket.points.length,
             overallScore: calculateMedian(bucket.points.map(point => point.overallScore)),
             expectedScore: calculateMedian(bucket.points.map(point => point.expectedScore)),
@@ -715,6 +750,177 @@ function startOfLocalDay(date) {
 
 function addLocalDays(date, dayOffset) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayOffset);
+}
+
+function parseAnalysisLocalDate(value) {
+    if (!value) {
+        return null;
+    }
+
+    const text = String(value).trim();
+    const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+        return new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]));
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getAnalysisTrendMarkerPointDate(point, index) {
+    const bucketStartDate = parseAnalysisLocalDate(point?.bucketStartDateKey);
+    if (bucketStartDate) {
+        return bucketStartDate;
+    }
+
+    return getAnalysisTrendPointDate(point, index);
+}
+
+function resolveAnalysisDateMarkerX(pointDates, markerDate) {
+    const datedPoints = pointDates
+        .map((date, index) => {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+                return null;
+            }
+
+            return {
+                index,
+                time: startOfLocalDay(date).getTime()
+            };
+        })
+        .filter(Boolean);
+
+    if (datedPoints.length === 0 || !(markerDate instanceof Date) || Number.isNaN(markerDate.getTime())) {
+        return null;
+    }
+
+    const markerTime = startOfLocalDay(markerDate).getTime();
+    const matchingPoints = datedPoints.filter(point => point.time === markerTime);
+    if (matchingPoints.length > 0) {
+        const averageIndex = matchingPoints.reduce((total, point) => total + point.index, 0) / matchingPoints.length;
+        return Math.round(getAnalysisChartX(averageIndex, pointDates.length) * 100) / 100;
+    }
+
+    const firstPoint = datedPoints[0];
+    const lastPoint = datedPoints[datedPoints.length - 1];
+    if (markerTime < firstPoint.time || markerTime > lastPoint.time) {
+        return null;
+    }
+
+    let leftPoint = firstPoint;
+    for (let index = 1; index < datedPoints.length; index += 1) {
+        const rightPoint = datedPoints[index];
+        if (rightPoint.time < markerTime) {
+            leftPoint = rightPoint;
+            continue;
+        }
+
+        if (rightPoint.time === leftPoint.time) {
+            return Math.round(getAnalysisChartX(rightPoint.index, pointDates.length) * 100) / 100;
+        }
+
+        const ratio = (markerTime - leftPoint.time) / (rightPoint.time - leftPoint.time);
+        const markerIndex = leftPoint.index + ((rightPoint.index - leftPoint.index) * ratio);
+        return Math.round(getAnalysisChartX(markerIndex, pointDates.length) * 100) / 100;
+    }
+
+    return null;
+}
+
+function formatAnalysisDateMarkerLabel(date) {
+    return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric"
+    });
+}
+
+function buildAnalysisDateMarkers(points, patchEras) {
+    const pointDates = (points ?? []).map((point, index) => getAnalysisTrendMarkerPointDate(point, index));
+    const datedPointTimes = pointDates
+        .map(date => {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+                return null;
+            }
+
+            return startOfLocalDay(date).getTime();
+        })
+        .filter(value => value != null)
+        .sort((left, right) => left - right);
+    const firstPointTime = datedPointTimes[0] ?? null;
+    const markersByDate = new Map();
+
+    (patchEras ?? []).forEach(era => {
+        const markerDate = parseAnalysisLocalDate(era?.startsOn);
+        if (!markerDate) {
+            return;
+        }
+
+        let x = resolveAnalysisDateMarkerX(pointDates, markerDate);
+        let activeAtStart = false;
+        if (x == null && firstPointTime != null) {
+            const markerTime = startOfLocalDay(markerDate).getTime();
+            const eraEndDate = parseAnalysisLocalDate(era?.endsOn);
+            const eraEndTime = eraEndDate ? startOfLocalDay(eraEndDate).getTime() : Infinity;
+            activeAtStart = markerTime < firstPointTime && firstPointTime <= eraEndTime;
+            if (activeAtStart) {
+                x = 0;
+            }
+        }
+
+        if (x == null) {
+            return;
+        }
+
+        const dateKey = formatAnalysisLocalDateKey(markerDate);
+        if (markersByDate.has(dateKey)) {
+            return;
+        }
+
+        markersByDate.set(dateKey, {
+            x,
+            label: formatAnalysisDateMarkerLabel(markerDate),
+            title: `${era?.label ? `${era.label} (${dateKey})` : dateKey}${activeAtStart ? "; active at start of selected fights" : ""}`
+        });
+    });
+
+    return [...markersByDate.values()].sort((left, right) => left.x - right.x);
+}
+
+function buildAnalysisDateMarkerMarkup(markers, height = 118) {
+    if ((markers ?? []).length === 0) {
+        return "";
+    }
+
+    let previousLabelX = -Infinity;
+    let labelLane = 0;
+
+    return markers
+        .map(marker => {
+            const markerX = Math.max(2, Math.min(318, Number(marker.x)));
+            if (!Number.isFinite(markerX)) {
+                return "";
+            }
+
+            labelLane = markerX - previousLabelX < 58 ? (labelLane + 1) % 2 : 0;
+            previousLabelX = markerX;
+
+            const labelAnchor = markerX > 276 ? "end" : "start";
+            const labelX = labelAnchor === "end"
+                ? Math.max(6, markerX - 5)
+                : Math.min(314, markerX + 5);
+            const labelY = 13 + (labelLane * 13);
+
+            return `
+                <g class="date-marker">
+                    <line class="date-marker-line" x1="${markerX}" y1="0" x2="${markerX}" y2="${height}">
+                        <title>${escapeHtml(marker.title)}</title>
+                    </line>
+                    <text class="date-marker-label" x="${labelX}" y="${labelY}" text-anchor="${labelAnchor}">${escapeHtml(marker.label)}</text>
+                </g>
+            `;
+        })
+        .filter(Boolean)
+        .join("");
 }
 
 function getAnalysisTrendComparisonWindow(mode, pointCount) {
@@ -823,12 +1029,13 @@ function buildAnalysisTrendDeltaCard(metric, aggregatedPoints, mode) {
     `;
 }
 
-function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW, showPoints = false, minValue = 0, maxValue = 100) {
+function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW, showPoints = false, minValue = 0, maxValue = 100, dateMarkers = []) {
     const normalizedSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(smoothingWindow);
     const rawPath = normalizedSmoothingWindow > 1 ? buildAnalysisLinePath(values, minValue, maxValue) : "";
     const smoothedValues = buildRollingAverage(values, normalizedSmoothingWindow);
     const smoothPath = buildAnalysisLinePath(smoothedValues, minValue, maxValue);
     const pointMarkup = showPoints ? buildAnalysisPointMarkup(values, minValue, maxValue) : "";
+    const dateMarkerMarkup = buildAnalysisDateMarkerMarkup(dateMarkers);
     const empty = !rawPath && !smoothPath;
     const numericCount = values.filter(value => value != null && !Number.isNaN(Number(value))).length;
     const effectiveWindow = normalizedSmoothingWindow > 1
@@ -848,12 +1055,391 @@ function buildAnalysisChartCard(title, valueLabel, values, detail, smoothingWind
                 <line class="grid-line" x1="0" y1="29.5" x2="320" y2="29.5"></line>
                 <line class="grid-line" x1="0" y1="59" x2="320" y2="59"></line>
                 <line class="grid-line" x1="0" y1="88.5" x2="320" y2="88.5"></line>
+                ${dateMarkerMarkup}
                 ${rawPath ? `<path class="raw-line" d="${escapeHtml(rawPath)}"></path>` : ""}
                 ${smoothPath ? `<path class="trend-line" d="${escapeHtml(smoothPath)}"></path>` : ""}
                 ${pointMarkup}
             </svg>
             ${empty ? `<div class="table-inline-note">No score points available for this selection.</div>` : ""}
         </article>
+    `;
+}
+
+function getAnalysisBurstMetricValue(point, sideKey, metricKey) {
+    const value = point?.[sideKey]?.[metricKey];
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getAnalysisMaxNumeric(values) {
+    const numericValues = (values ?? [])
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value));
+
+    return numericValues.length === 0 ? null : Math.max(...numericValues);
+}
+
+function buildAnalysisBurstSideAggregate(points, sideKey) {
+    return ANALYSIS_BURST_TREND_METRICS.reduce((side, metric) => {
+        side[metric.key] = getAnalysisMaxNumeric(points.map(point => getAnalysisBurstMetricValue(point, sideKey, metric.key)));
+        return side;
+    }, {});
+}
+
+function buildAggregatedBurstTrendPoints(points, mode) {
+    const normalizedMode = normalizeAnalysisTrendMode(mode);
+    if (normalizedMode === "fight") {
+        return (points ?? []).map((point, index) => ({
+            ...point,
+            bucketKey: point.fightId ?? `fight-${index}`,
+            bucketLabel: point.fightDateLabel ?? `Fight ${index + 1}`,
+            fightCount: 1
+        }));
+    }
+
+    const bucketMap = new Map();
+    (points ?? []).forEach((point, index) => {
+        const pointDate = getAnalysisTrendPointDate(point, index);
+        if (!pointDate) {
+            return;
+        }
+
+        const bucketStart = buildAnalysisTrendBucketStart(pointDate, normalizedMode);
+        const bucketKey = buildAnalysisTrendBucketKey(bucketStart, normalizedMode);
+        if (!bucketMap.has(bucketKey)) {
+            bucketMap.set(bucketKey, {
+                bucketKey,
+                bucketStart,
+                points: []
+            });
+        }
+
+        bucketMap.get(bucketKey).points.push(point);
+    });
+
+    return Array.from(bucketMap.values())
+        .sort((left, right) => left.bucketStart.getTime() - right.bucketStart.getTime())
+        .map(bucket => ({
+            bucketKey: bucket.bucketKey,
+            bucketLabel: formatAnalysisTrendBucketLabel(bucket.bucketStart, normalizedMode),
+            bucketStartDateKey: formatAnalysisLocalDateKey(bucket.bucketStart),
+            fightCount: bucket.points.length,
+            squad: buildAnalysisBurstSideAggregate(bucket.points, "squad"),
+            enemy: buildAnalysisBurstSideAggregate(bucket.points, "enemy")
+        }));
+}
+
+function buildAnalysisBurstTrendSummary(rawPoints, aggregatedPoints, mode) {
+    if ((rawPoints ?? []).length === 0) {
+        return "No retained burst data matched the current filters.";
+    }
+
+    const modeOption = ANALYSIS_TREND_MODE_OPTIONS[normalizeAnalysisTrendMode(mode)];
+    if (modeOption.usesMedianBuckets) {
+        return `${aggregatedPoints.length} ${aggregatedPoints.length === 1 ? modeOption.unitSingular : modeOption.unitPlural} from ${rawPoints.length} fights with retained burst data. Bucket values show the best retained value per metric.`;
+    }
+
+    return `${rawPoints.length} fights with retained burst data in date order. Values show the best retained value per metric for each side.`;
+}
+
+function buildAnalysisPointMarkupWithClass(values, minValue, maxValue, className) {
+    const height = 118;
+    const normalizedValues = (values ?? []).map(value => {
+        if (value == null) {
+            return null;
+        }
+
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? null : numeric;
+    });
+
+    if (!normalizedValues.some(value => value != null)) {
+        return "";
+    }
+
+    const range = Math.max(1, maxValue - minValue);
+    return normalizedValues
+        .map((value, index) => {
+            if (value == null) {
+                return "";
+            }
+
+            const x = Math.round(getAnalysisChartX(index, normalizedValues.length) * 100) / 100;
+            const clampedValue = Math.max(minValue, Math.min(maxValue, value));
+            const y = Math.round((height - ((clampedValue - minValue) / range) * height) * 100) / 100;
+            return `<circle class="${escapeHtml(className)}" cx="${x}" cy="${y}" r="2.5"></circle>`;
+        })
+        .filter(Boolean)
+        .join("");
+}
+
+function buildAnalysisBurstSeriesMarkup(values, sideKey, minValue, maxValue, smoothingWindow, showPoints) {
+    const normalizedSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(smoothingWindow);
+    const rawPath = normalizedSmoothingWindow > 1 ? buildAnalysisLinePath(values, minValue, maxValue) : "";
+    const displayValues = normalizedSmoothingWindow > 1
+        ? buildRollingAverage(values, normalizedSmoothingWindow)
+        : values;
+    const trendPath = buildAnalysisLinePath(displayValues, minValue, maxValue);
+    const pointMarkup = showPoints
+        ? buildAnalysisPointMarkupWithClass(values, minValue, maxValue, `burst-point burst-point-${sideKey}`)
+        : "";
+
+    return `
+        ${rawPath ? `<path class="burst-line burst-line-raw burst-line-${sideKey}" d="${escapeHtml(rawPath)}"></path>` : ""}
+        ${trendPath ? `<path class="burst-line burst-line-${sideKey}" d="${escapeHtml(trendPath)}"></path>` : ""}
+        ${pointMarkup}
+    `;
+}
+
+function resolveAnalysisBurstChartMaxValue(metric, values) {
+    const maxValue = getAnalysisMaxNumeric(values) ?? 1;
+    if (metric.key === "damage") {
+        const step = maxValue >= 1_000_000 ? 250_000 : 50_000;
+        return Math.max(step, Math.ceil((maxValue * 1.08) / step) * step);
+    }
+
+    const step = maxValue <= 5 ? 1 : maxValue <= 20 ? 2 : 5;
+    return Math.max(step, Math.ceil((maxValue * 1.15) / step) * step);
+}
+
+function formatAnalysisBurstTrendValue(metric, value) {
+    if (value == null) {
+        return "n/a";
+    }
+
+    return formatNumber(value, 0);
+}
+
+function buildAnalysisBurstTrendCard(metric, aggregatedPoints, dateMarkers) {
+    const squadValues = (aggregatedPoints ?? []).map(point => getAnalysisBurstMetricValue(point, "squad", metric.key));
+    const enemyValues = (aggregatedPoints ?? []).map(point => getAnalysisBurstMetricValue(point, "enemy", metric.key));
+    const maxValue = resolveAnalysisBurstChartMaxValue(metric, [...squadValues, ...enemyValues]);
+    const squadBest = getAnalysisMaxNumeric(squadValues);
+    const enemyBest = getAnalysisMaxNumeric(enemyValues);
+    const empty = squadBest == null && enemyBest == null;
+    const showPoints = analysisTrendMode !== "fight" || (aggregatedPoints ?? []).length <= 24;
+    const pointText = analysisTrendMode === "fight"
+        ? `${(aggregatedPoints ?? []).length} fights in date order.`
+        : `${(aggregatedPoints ?? []).length} ${(aggregatedPoints ?? []).length === 1 ? ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitSingular : ANALYSIS_TREND_MODE_OPTIONS[analysisTrendMode].unitPlural}.`;
+
+    return `
+        <article class="analysis-card analysis-burst-chart-card">
+            <strong>${escapeHtml(metric.title)}</strong>
+            <div class="analysis-card-value analysis-burst-card-value">
+                <span>Squad ${escapeHtml(formatAnalysisBurstTrendValue(metric, squadBest))}</span>
+                <span>Enemy ${escapeHtml(formatAnalysisBurstTrendValue(metric, enemyBest))}</span>
+            </div>
+            <div class="table-inline-note">${escapeHtml(`${metric.detail} ${pointText}`)}</div>
+            <svg class="analysis-chart analysis-burst-chart" viewBox="0 0 320 118" preserveAspectRatio="none" aria-hidden="true">
+                <line class="grid-line" x1="0" y1="29.5" x2="320" y2="29.5"></line>
+                <line class="grid-line" x1="0" y1="59" x2="320" y2="59"></line>
+                <line class="grid-line" x1="0" y1="88.5" x2="320" y2="88.5"></line>
+                ${buildAnalysisDateMarkerMarkup(dateMarkers)}
+                ${buildAnalysisBurstSeriesMarkup(squadValues, "squad", 0, maxValue, analysisTrendSmoothingWindow, showPoints)}
+                ${buildAnalysisBurstSeriesMarkup(enemyValues, "enemy", 0, maxValue, analysisTrendSmoothingWindow, showPoints)}
+            </svg>
+            ${empty ? `<div class="table-inline-note">No ${escapeHtml(metric.unit)} burst values available for this selection.</div>` : ""}
+        </article>
+    `;
+}
+
+function ensureAnalysisBurstComparisonSelection() {
+    const validIds = ANALYSIS_BURST_COMPARISON_SERIES.map(series => series.id);
+    if (selectedAnalysisBurstComparisonIds === null) {
+        selectedAnalysisBurstComparisonIds = new Set(validIds);
+        return selectedAnalysisBurstComparisonIds;
+    }
+
+    selectedAnalysisBurstComparisonIds = new Set(
+        Array.from(selectedAnalysisBurstComparisonIds)
+            .filter(id => validIds.includes(id)));
+    return selectedAnalysisBurstComparisonIds;
+}
+
+function buildAnalysisBurstComparisonControls(selectedIds) {
+    return ANALYSIS_BURST_COMPARISON_SERIES.map(series => {
+        const checked = selectedIds?.has(series.id) ? "checked" : "";
+        return `
+            <label class="analysis-burst-comparison-option ${checked ? "is-active" : ""}" style="--burst-color: ${escapeHtml(series.color)}">
+                <input type="checkbox" data-analysis-burst-comparison-id="${escapeHtml(series.id)}" ${checked}>
+                <span class="analysis-burst-comparison-swatch"></span>
+                <span>${escapeHtml(series.label)}</span>
+            </label>
+        `;
+    }).join("");
+}
+
+function getAnalysisBurstMetricMaxima(aggregatedPoints) {
+    return ANALYSIS_BURST_TREND_METRICS.reduce((maxima, metric) => {
+        maxima[metric.key] = getAnalysisMaxNumeric([
+            ...(aggregatedPoints ?? []).map(point => getAnalysisBurstMetricValue(point, "squad", metric.key)),
+            ...(aggregatedPoints ?? []).map(point => getAnalysisBurstMetricValue(point, "enemy", metric.key))
+        ]);
+        return maxima;
+    }, {});
+}
+
+function getAnalysisBurstSeriesData(aggregatedPoints) {
+    const maxima = getAnalysisBurstMetricMaxima(aggregatedPoints);
+    return ANALYSIS_BURST_COMPARISON_SERIES.map(series => {
+        const metric = ANALYSIS_BURST_TREND_METRICS.find(item => item.key === series.metricKey);
+        const metricMax = maxima[series.metricKey];
+        const rawValues = (aggregatedPoints ?? []).map(point => getAnalysisBurstMetricValue(point, series.sideKey, series.metricKey));
+        const values = rawValues.map(value => {
+            if (value == null || !metricMax || metricMax <= 0) {
+                return null;
+            }
+
+            return Math.max(0, Math.min(100, (value / metricMax) * 100));
+        });
+
+        return {
+            ...series,
+            metric,
+            metricMax,
+            rawValues,
+            values
+        };
+    });
+}
+
+function getAnalysisBurstComparisonChartLayout(pointCount) {
+    const width = 640;
+    const height = 260;
+    const plot = {
+        left: 42,
+        top: 24,
+        right: 628,
+        bottom: 220
+    };
+    plot.width = plot.right - plot.left;
+    plot.height = plot.bottom - plot.top;
+    plot.xForIndex = index => plot.left + (pointCount <= 1 ? plot.width / 2 : index * (plot.width / (pointCount - 1)));
+    plot.yForValue = value => plot.bottom - ((Math.max(0, Math.min(100, value)) / 100) * plot.height);
+    return { width, height, plot };
+}
+
+function buildAnalysisBurstComparisonPath(values, chart) {
+    let started = false;
+    return (values ?? [])
+        .map((value, index) => {
+            if (value == null) {
+                started = false;
+                return "";
+            }
+
+            const x = Math.round(chart.plot.xForIndex(index) * 100) / 100;
+            const y = Math.round(chart.plot.yForValue(value) * 100) / 100;
+            const command = started ? "L" : "M";
+            started = true;
+            return `${command} ${x} ${y}`;
+        })
+        .filter(Boolean)
+        .join(" ");
+}
+
+function buildAnalysisBurstComparisonPointMarkup(series, aggregatedPoints, chart, showPoints) {
+    if (!showPoints) {
+        return "";
+    }
+
+    return (series.values ?? []).map((value, index) => {
+        if (value == null) {
+            return "";
+        }
+
+        const point = aggregatedPoints[index];
+        const rawValue = series.rawValues[index];
+        const x = Math.round(chart.plot.xForIndex(index) * 100) / 100;
+        const y = Math.round(chart.plot.yForValue(value) * 100) / 100;
+        const metricUnit = series.metric?.unit ?? series.metricKey;
+        const label = `${series.label} ${point?.bucketLabel ?? point?.fightDateLabel ?? ""}: ${formatNumber(rawValue, 0)} ${metricUnit}, ${formatNumber(value, 0)} normalized`;
+        return `
+            <circle class="analysis-burst-comparison-point"
+                cx="${x}"
+                cy="${y}"
+                r="3"
+                style="--burst-color: ${escapeHtml(series.color)}">
+                <title>${escapeHtml(label)}</title>
+            </circle>
+        `;
+    }).filter(Boolean).join("");
+}
+
+function buildAnalysisBurstComparisonGrid(chart) {
+    return [100, 75, 50, 25, 0].map(value => {
+        const y = Math.round(chart.plot.yForValue(value) * 100) / 100;
+        return `
+            <g class="analysis-burst-comparison-grid-row">
+                <line class="grid-line" x1="${chart.plot.left}" y1="${y}" x2="${chart.plot.right}" y2="${y}"></line>
+                <text class="analysis-burst-comparison-axis-label" x="8" y="${y + 4}">${value}</text>
+            </g>
+        `;
+    }).join("");
+}
+
+function buildAnalysisBurstComparisonMarkerMarkup(markers, chart) {
+    if ((markers ?? []).length === 0) {
+        return "";
+    }
+
+    return markers.map(marker => {
+        const markerX = chart.plot.left + ((Math.max(0, Math.min(320, Number(marker.x))) / 320) * chart.plot.width);
+        if (!Number.isFinite(markerX)) {
+            return "";
+        }
+
+        const labelAnchor = markerX > chart.plot.right - 42 ? "end" : "start";
+        const labelX = labelAnchor === "end" ? markerX - 5 : markerX + 5;
+        return `
+            <g class="date-marker analysis-burst-comparison-date-marker">
+                <line class="date-marker-line" x1="${markerX}" y1="${chart.plot.top}" x2="${markerX}" y2="${chart.plot.bottom}">
+                    <title>${escapeHtml(marker.title)}</title>
+                </line>
+                <text class="date-marker-label" x="${labelX}" y="16" text-anchor="${labelAnchor}">${escapeHtml(marker.label)}</text>
+            </g>
+        `;
+    }).filter(Boolean).join("");
+}
+
+function buildAnalysisBurstComparisonChart(aggregatedPoints, dateMarkers, selectedIds) {
+    const selectedSeries = getAnalysisBurstSeriesData(aggregatedPoints)
+        .filter(series => selectedIds?.has(series.id));
+    if ((aggregatedPoints ?? []).length === 0) {
+        return `<div class="analysis-boon-trend-empty">No retained burst data available for this selection.</div>`;
+    }
+
+    if (selectedSeries.length === 0) {
+        return `<div class="analysis-boon-trend-empty">No burst components selected.</div>`;
+    }
+
+    const chart = getAnalysisBurstComparisonChartLayout(aggregatedPoints.length);
+    const normalizedSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(analysisTrendSmoothingWindow);
+    const showPoints = analysisTrendMode !== "fight" || aggregatedPoints.length <= 36;
+    const seriesMarkup = selectedSeries.map(series => {
+        const displayValues = normalizedSmoothingWindow > 1
+            ? buildRollingAverage(series.values, normalizedSmoothingWindow)
+            : series.values;
+        const path = buildAnalysisBurstComparisonPath(displayValues, chart);
+        return `
+            <g class="analysis-burst-comparison-series">
+                ${path ? `<path class="analysis-burst-comparison-line" d="${escapeHtml(path)}" style="--burst-color: ${escapeHtml(series.color)}"></path>` : ""}
+                ${buildAnalysisBurstComparisonPointMarkup(series, aggregatedPoints, chart, showPoints)}
+            </g>
+        `;
+    }).join("");
+    const smoothingLabel = normalizedSmoothingWindow > 1
+        ? `${normalizedSmoothingWindow}-point trailing average`
+        : "Raw values";
+
+    return `
+        <svg class="analysis-burst-comparison-chart" viewBox="0 0 ${chart.width} ${chart.height}" preserveAspectRatio="xMidYMid meet" aria-hidden="false">
+            <title>${escapeHtml(`Normalized burst comparison, ${smoothingLabel}`)}</title>
+            ${buildAnalysisBurstComparisonGrid(chart)}
+            ${buildAnalysisBurstComparisonMarkerMarkup(dateMarkers, chart)}
+            ${seriesMarkup}
+            <text class="analysis-burst-comparison-axis-caption" x="${chart.plot.left}" y="244">${escapeHtml(smoothingLabel)}</text>
+        </svg>
     `;
 }
 
@@ -2684,6 +3270,7 @@ function renderAnalysisMitigation(snapshot) {
 function renderAnalysisCharts(snapshot) {
     const trends = snapshot.trends ?? [];
     const aggregatedPoints = buildAggregatedTrendPoints(trends, analysisTrendMode);
+    const dateMarkers = buildAnalysisDateMarkers(aggregatedPoints, getPatchErasFromSource(snapshot));
     const showPoints = analysisTrendMode !== "fight" || aggregatedPoints.length <= 24;
 
     document.querySelector("#analysis-trend-summary").textContent =
@@ -2709,10 +3296,30 @@ function renderAnalysisCharts(snapshot) {
             analysisTrendSmoothingWindow,
             showPoints,
             chartRange.minValue,
-            chartRange.maxValue);
+            chartRange.maxValue,
+            dateMarkers);
     });
 
     setInnerHtml("#analysis-chart-grid", cards.join(""));
+}
+
+function renderAnalysisBurstTrends(snapshot) {
+    const burstPoints = snapshot.burstTrends ?? [];
+    const aggregatedPoints = buildAggregatedBurstTrendPoints(burstPoints, analysisTrendMode);
+    const dateMarkers = buildAnalysisDateMarkers(aggregatedPoints, getPatchErasFromSource(snapshot));
+    const selectedIds = ensureAnalysisBurstComparisonSelection();
+    const summary = document.querySelector("#analysis-burst-trend-summary");
+    if (summary) {
+        summary.textContent = buildAnalysisBurstTrendSummary(burstPoints, aggregatedPoints, analysisTrendMode);
+    }
+
+    setInnerHtml("#analysis-burst-comparison-controls", buildAnalysisBurstComparisonControls(selectedIds));
+    setInnerHtml("#analysis-burst-comparison-chart", buildAnalysisBurstComparisonChart(aggregatedPoints, dateMarkers, selectedIds));
+
+    const cards = ANALYSIS_BURST_TREND_METRICS
+        .map(metric => buildAnalysisBurstTrendCard(metric, aggregatedPoints, dateMarkers))
+        .join("");
+    setInnerHtml("#analysis-burst-chart-grid", cards);
 }
 
 function getAnalysisPlayerSearchText(player) {
@@ -6792,6 +7399,10 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-trend-summary").textContent = message;
     setInnerHtml("#analysis-trend-delta-grid", "");
     setInnerHtml("#analysis-chart-grid", "");
+    document.querySelector("#analysis-burst-trend-summary").textContent = message;
+    setInnerHtml("#analysis-burst-comparison-controls", "");
+    setInnerHtml("#analysis-burst-comparison-chart", "");
+    setInnerHtml("#analysis-burst-chart-grid", "");
     setInnerHtml("#analysis-mitigation-card", "");
     document.querySelector("#analysis-differences-summary").textContent = message;
     setInnerHtml("#analysis-differences-top-signals", "");
@@ -6836,6 +7447,7 @@ function renderAnalysis(snapshot) {
     setInnerHtml("#analysis-overview-cards", buildAnalysisOverviewCards(snapshot));
     renderAnalysisDifferences(snapshot);
     renderAnalysisCharts(snapshot);
+    renderAnalysisBurstTrends(snapshot);
     renderAnalysisMitigation(snapshot);
 
     setInnerHtml("#analysis-scope-list", buildAnalysisScopeChipListHtml(snapshot));
@@ -8590,6 +9202,27 @@ function updateAnalysisTrendControls(mode, smoothingWindow) {
 
     if (currentAnalysisSnapshot) {
         renderAnalysisCharts(currentAnalysisSnapshot);
+        renderAnalysisBurstTrends(currentAnalysisSnapshot);
+    }
+}
+
+function handleAnalysisBurstComparisonSelectionChange(event) {
+    const input = event.target.closest("[data-analysis-burst-comparison-id]");
+    if (!input) {
+        return;
+    }
+
+    const id = String(input.dataset.analysisBurstComparisonId ?? "");
+    const selectedIds = new Set(selectedAnalysisBurstComparisonIds ?? ANALYSIS_BURST_COMPARISON_SERIES.map(series => series.id));
+    if (input.checked) {
+        selectedIds.add(id);
+    } else {
+        selectedIds.delete(id);
+    }
+
+    selectedAnalysisBurstComparisonIds = selectedIds;
+    if (currentAnalysisSnapshot) {
+        renderAnalysisBurstTrends(currentAnalysisSnapshot);
     }
 }
 
@@ -8909,6 +9542,7 @@ document.querySelector("#analysis-trend-mode").addEventListener("change", event 
 document.querySelector("#analysis-trend-smoothing").addEventListener("change", event => {
     updateAnalysisTrendControls(analysisTrendMode, event.target.value);
 });
+document.querySelector("#analysis-burst-comparison-controls").addEventListener("change", handleAnalysisBurstComparisonSelectionChange);
 document.querySelector("#analysis-comp-helper-search").addEventListener("input", () => {
     if (currentAnalysisSnapshot) {
         renderAnalysisCompHelper(currentAnalysisSnapshot);

@@ -656,6 +656,30 @@
                         </div>
                         <div class="stats-grid analysis-trend-delta-grid" id="analysis-trend-delta-grid"></div>
                         <div class="pillar-grid" id="analysis-chart-grid"></div>
+                        <section class="analysis-burst-trend-section">
+                            <div class="section-heading">
+                                <div>
+                                    <h3>Burst trends</h3>
+                                    <p id="analysis-burst-trend-summary">Best retained squad and enemy burst windows over time.</p>
+                                </div>
+                                <div class="analysis-burst-trend-legend" aria-label="Burst trend legend">
+                                    <span><i class="analysis-burst-swatch analysis-burst-swatch-squad"></i>Squad</span>
+                                    <span><i class="analysis-burst-swatch analysis-burst-swatch-enemy"></i>Enemy</span>
+                                </div>
+                            </div>
+                            <article class="analysis-card analysis-burst-comparison-card">
+                                <div class="analysis-burst-comparison-header">
+                                    <div>
+                                        <strong>Normalized burst comparison</strong>
+                                        <div class="table-inline-note">Each component is scaled to 0-100 against its own current-filter maximum so all eight lines can share one axis.</div>
+                                    </div>
+                                    <div class="analysis-burst-comparison-scale">100 = current max for that metric</div>
+                                </div>
+                                <div class="analysis-burst-comparison-controls" id="analysis-burst-comparison-controls"></div>
+                                <div class="analysis-burst-comparison-chart-wrap" id="analysis-burst-comparison-chart"></div>
+                            </article>
+                            <div class="pillar-grid analysis-burst-chart-grid" id="analysis-burst-chart-grid"></div>
+                        </section>
                         <div class="stats-grid analysis-mitigation-grid" id="analysis-mitigation-card"></div>
                     </div>
                 </div>
