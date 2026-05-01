@@ -75,6 +75,91 @@ public sealed class FightAnalysisService
         string? patchScope,
         string? patchEraIds,
         string? fightAttributes)
+        => GetOrBuildSnapshot(
+            commander,
+            startDate,
+            endDate,
+            outcomeCode,
+            squadIncludeClasses,
+            squadExcludeClasses,
+            enemyIncludeClasses,
+            enemyExcludeClasses,
+            patchScope,
+            patchEraIds,
+            fightAttributes).Snapshot;
+
+    public FightAnalysisPlayerRowDto? BuildPlayerDetail(
+        string account,
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
+    {
+        if (string.IsNullOrWhiteSpace(account))
+        {
+            return null;
+        }
+
+        var snapshot = GetOrBuildSnapshot(
+            commander,
+            startDate,
+            endDate,
+            outcomeCode,
+            squadIncludeClasses,
+            squadExcludeClasses,
+            enemyIncludeClasses,
+            enemyExcludeClasses,
+            patchScope,
+            patchEraIds,
+            fightAttributes);
+        return snapshot.PlayerDetails
+            .FirstOrDefault(player => string.Equals(player.Account, account.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    public IReadOnlyList<FightAnalysisPlayerRowDto> BuildPlayerDetails(
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
+        => GetOrBuildSnapshot(
+            commander,
+            startDate,
+            endDate,
+            outcomeCode,
+            squadIncludeClasses,
+            squadExcludeClasses,
+            enemyIncludeClasses,
+            enemyExcludeClasses,
+            patchScope,
+            patchEraIds,
+            fightAttributes).PlayerDetails;
+
+    private CachedFightAnalysisSnapshot GetOrBuildSnapshot(
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
     {
         var cacheKey = BuildSnapshotCacheKey(
             _fightCatalog.CacheVersion,
@@ -110,7 +195,7 @@ public sealed class FightAnalysisService
         return snapshot;
     }
 
-    private FightAnalysisSnapshotDto BuildSnapshotUncached(
+    private CachedFightAnalysisSnapshot BuildSnapshotUncached(
         string? commander,
         string? startDate,
         string? endDate,
@@ -178,8 +263,13 @@ public sealed class FightAnalysisService
         var totalClassSampleCounts = BuildTotalClassSampleCounts(allFights);
         var totalClassPlayerFightCounts = BuildTotalClassPlayerFightCounts(allFights);
         var patchImpactsForSelection = GetPatchImpactsForSelection(patchMetadata, patchSelection);
+        var topPlayerDetails = BuildTopPlayers(
+            filteredFights,
+            totalPlayerFightCounts,
+            totalCharacterFightCounts,
+            totalCharacterLaneSampleCounts);
 
-        return new FightAnalysisSnapshotDto(
+        var snapshot = new FightAnalysisSnapshotDto(
             Options: new FightAnalysisFilterOptionsDto(
                 Commanders: commanderOptions,
                 ClassOptions: classOptions,
@@ -202,7 +292,7 @@ public sealed class FightAnalysisService
             Scope: BuildScope(allFights, filteredFights),
             Overview: BuildOverview(filteredFights, expectedScoreLookup),
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
-            TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
+            TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
@@ -212,16 +302,18 @@ public sealed class FightAnalysisService
                 filteredFights,
                 expectedScoreLookup,
                 fightAttributeDefinitions));
+
+        return new CachedFightAnalysisSnapshot(snapshot, topPlayerDetails, 0);
     }
 
-    private bool TryGetCachedSnapshot(string cacheKey, out FightAnalysisSnapshotDto snapshot)
+    private bool TryGetCachedSnapshot(string cacheKey, out CachedFightAnalysisSnapshot snapshot)
     {
         lock (_snapshotCacheLock)
         {
             if (_snapshotCache.TryGetValue(cacheKey, out var cached))
             {
                 cached.LastAccessOrder = ++_snapshotCacheAccessCounter;
-                snapshot = cached.Snapshot;
+                snapshot = cached;
                 return true;
             }
         }
@@ -230,11 +322,12 @@ public sealed class FightAnalysisService
         return false;
     }
 
-    private void CacheSnapshot(string cacheKey, FightAnalysisSnapshotDto snapshot)
+    private void CacheSnapshot(string cacheKey, CachedFightAnalysisSnapshot snapshot)
     {
         lock (_snapshotCacheLock)
         {
-            _snapshotCache[cacheKey] = new CachedFightAnalysisSnapshot(snapshot, ++_snapshotCacheAccessCounter);
+            snapshot.LastAccessOrder = ++_snapshotCacheAccessCounter;
+            _snapshotCache[cacheKey] = snapshot;
             while (_snapshotCache.Count > MaximumSnapshotCacheEntries)
             {
                 var oldestKey = _snapshotCache
@@ -1597,6 +1690,70 @@ public sealed class FightAnalysisService
             .ThenByDescending(player => player.FightCount)
             .ThenBy(player => player.Account, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisPlayerSummaryRowDto> BuildPlayerSummaryRows(
+        IReadOnlyList<FightAnalysisPlayerRowDto> players)
+        => players
+            .Select(BuildPlayerSummaryRow)
+            .ToArray();
+
+    private static FightAnalysisPlayerSummaryRowDto BuildPlayerSummaryRow(FightAnalysisPlayerRowDto player)
+    {
+        var laneSummaries = player.Characters
+            .Where(character => Math.Max(character.TotalFightCountAll, character.FightCount) >= 10)
+            .SelectMany(character => character.LaneContributions.Select(lane => new FightAnalysisPlayerLaneSummaryDto(
+                LaneKey: lane.LaneKey,
+                LaneLabel: lane.LaneLabel,
+                CharacterName: character.CharacterName,
+                ClassLabel: character.ClassLabel,
+                CharacterFightCount: character.FightCount,
+                CharacterTotalFightCountAll: character.TotalFightCountAll,
+                CharacterWinRatePercent: character.WinRatePercent,
+                AverageStrengthPercent: lane.AverageStrengthPercent,
+                AverageSharePercent: lane.AverageSharePercent,
+                OverallStrengthPercent: lane.OverallStrengthPercent,
+                OverallSharePercent: lane.OverallSharePercent,
+                AppearanceRatePercent: lane.AppearanceRatePercent,
+                Samples: lane.Samples,
+                TotalSamplesAll: lane.TotalSamplesAll)))
+            .OrderByDescending(lane => lane.OverallStrengthPercent)
+            .ThenByDescending(lane => lane.TotalSamplesAll)
+            .ThenBy(lane => lane.CharacterName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(lane => lane.LaneLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new FightAnalysisPlayerSummaryRowDto(
+            Account: player.Account,
+            DisplayName: player.DisplayName,
+            FightCount: player.FightCount,
+            TotalFightCountAll: player.TotalFightCountAll,
+            WinCount: player.WinCount,
+            LossCount: player.LossCount,
+            DrawCount: player.DrawCount,
+            WinRatePercent: player.WinRatePercent,
+            ClassesPlayed: player.ClassesPlayed,
+            PrimaryClassLabel: player.PrimaryClassLabel,
+            PrimaryLaneLabel: player.PrimaryLaneLabel,
+            ImpactScore: player.ImpactScore,
+            AveragePrimaryLaneScore: player.AveragePrimaryLaneScore,
+            AverageWeightedLaneScore: player.AverageWeightedLaneScore,
+            AverageDamagePerFight: player.AverageDamagePerFight,
+            AverageDownsPerFight: player.AverageDownsPerFight,
+            AverageKillsPerFight: player.AverageKillsPerFight,
+            AverageStripsPerFight: player.AverageStripsPerFight,
+            AverageOutgoingCleansesPerFight: player.AverageOutgoingCleansesPerFight,
+            AverageHealingPerFight: player.AverageHealingPerFight,
+            AverageBarrierPerFight: player.AverageBarrierPerFight,
+            AverageResurrectsPerFight: player.AverageResurrectsPerFight,
+            AverageDeathsPerFight: player.AverageDeathsPerFight,
+            AverageRecoveriesPerFight: player.AverageRecoveriesPerFight,
+            AverageInPositionRate: player.AverageInPositionRate,
+            ContributionSummary: player.ContributionSummary,
+            AverageFightImpactScore: player.AverageFightImpactScore,
+            FightImpactSampleCount: player.FightImpactSampleCount,
+            CharacterNames: player.CharacterNames,
+            LaneSummaries: laneSummaries);
     }
 
     private static IReadOnlyList<FightAnalysisClassRowDto> BuildTopClasses(
@@ -4106,13 +4263,19 @@ internal sealed record PatchSelection(
 
 internal sealed class CachedFightAnalysisSnapshot
 {
-    public CachedFightAnalysisSnapshot(FightAnalysisSnapshotDto snapshot, long lastAccessOrder)
+    public CachedFightAnalysisSnapshot(
+        FightAnalysisSnapshotDto snapshot,
+        IReadOnlyList<FightAnalysisPlayerRowDto> playerDetails,
+        long lastAccessOrder)
     {
         Snapshot = snapshot;
+        PlayerDetails = playerDetails;
         LastAccessOrder = lastAccessOrder;
     }
 
     public FightAnalysisSnapshotDto Snapshot { get; }
+
+    public IReadOnlyList<FightAnalysisPlayerRowDto> PlayerDetails { get; }
 
     public long LastAccessOrder { get; set; }
 }

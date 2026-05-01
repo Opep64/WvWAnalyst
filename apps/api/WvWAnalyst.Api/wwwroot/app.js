@@ -7,6 +7,10 @@ const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
+let currentAnalysisPlayerDetailsByAccount = new Map();
+let currentAnalysisPlayerDetailPromisesByAccount = new Map();
+let currentAnalysisAllPlayerDetails = null;
+let currentAnalysisAllPlayerDetailsPromise = null;
 let currentPatchMetadata = null;
 let currentCompHelperConfig = null;
 let lastBatchResult = null;
@@ -1147,7 +1151,7 @@ async function loadFightDetail(fightId) {
     return response.json();
 }
 
-async function loadAnalysis(filters = {}) {
+function buildAnalysisQueryString(filters = {}) {
     const params = new URLSearchParams();
 
     if (filters.commander) {
@@ -1186,13 +1190,127 @@ async function loadAnalysis(filters = {}) {
         params.set("enemyExcludeClasses", enemyExcludeClasses);
     }
 
-    const query = params.toString();
+    return params.toString();
+}
+
+async function loadAnalysis(filters = {}) {
+    const query = buildAnalysisQueryString(filters);
     const response = await fetch(`/api/analysis${query ? `?${query}` : ""}`);
     if (!response.ok) {
         throw new Error(`Analysis request failed with status ${response.status}`);
     }
 
     return response.json();
+}
+
+async function loadAnalysisPlayerDetail(account, filters = {}) {
+    const query = buildAnalysisQueryString(filters);
+    const response = await fetch(`/api/analysis/players/${encodeURIComponent(account)}${query ? `?${query}` : ""}`);
+    if (!response.ok) {
+        throw new Error(`Player detail request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadAnalysisPlayerDetails(filters = {}) {
+    const query = buildAnalysisQueryString(filters);
+    const response = await fetch(`/api/analysis/player-details${query ? `?${query}` : ""}`);
+    if (!response.ok) {
+        throw new Error(`Player details request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+function resetAnalysisPlayerDetailState() {
+    currentAnalysisPlayerDetailsByAccount = new Map();
+    currentAnalysisPlayerDetailPromisesByAccount = new Map();
+    currentAnalysisAllPlayerDetails = null;
+    currentAnalysisAllPlayerDetailsPromise = null;
+}
+
+function getAnalysisPlayerAccountKey(account) {
+    return String(account ?? "").trim().toLowerCase();
+}
+
+function cacheAnalysisPlayerDetail(player) {
+    const key = getAnalysisPlayerAccountKey(player?.account);
+    if (!key) {
+        return;
+    }
+
+    currentAnalysisPlayerDetailsByAccount.set(key, player);
+}
+
+function getCachedAnalysisPlayerDetail(account) {
+    const key = getAnalysisPlayerAccountKey(account);
+    return key ? currentAnalysisPlayerDetailsByAccount.get(key) ?? null : null;
+}
+
+async function ensureAnalysisPlayerDetail(account) {
+    const key = getAnalysisPlayerAccountKey(account);
+    if (!key) {
+        return null;
+    }
+
+    const cached = currentAnalysisPlayerDetailsByAccount.get(key);
+    if (cached) {
+        return cached;
+    }
+
+    const pending = currentAnalysisPlayerDetailPromisesByAccount.get(key);
+    if (pending) {
+        return pending;
+    }
+
+    const detailMap = currentAnalysisPlayerDetailsByAccount;
+    const promiseMap = currentAnalysisPlayerDetailPromisesByAccount;
+    const promise = loadAnalysisPlayerDetail(account, getAnalysisFiltersFromUi())
+        .then(player => {
+            if (detailMap === currentAnalysisPlayerDetailsByAccount) {
+                cacheAnalysisPlayerDetail(player);
+            }
+
+            return player;
+        })
+        .finally(() => {
+            if (promiseMap === currentAnalysisPlayerDetailPromisesByAccount) {
+                promiseMap.delete(key);
+            }
+        });
+
+    currentAnalysisPlayerDetailPromisesByAccount.set(key, promise);
+    return promise;
+}
+
+async function ensureAnalysisAllPlayerDetails() {
+    if (currentAnalysisAllPlayerDetails) {
+        return currentAnalysisAllPlayerDetails;
+    }
+
+    if (currentAnalysisAllPlayerDetailsPromise) {
+        return currentAnalysisAllPlayerDetailsPromise;
+    }
+
+    const detailMap = currentAnalysisPlayerDetailsByAccount;
+    const promise = loadAnalysisPlayerDetails(getAnalysisFiltersFromUi())
+        .then(players => {
+            if (detailMap === currentAnalysisPlayerDetailsByAccount) {
+                currentAnalysisAllPlayerDetails = players ?? [];
+                currentAnalysisAllPlayerDetails.forEach(cacheAnalysisPlayerDetail);
+            }
+
+            return players ?? [];
+        })
+        .finally(() => {
+            if (currentAnalysisAllPlayerDetailsPromise === promise) {
+                currentAnalysisAllPlayerDetailsPromise = null;
+            }
+        });
+
+    currentAnalysisAllPlayerDetailsPromise = promise;
+    return promise;
 }
 
 async function loadBatchJobStatus(jobId) {
@@ -2846,23 +2964,72 @@ function getSelectedAnalysisPlayerLaneLabel() {
     return option?.textContent?.trim() || "All lanes";
 }
 
+function normalizeAnalysisPlayerLaneSummary(lane, character = null) {
+    return {
+        ...lane,
+        characterName: lane.characterName ?? character?.characterName ?? "",
+        classLabel: lane.classLabel ?? character?.classLabel ?? "",
+        characterFightCount: Number(lane.characterFightCount ?? character?.fightCount ?? 0),
+        characterTotalFightCountAll: Number(lane.characterTotalFightCountAll ?? character?.totalFightCountAll ?? character?.fightCount ?? 0),
+        characterWinRatePercent: Number(lane.characterWinRatePercent ?? character?.winRatePercent ?? 0)
+    };
+}
+
+function getAnalysisPlayerLaneSummaries(player) {
+    const directSummaries = (player?.laneSummaries ?? [])
+        .map(lane => normalizeAnalysisPlayerLaneSummary(lane));
+    if (directSummaries.length > 0) {
+        return directSummaries;
+    }
+
+    return (player?.characters ?? [])
+        .filter(character => Number(character.totalFightCountAll ?? character.fightCount ?? 0) >= 10)
+        .flatMap(character => (character.laneContributions ?? [])
+            .map(lane => normalizeAnalysisPlayerLaneSummary(lane, character)));
+}
+
+function getAnalysisPlayerCharacterLaneSummaryGroups(player) {
+    const groups = new Map();
+    for (const lane of getAnalysisPlayerLaneSummaries(player)) {
+        const characterName = String(lane.characterName ?? "").trim();
+        const classLabel = String(lane.classLabel ?? "").trim();
+        if (!characterName || Number(lane.characterTotalFightCountAll ?? lane.characterFightCount ?? 0) < 10) {
+            continue;
+        }
+
+        const key = `${characterName.toLowerCase()}\u001f${classLabel.toLowerCase()}`;
+        if (!groups.has(key)) {
+            groups.set(key, {
+                character: {
+                    characterName,
+                    classLabel,
+                    fightCount: Number(lane.characterFightCount ?? 0),
+                    totalFightCountAll: Number(lane.characterTotalFightCountAll ?? lane.characterFightCount ?? 0),
+                    winRatePercent: Number(lane.characterWinRatePercent ?? 0)
+                },
+                laneContributions: []
+            });
+        }
+
+        groups.get(key).laneContributions.push(lane);
+    }
+
+    return Array.from(groups.values());
+}
+
 function getAnalysisPlayerLaneOptions(snapshot) {
     const laneMap = new Map();
 
     (snapshot.topPlayers ?? []).forEach(player => {
-        (player.characters ?? [])
-            .filter(character => Number(character.totalFightCountAll ?? character.fightCount ?? 0) >= 10)
-            .forEach(character => {
-                (character.laneContributions ?? []).forEach(lane => {
-                    const laneKey = String(lane.laneKey ?? "").trim();
-                    const laneLabel = String(lane.laneLabel ?? "").trim();
-                    if (!laneKey || !laneLabel || laneMap.has(laneKey)) {
-                        return;
-                    }
+        getAnalysisPlayerLaneSummaries(player).forEach(lane => {
+            const laneKey = String(lane.laneKey ?? "").trim();
+            const laneLabel = String(lane.laneLabel ?? "").trim();
+            if (!laneKey || !laneLabel || laneMap.has(laneKey)) {
+                return;
+            }
 
-                    laneMap.set(laneKey, laneLabel);
-                });
-            });
+            laneMap.set(laneKey, laneLabel);
+        });
     });
 
     return [
@@ -2896,11 +3063,18 @@ function getBestAnalysisPlayerLaneMatch(player, laneKey) {
         return null;
     }
 
-    const matches = (player.characters ?? [])
-        .filter(character => Number(character.totalFightCountAll ?? character.fightCount ?? 0) >= 10)
-        .flatMap(character => (character.laneContributions ?? [])
-            .filter(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey))
-            .map(lane => ({ character, lane })))
+    const matches = getAnalysisPlayerLaneSummaries(player)
+        .filter(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey))
+        .map(lane => ({
+            character: {
+                characterName: lane.characterName,
+                classLabel: lane.classLabel,
+                fightCount: Number(lane.characterFightCount ?? 0),
+                totalFightCountAll: Number(lane.characterTotalFightCountAll ?? lane.characterFightCount ?? 0),
+                winRatePercent: Number(lane.characterWinRatePercent ?? 0)
+            },
+            lane
+        }))
         .sort((left, right) => Number(right.lane.overallStrengthPercent ?? 0) - Number(left.lane.overallStrengthPercent ?? 0)
             || Number(right.character.totalFightCountAll ?? right.character.fightCount ?? 0) - Number(left.character.totalFightCountAll ?? left.character.fightCount ?? 0)
             || String(left.character.characterName ?? "").localeCompare(String(right.character.characterName ?? ""), undefined, { sensitivity: "base" }));
@@ -3227,10 +3401,9 @@ function getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows) {
     return (snapshot.topPlayers ?? [])
         .filter(player => Number(player.totalFightCountAll ?? player.fightCount ?? 0) >= MINIMUM_PLAYER_TABLE_FIGHTS)
         .map(player => {
-            const bestCharacter = (player.characters ?? [])
-                .filter(character => Number(character.totalFightCountAll ?? character.fightCount ?? 0) >= 10)
-                .map(character => {
-                    const lane = buildCombinedLaneContribution(selectedLaneRows, character.laneContributions ?? []);
+            const bestCharacter = getAnalysisPlayerCharacterLaneSummaryGroups(player)
+                .map(group => {
+                    const lane = buildCombinedLaneContribution(selectedLaneRows, group.laneContributions ?? []);
                     if (!lane || Number(lane.totalSamplesAll ?? 0) < MINIMUM_LANE_FILTER_APPEARANCES) {
                         return null;
                     }
@@ -3241,7 +3414,7 @@ function getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows) {
                         + Number(lane.coverageRatePercent ?? 0) * 0.10) * 10) / 10;
 
                     return {
-                        character,
+                        character: group.character,
                         lane,
                         rankingScore
                     };
@@ -3771,8 +3944,15 @@ function buildCompHelperCandidates(snapshot) {
     return orderedCandidates;
 }
 
+function getCompHelperCandidateSnapshot(snapshot) {
+    return {
+        ...(snapshot ?? {}),
+        topPlayers: currentAnalysisAllPlayerDetails ?? snapshot?.topPlayers ?? []
+    };
+}
+
 function getCompHelperCandidates(snapshot) {
-    const candidates = buildCompHelperCandidates(snapshot);
+    const candidates = buildCompHelperCandidates(getCompHelperCandidateSnapshot(snapshot));
     const candidateIds = new Set(candidates.map(candidate => candidate.id));
     lockedCompHelperCandidateIds = lockedCompHelperCandidateIds.filter(id => candidateIds.has(id));
     return candidates;
@@ -4487,6 +4667,25 @@ function updateCompHelperConfigValue(input) {
     return true;
 }
 
+function renderAnalysisCompHelperPlaceholder(message) {
+    const summary = document.querySelector("#analysis-comp-helper-summary");
+    const locksContainer = document.querySelector("#analysis-comp-helper-locks");
+    const candidatesBody = document.querySelector("#analysis-comp-helper-candidates-body");
+    const suggestionsContainer = document.querySelector("#analysis-comp-helper-suggestions");
+    if (summary) {
+        summary.textContent = message;
+    }
+    if (locksContainer) {
+        locksContainer.innerHTML = "";
+    }
+    if (candidatesBody) {
+        candidatesBody.innerHTML = `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`;
+    }
+    if (suggestionsContainer) {
+        suggestionsContainer.innerHTML = "";
+    }
+}
+
 function renderAnalysisCompHelper(snapshot) {
     const summary = document.querySelector("#analysis-comp-helper-summary");
     const locksContainer = document.querySelector("#analysis-comp-helper-locks");
@@ -4498,10 +4697,30 @@ function renderAnalysisCompHelper(snapshot) {
         return;
     }
 
-    const candidates = getCompHelperCandidates(snapshot);
+    if (!currentAnalysisAllPlayerDetails) {
+        const message = currentAnalysisAllPlayerDetailsPromise
+            ? "Loading Comp Helper player cards..."
+            : "Loading Comp Helper player cards on demand...";
+        renderAnalysisCompHelperPlaceholder(message);
+        void ensureAnalysisAllPlayerDetails()
+            .then(() => {
+                if (snapshot === currentAnalysisSnapshot && activeAnalysisTab === "comp-helper") {
+                    renderAnalysisCompHelper(snapshot);
+                }
+            })
+            .catch(error => {
+                if (snapshot === currentAnalysisSnapshot) {
+                    renderAnalysisCompHelperPlaceholder(error instanceof Error ? error.message : String(error));
+                }
+            });
+        return;
+    }
+
+    const compSnapshot = getCompHelperCandidateSnapshot(snapshot);
+    const candidates = getCompHelperCandidates(compSnapshot);
     const lockedCandidates = getLockedCompHelperCandidates(candidates);
     const filteredCandidates = getCompHelperFilteredCandidates(candidates);
-    const searchResult = searchCompHelperSuggestions(snapshot, candidates);
+    const searchResult = searchCompHelperSuggestions(compSnapshot, candidates);
     syncCompHelperProfileControl();
     syncCompHelperCandidateTierControl();
     favoredLanesContainer.innerHTML = compHelperLaneTargets
@@ -4727,11 +4946,14 @@ function buildCharacterLaneMetricCopy(lane, totalFights) {
 
 function buildAnalysisPlayerCompCandidateLookup(snapshot) {
     const lookup = new Map();
-    if (!snapshot) {
+    if (!snapshot || !currentAnalysisAllPlayerDetails) {
         return lookup;
     }
 
-    for (const candidate of buildCompHelperCandidates(snapshot)) {
+    for (const candidate of buildCompHelperCandidates({
+        ...snapshot,
+        topPlayers: currentAnalysisAllPlayerDetails
+    })) {
         lookup.set(candidate.id, candidate);
     }
 
@@ -5199,8 +5421,7 @@ function getCurrentAnalysisImpactTrends(context) {
         return classRow?.characterImpactTrends ?? [];
     }
 
-    const player = (currentAnalysisSnapshot.topPlayers ?? [])
-        .find(row => stringEqualsIgnoreCase(row.account, selectedAnalysisPlayerAccount));
+    const player = getCachedAnalysisPlayerDetail(selectedAnalysisPlayerAccount);
     return player?.characterImpactTrends ?? [];
 }
 
@@ -5284,9 +5505,11 @@ function renderAnalysisImpactTrendContext(context) {
         return;
     }
 
-    const player = (currentAnalysisSnapshot.topPlayers ?? [])
-        .find(row => stringEqualsIgnoreCase(row.account, selectedAnalysisPlayerAccount));
-    renderAnalysisPlayerDetail(player ?? null);
+    if (activeAnalysisTab === "players") {
+        renderSelectedAnalysisPlayerDetail();
+    } else {
+        renderAnalysisPlayerDetailMessage("Open Players to load character cards for the selected player.");
+    }
 }
 
 function handleAnalysisImpactTrendSelectionChange(event) {
@@ -5389,6 +5612,16 @@ function buildAnalysisCharacterCard(character, player = null, compCandidateLooku
     `;
 }
 
+function renderAnalysisPlayerDetailMessage(message) {
+    const container = document.querySelector("#analysis-player-detail");
+    if (!container) {
+        return;
+    }
+
+    container.className = "analysis-player-detail";
+    container.innerHTML = `<p class="workspace-note">${escapeHtml(message)}</p>`;
+}
+
 function renderAnalysisPlayerDetail(player) {
     const container = document.querySelector("#analysis-player-detail");
     if (!player) {
@@ -5415,6 +5648,33 @@ function renderAnalysisPlayerDetail(player) {
         </div>
     `;
     hideAnalysisImpactTrendTooltip("player");
+}
+
+function renderSelectedAnalysisPlayerDetail() {
+    if (!selectedAnalysisPlayerAccount) {
+        renderAnalysisPlayerDetail(null);
+        return;
+    }
+
+    const selectedAccount = selectedAnalysisPlayerAccount;
+    const cachedPlayer = getCachedAnalysisPlayerDetail(selectedAccount);
+    if (cachedPlayer) {
+        renderAnalysisPlayerDetail(cachedPlayer);
+        return;
+    }
+
+    renderAnalysisPlayerDetailMessage(`Loading ${selectedAccount} character cards...`);
+    void ensureAnalysisPlayerDetail(selectedAccount)
+        .then(player => {
+            if (currentAnalysisSnapshot && stringEqualsIgnoreCase(selectedAnalysisPlayerAccount, selectedAccount)) {
+                renderAnalysisPlayerDetail(player);
+            }
+        })
+        .catch(error => {
+            if (stringEqualsIgnoreCase(selectedAnalysisPlayerAccount, selectedAccount)) {
+                renderAnalysisPlayerDetailMessage(error instanceof Error ? error.message : String(error));
+            }
+        });
 }
 
 function renderAnalysisPlayers(snapshot) {
@@ -5451,8 +5711,11 @@ function renderAnalysisPlayers(snapshot) {
         .map(player => buildAnalysisPlayerRow(player, stringEqualsIgnoreCase(player.account, selectedAnalysisPlayerAccount)))
         .join("");
 
-    const selectedPlayer = filteredPlayers.find(player => stringEqualsIgnoreCase(player.account, selectedAnalysisPlayerAccount)) ?? filteredPlayers[0];
-    renderAnalysisPlayerDetail(selectedPlayer);
+    if (activeAnalysisTab === "players") {
+        renderSelectedAnalysisPlayerDetail();
+    } else {
+        renderAnalysisPlayerDetailMessage("Open Players to load character cards for the selected player.");
+    }
 }
 
 function buildAnalysisClassRow(classRow) {
@@ -6515,6 +6778,12 @@ function setActiveAnalysisTab(tabKey, options = {}) {
     if (resetScroll) {
         requestAnimationFrame(() => resetAnalysisPanelScroll(tabKey));
     }
+
+    if (tabKey === "comp-helper" && currentAnalysisSnapshot) {
+        renderAnalysisCompHelper(currentAnalysisSnapshot);
+    } else if (tabKey === "players" && currentAnalysisSnapshot) {
+        renderAnalysisPlayers(currentAnalysisSnapshot);
+    }
 }
 
 function renderAnalysisLoading(message = "Loading analysis...") {
@@ -6558,6 +6827,7 @@ function renderAnalysisError(message) {
 
 function renderAnalysis(snapshot) {
     currentAnalysisSnapshot = snapshot;
+    resetAnalysisPlayerDetailState();
 
     document.querySelector("#analysis-summary").textContent =
         `${snapshot.scope.filteredFightCount} fights selected from ${snapshot.scope.totalImportedFights} imported fights. Win rate ${formatPercent(snapshot.scope.winRatePercent)}.`;
@@ -6575,7 +6845,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisEnemies(snapshot);
     renderAnalysisLanes(snapshot);
     renderAnalysisBoons(snapshot);
-    renderAnalysisCompHelper(snapshot);
+    renderAnalysisCompHelperPlaceholder("Open Comp Helper to load candidate player cards for the current filter.");
 
     setActiveAnalysisTab(activeAnalysisTab);
 }

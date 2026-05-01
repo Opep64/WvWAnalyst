@@ -130,6 +130,61 @@ app.MapGet("/api/analysis", (
         patchScope,
         patchEraIds,
         fightAttributes)));
+app.MapGet("/api/analysis/players/{account}", (
+    string account,
+    string? commander,
+    string? startDate,
+    string? endDate,
+    string? outcome,
+    string? squadIncludeClasses,
+    string? squadExcludeClasses,
+    string? enemyIncludeClasses,
+    string? enemyExcludeClasses,
+    string? patchScope,
+    string? patchEraIds,
+    string? fightAttributes,
+    FightAnalysisService service) =>
+{
+    var player = service.BuildPlayerDetail(
+        account,
+        commander,
+        startDate,
+        endDate,
+        outcome,
+        squadIncludeClasses,
+        squadExcludeClasses,
+        enemyIncludeClasses,
+        enemyExcludeClasses,
+        patchScope,
+        patchEraIds,
+        fightAttributes);
+    return player is null ? Results.NotFound() : Results.Ok(player);
+});
+app.MapGet("/api/analysis/player-details", (
+    string? commander,
+    string? startDate,
+    string? endDate,
+    string? outcome,
+    string? squadIncludeClasses,
+    string? squadExcludeClasses,
+    string? enemyIncludeClasses,
+    string? enemyExcludeClasses,
+    string? patchScope,
+    string? patchEraIds,
+    string? fightAttributes,
+    FightAnalysisService service) =>
+    Results.Ok(service.BuildPlayerDetails(
+        commander,
+        startDate,
+        endDate,
+        outcome,
+        squadIncludeClasses,
+        squadExcludeClasses,
+        enemyIncludeClasses,
+        enemyExcludeClasses,
+        patchScope,
+        patchEraIds,
+        fightAttributes)));
 app.MapGet("/api/fights/{fightId}", (string fightId, FightCatalogService catalog) =>
     catalog.TryGetFightDetail(fightId, out var detail)
         ? Results.Ok(detail)
