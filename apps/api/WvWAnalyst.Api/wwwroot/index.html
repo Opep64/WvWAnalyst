@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260430compconfig1">
+    <link rel="stylesheet" href="/styles.css?v=20260430differences1">
 </head>
 <body>
     <div class="page-shell">
@@ -619,6 +619,7 @@
                     </div>
                     <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
                         <button class="analysis-tab is-active" id="analysis-tab-overview" type="button" data-analysis-tab="overview" role="tab" aria-selected="true">Overview</button>
+                        <button class="analysis-tab" id="analysis-tab-differences" type="button" data-analysis-tab="differences" role="tab" aria-selected="false">Differences</button>
                         <button class="analysis-tab" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="false">Players</button>
                         <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
                         <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
@@ -656,6 +657,115 @@
                         <div class="stats-grid analysis-trend-delta-grid" id="analysis-trend-delta-grid"></div>
                         <div class="pillar-grid" id="analysis-chart-grid"></div>
                         <div class="stats-grid analysis-mitigation-grid" id="analysis-mitigation-card"></div>
+                    </div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-differences" data-analysis-panel="differences" role="tabpanel" aria-labelledby="analysis-tab-differences" hidden>
+                    <p class="workspace-note analysis-panel-note" id="analysis-differences-summary">Win/loss comparison across the current analysis filter.</p>
+                    <div class="stats-grid analysis-difference-card-grid" id="analysis-differences-top-signals"></div>
+                    <div class="analysis-difference-grid">
+                        <section class="analysis-difference-section">
+                            <h3>Score and Context</h3>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Metric</th>
+                                            <th>Wins</th>
+                                            <th>Losses</th>
+                                            <th>Delta</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-score-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="analysis-difference-section">
+                            <h3>Lanes</h3>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Lane</th>
+                                            <th>Wins</th>
+                                            <th>Losses</th>
+                                            <th>Delta</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-lane-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="analysis-difference-section">
+                            <h3>Fight Attributes</h3>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Attribute</th>
+                                            <th>Wins</th>
+                                            <th>Losses</th>
+                                            <th>Delta</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-attribute-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="analysis-difference-section">
+                            <h3>Boons</h3>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Boon</th>
+                                            <th>Wins</th>
+                                            <th>Losses</th>
+                                            <th>Delta</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-boon-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="analysis-difference-section">
+                            <h3>Classes</h3>
+                            <p class="analysis-difference-note">Rows use only fights where the class appeared. Result is the win/loss split for those fights; average count ignores fights without that class.</p>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table analysis-difference-class-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Result when present</th>
+                                            <th>Avg count when present</th>
+                                            <th>Coverage</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-class-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="analysis-difference-section">
+                            <h3>Enemies</h3>
+                            <div class="table-shell">
+                                <table class="data-table data-table-compact analysis-difference-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Enemy class</th>
+                                            <th>Wins</th>
+                                            <th>Losses</th>
+                                            <th>Delta</th>
+                                            <th>Confidence</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-differences-enemy-body"></tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players" hidden>
@@ -932,6 +1042,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260430compconfig1" defer></script>
+    <script src="/app.js?v=20260430differences1" defer></script>
 </body>
 </html>

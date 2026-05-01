@@ -11,7 +11,8 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisEnemyClassRowDto> TopEnemyClasses,
     IReadOnlyList<FightAnalysisLaneRowDto> TopLanes,
     IReadOnlyList<FightAnalysisBoonTrendDto> BoonTrends,
-    IReadOnlyList<FightAnalysisBoonRowDto> TopBoons);
+    IReadOnlyList<FightAnalysisBoonRowDto> TopBoons,
+    FightAnalysisDifferenceReportDto WinLossDifferences);
 
 public sealed record FightAnalysisFilterOptionsDto(
     IReadOnlyList<string> Commanders,
@@ -66,6 +67,54 @@ public sealed record FightAnalysisOverviewDto(
     double AverageDurationSeconds,
     FightAnalysisMitigationSummaryDto? MitigationSummary,
     FightAnalysisObliterateSummaryDto? ObliterateSummary);
+
+public sealed record FightAnalysisDifferenceReportDto(
+    int WinFightCount,
+    int LossFightCount,
+    string ConfidenceLabel,
+    string Summary,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> TopSignals,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> ScoreDifferences,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> LaneDifferences,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> BoonDifferences,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> ClassDifferences,
+    IReadOnlyList<FightAnalysisClassDifferenceRowDto> ClassDetails,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> EnemyDifferences,
+    IReadOnlyList<FightAnalysisDifferenceRowDto> AttributeDifferences);
+
+public sealed record FightAnalysisDifferenceRowDto(
+    string Key,
+    string Label,
+    string Group,
+    double? WinValue,
+    double? LossValue,
+    double? Delta,
+    string Unit,
+    int WinSampleCount,
+    int LossSampleCount,
+    string ConfidenceLabel,
+    string DirectionLabel,
+    string Detail);
+
+public sealed record FightAnalysisClassDifferenceRowDto(
+    string ClassLabel,
+    int PresentFightCount,
+    int PresentWinCount,
+    int PresentLossCount,
+    double WinWhenPresentPercent,
+    double LossWhenPresentPercent,
+    double ResultDelta,
+    double AverageCountWhenPresent,
+    double WinAverageCountWhenPresent,
+    double LossAverageCountWhenPresent,
+    double CountDeltaWhenPresent,
+    double WinCoverageScore,
+    double LossCoverageScore,
+    double CoverageDelta,
+    int WinCoverageSampleCount,
+    int LossCoverageSampleCount,
+    string ConfidenceLabel,
+    string Detail);
 
 public sealed record FightAnalysisMitigationSummaryDto(
     int AvailableFightCount,

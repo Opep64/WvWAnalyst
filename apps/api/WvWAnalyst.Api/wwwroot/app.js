@@ -2378,6 +2378,180 @@ function buildAnalysisOverviewCards(snapshot) {
     return cards.map(card => typeof card === "string" ? card : buildAnalysisOverviewStandardCard(card)).join("");
 }
 
+function formatAnalysisDifferenceValue(row, value) {
+    if (value == null) {
+        return "n/a";
+    }
+
+    switch (row.unit) {
+        case "%":
+            return formatPercent(value);
+        case "seconds":
+            return formatSeconds(value);
+        case "players":
+            return `${formatNumber(value, 1)} players`;
+        case "per fight":
+            return `${formatNumber(value, 1)}/fight`;
+        case "score":
+            return formatNumber(value, 1);
+        default:
+            return formatNumber(value, 1);
+    }
+}
+
+function formatAnalysisDifferenceDelta(row) {
+    if (row.delta == null) {
+        return "n/a";
+    }
+
+    const suffix = row.unit === "%"
+        ? "%"
+        : row.unit === "seconds"
+            ? "s"
+            : row.unit === "players"
+                ? " players"
+                : row.unit === "per fight"
+                    ? "/fight"
+                    : "";
+    return `${formatSignedNumber(row.delta, 1)}${suffix}`;
+}
+
+function getAnalysisDifferenceDirectionClass(row) {
+    const delta = Number(row.delta ?? 0);
+    if (Math.abs(delta) < 0.05) {
+        return "is-flat";
+    }
+
+    return delta > 0 ? "is-up" : "is-down";
+}
+
+function buildAnalysisDifferenceTopSignalCard(row) {
+    return `
+        <article class="analysis-card analysis-delta-card">
+            <strong>${escapeHtml(`${row.group}: ${row.label}`)}</strong>
+            <div class="analysis-delta-direction ${getAnalysisDifferenceDirectionClass(row)}">${escapeHtml(row.directionLabel ?? "Even")}</div>
+            <div class="analysis-delta-metric">${escapeHtml(formatAnalysisDifferenceDelta(row))}</div>
+            <div class="table-inline-note">${escapeHtml(row.detail ?? "Compared across wins and losses.")}</div>
+            <div class="analysis-delta-pair">
+                <span>Wins ${escapeHtml(formatAnalysisDifferenceValue(row, row.winValue))}</span>
+                <span>Losses ${escapeHtml(formatAnalysisDifferenceValue(row, row.lossValue))}</span>
+                <span>${escapeHtml(row.confidenceLabel ?? "Low")} confidence</span>
+            </div>
+        </article>
+    `;
+}
+
+function buildAnalysisDifferenceTableRows(rows, emptyMessage) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return `<tr><td colspan="5">${escapeHtml(emptyMessage)}</td></tr>`;
+    }
+
+    return rows.map(row => `
+        <tr>
+            <td>
+                <strong>${escapeHtml(row.label)}</strong>
+                <span class="table-inline-note">${escapeHtml(row.detail ?? "")}</span>
+            </td>
+            <td>
+                <strong>${escapeHtml(formatAnalysisDifferenceValue(row, row.winValue))}</strong>
+                <span class="table-inline-note">${escapeHtml(`${formatNumber(row.winSampleCount ?? 0)} samples`)}</span>
+            </td>
+            <td>
+                <strong>${escapeHtml(formatAnalysisDifferenceValue(row, row.lossValue))}</strong>
+                <span class="table-inline-note">${escapeHtml(`${formatNumber(row.lossSampleCount ?? 0)} samples`)}</span>
+            </td>
+            <td>
+                <span class="analysis-difference-delta ${getAnalysisDifferenceDirectionClass(row)}">${escapeHtml(formatAnalysisDifferenceDelta(row))}</span>
+                <span class="table-inline-note">${escapeHtml(row.directionLabel ?? "Even")}</span>
+            </td>
+            <td>${escapeHtml(row.confidenceLabel ?? "Low")}</td>
+        </tr>
+    `).join("");
+}
+
+function formatDifferenceDelta(value, suffix = "") {
+    return `${formatSignedNumber(value, 1)}${suffix}`;
+}
+
+function buildAnalysisClassDifferenceMetric(winLabel, lossLabel, deltaLabel, directionClass) {
+    return `
+        <div class="analysis-class-difference-metric">
+            <span>Wins <strong>${escapeHtml(winLabel)}</strong></span>
+            <span>Losses <strong>${escapeHtml(lossLabel)}</strong></span>
+            <span class="analysis-difference-delta ${directionClass}">${escapeHtml(deltaLabel)}</span>
+        </div>
+    `;
+}
+
+function buildAnalysisClassDifferenceTableRows(rows, emptyMessage) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return `<tr><td colspan="5">${escapeHtml(emptyMessage)}</td></tr>`;
+    }
+
+    return rows.map(row => {
+        const resultDirection = getAnalysisDifferenceDirectionClass({ delta: row.resultDelta });
+        const countDirection = getAnalysisDifferenceDirectionClass({ delta: row.countDeltaWhenPresent });
+        const coverageDirection = getAnalysisDifferenceDirectionClass({ delta: row.coverageDelta });
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(row.classLabel)}</strong>
+                    <span class="table-inline-note">${escapeHtml(`${formatNumber(row.presentFightCount ?? 0)} present fights`)}</span>
+                </td>
+                <td>
+                    ${buildAnalysisClassDifferenceMetric(
+                        `${formatPercent(row.winWhenPresentPercent)} (${formatNumber(row.presentWinCount ?? 0)} fights)`,
+                        `${formatPercent(row.lossWhenPresentPercent)} (${formatNumber(row.presentLossCount ?? 0)} fights)`,
+                        formatDifferenceDelta(row.resultDelta, " pts"),
+                        resultDirection)}
+                </td>
+                <td>
+                    ${buildAnalysisClassDifferenceMetric(
+                        `${formatNumber(row.winAverageCountWhenPresent, 1)}/fight`,
+                        `${formatNumber(row.lossAverageCountWhenPresent, 1)}/fight`,
+                        formatDifferenceDelta(row.countDeltaWhenPresent),
+                        countDirection)}
+                    <span class="table-inline-note">${escapeHtml(`All present ${formatNumber(row.averageCountWhenPresent, 1)}/fight`)}</span>
+                </td>
+                <td>
+                    ${buildAnalysisClassDifferenceMetric(
+                        `${formatNumber(row.winCoverageScore, 1)} (${formatNumber(row.winCoverageSampleCount ?? 0)} samples)`,
+                        `${formatNumber(row.lossCoverageScore, 1)} (${formatNumber(row.lossCoverageSampleCount ?? 0)} samples)`,
+                        formatDifferenceDelta(row.coverageDelta),
+                        coverageDirection)}
+                </td>
+                <td>${escapeHtml(row.confidenceLabel ?? "Low")}</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+function renderAnalysisDifferences(snapshot) {
+    const report = snapshot.winLossDifferences ?? null;
+    if (!report) {
+        document.querySelector("#analysis-differences-summary").textContent = "No win/loss difference report is available for this analysis snapshot.";
+        setInnerHtml("#analysis-differences-top-signals", "");
+        ["score", "lane", "attribute", "boon", "class", "enemy"].forEach(key => {
+            setInnerHtml(`#analysis-differences-${key}-body`, `<tr><td colspan="5">No difference data available.</td></tr>`);
+        });
+        return;
+    }
+
+    document.querySelector("#analysis-differences-summary").textContent =
+        `${report.summary} Wins ${formatNumber(report.winFightCount)} | Losses ${formatNumber(report.lossFightCount)} | ${report.confidenceLabel} confidence.`;
+    setInnerHtml(
+        "#analysis-differences-top-signals",
+        (report.topSignals ?? []).length > 0
+            ? report.topSignals.map(buildAnalysisDifferenceTopSignalCard).join("")
+            : `<article class="analysis-card"><strong>No separators yet</strong><div class="table-inline-note">${escapeHtml(report.summary)}</div></article>`);
+    setInnerHtml("#analysis-differences-score-body", buildAnalysisDifferenceTableRows(report.scoreDifferences, "No score differences available."));
+    setInnerHtml("#analysis-differences-lane-body", buildAnalysisDifferenceTableRows(report.laneDifferences, "No lane differences available."));
+    setInnerHtml("#analysis-differences-attribute-body", buildAnalysisDifferenceTableRows(report.attributeDifferences, "No fight attribute differences available."));
+    setInnerHtml("#analysis-differences-boon-body", buildAnalysisDifferenceTableRows(report.boonDifferences, "No boon differences available."));
+    setInnerHtml("#analysis-differences-class-body", buildAnalysisClassDifferenceTableRows(report.classDetails ?? [], "No class differences available."));
+    setInnerHtml("#analysis-differences-enemy-body", buildAnalysisDifferenceTableRows(report.enemyDifferences, "No enemy differences available."));
+}
+
 function renderAnalysisMitigation(snapshot) {
     const mitigationSummary = snapshot.overview?.mitigationSummary ?? null;
     if (!mitigationSummary) {
@@ -6350,6 +6524,11 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-trend-delta-grid", "");
     setInnerHtml("#analysis-chart-grid", "");
     setInnerHtml("#analysis-mitigation-card", "");
+    document.querySelector("#analysis-differences-summary").textContent = message;
+    setInnerHtml("#analysis-differences-top-signals", "");
+    ["score", "lane", "attribute", "boon", "class", "enemy"].forEach(key => {
+        setInnerHtml(`#analysis-differences-${key}-body`, `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
+    });
     setInnerHtml("#analysis-scope-list", buildAnalysisScopeStaticChip(message));
     document.querySelector("#analysis-players-summary").textContent = message;
     setInnerHtml("#analysis-players-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
@@ -6385,6 +6564,7 @@ function renderAnalysis(snapshot) {
 
     renderAnalysisFilterOptions(snapshot);
     setInnerHtml("#analysis-overview-cards", buildAnalysisOverviewCards(snapshot));
+    renderAnalysisDifferences(snapshot);
     renderAnalysisCharts(snapshot);
     renderAnalysisMitigation(snapshot);
 

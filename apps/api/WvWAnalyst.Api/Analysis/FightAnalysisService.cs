@@ -119,12 +119,14 @@ public sealed class FightAnalysisService
             .ToArray();
 
         var expectedScoreLookup = BuildExpectedScoreLookup(allFights);
+        var fightAttributeDefinitions = _fightAttributes.GetDefinitions();
         var trackedPlayerSamples = GetTrackedPlayerSamples(allFights);
         var totalPlayerFightCounts = BuildTotalPlayerFightCounts(trackedPlayerSamples);
         var totalCharacterFightCounts = BuildTotalCharacterFightCounts(trackedPlayerSamples);
         var totalCharacterLaneSampleCounts = BuildTotalCharacterLaneSampleCounts(trackedPlayerSamples);
         var totalClassSampleCounts = BuildTotalClassSampleCounts(allFights);
         var totalClassPlayerFightCounts = BuildTotalClassPlayerFightCounts(allFights);
+        var patchImpactsForSelection = GetPatchImpactsForSelection(patchMetadata, patchSelection);
 
         return new FightAnalysisSnapshotDto(
             Options: new FightAnalysisFilterOptionsDto(
@@ -133,7 +135,7 @@ public sealed class FightAnalysisService
                 MinFightDate: minDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 MaxFightDate: maxDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 PatchEras: patchMetadata.PatchEras,
-                FightAttributes: _fightAttributes.GetDefinitions()),
+                FightAttributes: fightAttributeDefinitions),
             Selection: new FightAnalysisSelectionDto(
                 Commander: normalizedCommander,
                 StartDate: normalizedStartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -150,11 +152,15 @@ public sealed class FightAnalysisService
             Overview: BuildOverview(filteredFights, expectedScoreLookup),
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
             TopPlayers: BuildTopPlayers(filteredFights, totalPlayerFightCounts, totalCharacterFightCounts, totalCharacterLaneSampleCounts),
-            TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, GetPatchImpactsForSelection(patchMetadata, patchSelection)),
+            TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
-            TopBoons: BuildTopBoons(filteredFights));
+            TopBoons: BuildTopBoons(filteredFights),
+            WinLossDifferences: BuildWinLossDifferences(
+                filteredFights,
+                expectedScoreLookup,
+                fightAttributeDefinitions));
     }
 
     private static FightAnalysisScopeDto BuildScope(
@@ -297,6 +303,512 @@ public sealed class FightAnalysisService
             AverageDurationSeconds: averageDurationSeconds,
             MitigationSummary: mitigationSummary,
             ObliterateSummary: obliterateSummary);
+    }
+
+    private static FightAnalysisDifferenceReportDto BuildWinLossDifferences(
+        IReadOnlyList<FightArtifactSummaryDto> filteredFights,
+        IReadOnlyDictionary<string, FightExpectedScoreResult> expectedScoreLookup,
+        IReadOnlyList<FightAttributeDefinitionDto> attributeDefinitions)
+    {
+        var wins = filteredFights
+            .Where(IsSquadWin)
+            .ToArray();
+        var losses = filteredFights
+            .Where(IsEnemyWin)
+            .ToArray();
+        var confidenceLabel = DeriveDifferenceReportConfidence(wins.Length, losses.Length);
+
+        if (wins.Length == 0 || losses.Length == 0)
+        {
+            return new FightAnalysisDifferenceReportDto(
+                WinFightCount: wins.Length,
+                LossFightCount: losses.Length,
+                ConfidenceLabel: confidenceLabel,
+                Summary: "This report needs at least one win and one loss inside the current filter.",
+                TopSignals: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                ScoreDifferences: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                LaneDifferences: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                BoonDifferences: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                ClassDifferences: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                ClassDetails: Array.Empty<FightAnalysisClassDifferenceRowDto>(),
+                EnemyDifferences: Array.Empty<FightAnalysisDifferenceRowDto>(),
+                AttributeDifferences: Array.Empty<FightAnalysisDifferenceRowDto>());
+        }
+
+        var winOverview = BuildOverview(wins, expectedScoreLookup);
+        var lossOverview = BuildOverview(losses, expectedScoreLookup);
+        var scoreDifferences = BuildScoreDifferenceRows(winOverview, lossOverview, wins.Length, losses.Length);
+        var laneDifferences = BuildLaneDifferenceRows(BuildTopLanes(wins), BuildTopLanes(losses), wins.Length, losses.Length);
+        var boonDifferences = BuildBoonDifferenceRows(BuildTopBoons(wins), BuildTopBoons(losses), wins.Length, losses.Length);
+        var classDetails = BuildClassDetailDifferenceRows(wins, losses);
+        var classDifferences = BuildClassRecordDifferenceRows(classDetails);
+        var enemyDifferences = BuildEnemyDifferenceRows(BuildTopEnemyClasses(wins), BuildTopEnemyClasses(losses), wins.Length, losses.Length);
+        var attributeDifferences = BuildAttributeDifferenceRows(wins, losses, attributeDefinitions);
+        var topSignals = scoreDifferences
+            .Concat(laneDifferences)
+            .Concat(boonDifferences)
+            .Concat(classDifferences)
+            .Concat(enemyDifferences)
+            .Concat(attributeDifferences)
+            .Where(row => row.Delta.HasValue)
+            .OrderByDescending(GetDifferenceSortMagnitude)
+            .ThenBy(row => row.Group, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+
+        return new FightAnalysisDifferenceReportDto(
+            WinFightCount: wins.Length,
+            LossFightCount: losses.Length,
+            ConfidenceLabel: confidenceLabel,
+            Summary: BuildWinLossDifferenceSummary(wins.Length, losses.Length, confidenceLabel, topSignals),
+            TopSignals: topSignals,
+            ScoreDifferences: scoreDifferences,
+            LaneDifferences: laneDifferences,
+            BoonDifferences: boonDifferences,
+            ClassDifferences: classDifferences,
+            ClassDetails: classDetails,
+            EnemyDifferences: enemyDifferences,
+            AttributeDifferences: attributeDifferences);
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildScoreDifferenceRows(
+        FightAnalysisOverviewDto wins,
+        FightAnalysisOverviewDto losses,
+        int winFightCount,
+        int lossFightCount)
+    {
+        return
+        [
+            BuildDifferenceRow("overall", "Overall score", "Score", wins.AverageOverallScore, losses.AverageOverallScore, "score", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average Analyst overall score."),
+            BuildDifferenceRow("expected", "Expected score", "Score", wins.AverageExpectedScore, losses.AverageExpectedScore, "score", wins.ContextDeltaSampleCount, losses.ContextDeltaSampleCount, winFightCount, lossFightCount, "Average expected score from similar fight contexts."),
+            BuildDifferenceRow("context-delta", "Context delta", "Score", wins.AverageContextDelta, losses.AverageContextDelta, "score", wins.ContextDeltaSampleCount, losses.ContextDeltaSampleCount, winFightCount, lossFightCount, "Actual score minus expected score for similar fight contexts."),
+            BuildDifferenceRow("cohesion", "Cohesion", "Score", wins.AverageCohesionScore, losses.AverageCohesionScore, "score", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average cohesion and positioning pillar."),
+            BuildDifferenceRow("pressure", "Pressure", "Score", wins.AveragePressureScore, losses.AveragePressureScore, "score", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average pressure and burst pillar."),
+            BuildDifferenceRow("downstate", "Downstate", "Score", wins.AverageDownstateScore, losses.AverageDownstateScore, "score", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average downstate and conversion pillar."),
+            BuildDifferenceRow("support", "Support", "Score", wins.AverageSupportScore, losses.AverageSupportScore, "score", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average support and mitigation pillar."),
+            BuildDifferenceRow("squad-size", "Squad size", "Context", wins.AverageSquadSize, losses.AverageSquadSize, "players", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average squad size in the selected fights."),
+            BuildDifferenceRow("enemy-size", "Enemy size", "Context", wins.AverageEnemySize, losses.AverageEnemySize, "players", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average enemy size in the selected fights."),
+            BuildDifferenceRow("duration", "Duration", "Context", wins.AverageDurationSeconds, losses.AverageDurationSeconds, "seconds", winFightCount, lossFightCount, winFightCount, lossFightCount, "Average fight duration.")
+        ];
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildLaneDifferenceRows(
+        IReadOnlyList<FightAnalysisLaneRowDto> winRows,
+        IReadOnlyList<FightAnalysisLaneRowDto> lossRows,
+        int winFightCount,
+        int lossFightCount)
+    {
+        var winLookup = winRows.ToDictionary(row => row.LaneKey, StringComparer.OrdinalIgnoreCase);
+        var lossLookup = lossRows.ToDictionary(row => row.LaneKey, StringComparer.OrdinalIgnoreCase);
+        return winLookup.Keys
+            .Concat(lossLookup.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(key =>
+            {
+                winLookup.TryGetValue(key, out var winRow);
+                lossLookup.TryGetValue(key, out var lossRow);
+                return BuildDifferenceRow(
+                    key,
+                    winRow?.LaneLabel ?? lossRow?.LaneLabel ?? key,
+                    "Lane",
+                    winRow?.AverageStrengthPercent,
+                    lossRow?.AverageStrengthPercent,
+                    "%",
+                    winRow?.Samples ?? 0,
+                    lossRow?.Samples ?? 0,
+                    winFightCount,
+                    lossFightCount,
+                    "Average lane strength from player lane contribution samples.");
+            })
+            .OrderByDescending(row => Math.Abs(row.Delta ?? 0.0))
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildBoonDifferenceRows(
+        IReadOnlyList<FightAnalysisBoonRowDto> winRows,
+        IReadOnlyList<FightAnalysisBoonRowDto> lossRows,
+        int winFightCount,
+        int lossFightCount)
+    {
+        var winLookup = winRows.ToDictionary(row => row.Id);
+        var lossLookup = lossRows.ToDictionary(row => row.Id);
+        return winLookup.Keys
+            .Concat(lossLookup.Keys)
+            .Distinct()
+            .Select(key =>
+            {
+                winLookup.TryGetValue(key, out var winRow);
+                lossLookup.TryGetValue(key, out var lossRow);
+                return BuildDifferenceRow(
+                    key.ToString(CultureInfo.InvariantCulture),
+                    winRow?.Name ?? lossRow?.Name ?? $"Boon {key}",
+                    "Boon",
+                    winRow?.AverageCoverage,
+                    lossRow?.AverageCoverage,
+                    "%",
+                    winRow?.FightCount ?? 0,
+                    lossRow?.FightCount ?? 0,
+                    winFightCount,
+                    lossFightCount,
+                    "Average threat-window boon coverage.");
+            })
+            .OrderByDescending(row => Math.Abs(row.Delta ?? 0.0))
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildClassRecordDifferenceRows(
+        IReadOnlyList<FightAnalysisClassDifferenceRowDto> classDetails)
+    {
+        return classDetails
+            .Where(row => row.PresentFightCount >= 10)
+            .Select(row => BuildDifferenceRow(
+                row.ClassLabel,
+                row.ClassLabel,
+                "Class",
+                row.WinWhenPresentPercent,
+                row.LossWhenPresentPercent,
+                "%",
+                row.PresentWinCount,
+                row.PresentLossCount,
+                row.PresentFightCount,
+                row.PresentFightCount,
+                "Win/loss split across fights where this class appeared.",
+                allowZeroSamples: true))
+            .OrderByDescending(row => Math.Abs(row.Delta ?? 0.0))
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisClassDifferenceRowDto> BuildClassDetailDifferenceRows(
+        IReadOnlyList<FightArtifactSummaryDto> wins,
+        IReadOnlyList<FightArtifactSummaryDto> losses)
+    {
+        var winLookup = BuildClassSideDifferenceStats(wins);
+        var lossLookup = BuildClassSideDifferenceStats(losses);
+        return winLookup.Keys
+            .Concat(lossLookup.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(key =>
+            {
+                winLookup.TryGetValue(key, out var winStats);
+                lossLookup.TryGetValue(key, out var lossStats);
+                winStats ??= ClassDifferenceSideStats.Empty(key);
+                lossStats ??= ClassDifferenceSideStats.Empty(key);
+                int presentFightCount = winStats.FightCount + lossStats.FightCount;
+                int presentTotalCount = winStats.TotalCount + lossStats.TotalCount;
+                double winWhenPresentPercent = presentFightCount == 0
+                    ? 0.0
+                    : Math.Round(winStats.FightCount * 100.0 / presentFightCount, 1);
+                double lossWhenPresentPercent = presentFightCount == 0
+                    ? 0.0
+                    : Math.Round(lossStats.FightCount * 100.0 / presentFightCount, 1);
+                double averageCountWhenPresent = presentFightCount == 0
+                    ? 0.0
+                    : Math.Round(presentTotalCount * 1.0 / presentFightCount, 1);
+
+                return new FightAnalysisClassDifferenceRowDto(
+                    ClassLabel: key,
+                    PresentFightCount: presentFightCount,
+                    PresentWinCount: winStats.FightCount,
+                    PresentLossCount: lossStats.FightCount,
+                    WinWhenPresentPercent: winWhenPresentPercent,
+                    LossWhenPresentPercent: lossWhenPresentPercent,
+                    ResultDelta: Math.Round(winWhenPresentPercent - lossWhenPresentPercent, 1),
+                    AverageCountWhenPresent: averageCountWhenPresent,
+                    WinAverageCountWhenPresent: winStats.AverageCountWhenPresent,
+                    LossAverageCountWhenPresent: lossStats.AverageCountWhenPresent,
+                    CountDeltaWhenPresent: Math.Round(winStats.AverageCountWhenPresent - lossStats.AverageCountWhenPresent, 1),
+                    WinCoverageScore: winStats.AverageCoverage,
+                    LossCoverageScore: lossStats.AverageCoverage,
+                    CoverageDelta: Math.Round(winStats.AverageCoverage - lossStats.AverageCoverage, 1),
+                    WinCoverageSampleCount: winStats.CoverageSampleCount,
+                    LossCoverageSampleCount: lossStats.CoverageSampleCount,
+                    ConfidenceLabel: DeriveClassDetailDifferenceConfidence(presentFightCount),
+                    Detail: "Only fights where this class appeared are counted here. Average count is the class count in those present fights; coverage is still split by win/loss when available.");
+            })
+            .OrderByDescending(row => row.PresentFightCount)
+            .ThenByDescending(row => Math.Abs(row.ResultDelta))
+            .ThenBy(row => row.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyDictionary<string, ClassDifferenceSideStats> BuildClassSideDifferenceStats(
+        IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .SelectMany(fight => (fight.FightIndex?.SquadSide?.Classes ?? Array.Empty<FightSideClassIndexDto>())
+                .Where(classEntry => !string.IsNullOrWhiteSpace(classEntry.ClassLabel) && classEntry.Count > 0)
+                .Select(classEntry => new
+                {
+                    Fight = fight,
+                    Class = classEntry
+                }))
+            .GroupBy(entry => entry.Class.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var entries = group.ToArray();
+                    var fightCount = entries
+                        .Select(entry => entry.Fight.FightId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count();
+                    var totalCount = entries.Sum(entry => Math.Max(0, entry.Class.Count));
+                    var coverageEntries = entries
+                        .Where(entry => entry.Class.FightCoverageScore > 0.0)
+                        .ToArray();
+                    return new ClassDifferenceSideStats(
+                        ClassLabel: group.Key,
+                        FightCount: fightCount,
+                        TotalCount: totalCount,
+                        CoverageSampleCount: coverageEntries.Length,
+                        AverageCountWhenPresent: fightCount == 0 ? 0.0 : Math.Round(totalCount * 1.0 / fightCount, 1),
+                        AverageCoverage: coverageEntries.Length == 0
+                            ? 0.0
+                            : Math.Round(CleanupAdjustedAverage(coverageEntries, entry => entry.Class.FightCoverageScore, entry => entry.Fight), 1));
+                },
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildEnemyDifferenceRows(
+        IReadOnlyList<FightAnalysisEnemyClassRowDto> winRows,
+        IReadOnlyList<FightAnalysisEnemyClassRowDto> lossRows,
+        int winFightCount,
+        int lossFightCount)
+    {
+        var winLookup = winRows.ToDictionary(row => row.ClassLabel, StringComparer.OrdinalIgnoreCase);
+        var lossLookup = lossRows.ToDictionary(row => row.ClassLabel, StringComparer.OrdinalIgnoreCase);
+        return winLookup.Keys
+            .Concat(lossLookup.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(key =>
+            {
+                winLookup.TryGetValue(key, out var winRow);
+                lossLookup.TryGetValue(key, out var lossRow);
+                var winValue = winFightCount == 0 || winRow is null ? (double?)null : Math.Round(winRow.TotalCount * 1.0 / winFightCount, 2);
+                var lossValue = lossFightCount == 0 || lossRow is null ? (double?)null : Math.Round(lossRow.TotalCount * 1.0 / lossFightCount, 2);
+                return BuildDifferenceRow(
+                    key,
+                    key,
+                    "Enemy",
+                    winValue,
+                    lossValue,
+                    "per fight",
+                    winRow?.FightCount ?? 0,
+                    lossRow?.FightCount ?? 0,
+                    winFightCount,
+                    lossFightCount,
+                    "Average enemy class count per selected fight.");
+            })
+            .OrderByDescending(row => Math.Abs(row.Delta ?? 0.0))
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisDifferenceRowDto> BuildAttributeDifferenceRows(
+        IReadOnlyList<FightArtifactSummaryDto> wins,
+        IReadOnlyList<FightArtifactSummaryDto> losses,
+        IReadOnlyList<FightAttributeDefinitionDto> attributeDefinitions)
+    {
+        var definitionLookup = attributeDefinitions
+            .Where(definition => !string.IsNullOrWhiteSpace(definition.Key))
+            .ToDictionary(definition => definition.Key, StringComparer.OrdinalIgnoreCase);
+        var winCounts = CountFightAttributes(wins);
+        var lossCounts = CountFightAttributes(losses);
+        return winCounts.Keys
+            .Concat(lossCounts.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(key =>
+            {
+                winCounts.TryGetValue(key, out int winCount);
+                lossCounts.TryGetValue(key, out int lossCount);
+                definitionLookup.TryGetValue(key, out var definition);
+                return BuildDifferenceRow(
+                    key,
+                    definition?.Label ?? key,
+                    "Fight Attribute",
+                    wins.Count == 0 ? null : Math.Round(winCount * 100.0 / wins.Count, 1),
+                    losses.Count == 0 ? null : Math.Round(lossCount * 100.0 / losses.Count, 1),
+                    "%",
+                    winCount,
+                    lossCount,
+                    wins.Count,
+                    losses.Count,
+                    "Share of selected fights with this attribute.",
+                    allowZeroSamples: true);
+            })
+            .OrderByDescending(row => Math.Abs(row.Delta ?? 0.0))
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+    }
+
+    private static FightAnalysisDifferenceRowDto BuildDifferenceRow(
+        string key,
+        string label,
+        string group,
+        double? winValue,
+        double? lossValue,
+        string unit,
+        int winSampleCount,
+        int lossSampleCount,
+        int winFightCount,
+        int lossFightCount,
+        string detail,
+        bool allowZeroSamples = false)
+    {
+        double? roundedWinValue = winValue.HasValue ? Math.Round(winValue.Value, 1) : null;
+        double? roundedLossValue = lossValue.HasValue ? Math.Round(lossValue.Value, 1) : null;
+        double? delta = roundedWinValue.HasValue && roundedLossValue.HasValue
+            ? Math.Round(roundedWinValue.Value - roundedLossValue.Value, 1)
+            : null;
+
+        return new FightAnalysisDifferenceRowDto(
+            Key: key,
+            Label: label,
+            Group: group,
+            WinValue: roundedWinValue,
+            LossValue: roundedLossValue,
+            Delta: delta,
+            Unit: unit,
+            WinSampleCount: winSampleCount,
+            LossSampleCount: lossSampleCount,
+            ConfidenceLabel: DeriveDifferenceRowConfidence(winFightCount, lossFightCount, winSampleCount, lossSampleCount, allowZeroSamples),
+            DirectionLabel: BuildDifferenceDirectionLabel(delta),
+            Detail: detail);
+    }
+
+    private static Dictionary<string, int> CountFightAttributes(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .SelectMany(fight => (fight.Attributes ?? Array.Empty<FightAttributeDto>())
+                .Where(attribute => !string.IsNullOrWhiteSpace(attribute.Key))
+                .Select(attribute => attribute.Key))
+            .GroupBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSquadWin(FightArtifactSummaryDto fight)
+    {
+        return string.Equals(fight.FightIndex?.Outcome.OutcomeCode, "squad", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsEnemyWin(FightArtifactSummaryDto fight)
+    {
+        return string.Equals(fight.FightIndex?.Outcome.OutcomeCode, "enemy", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DeriveDifferenceReportConfidence(int winFightCount, int lossFightCount)
+    {
+        var minimum = Math.Min(winFightCount, lossFightCount);
+        if (minimum >= 15)
+        {
+            return "High";
+        }
+
+        return minimum >= 6 ? "Medium" : "Low";
+    }
+
+    private static string DeriveDifferenceRowConfidence(
+        int winFightCount,
+        int lossFightCount,
+        int winSampleCount,
+        int lossSampleCount,
+        bool allowZeroSamples)
+    {
+        var minimumFightCount = Math.Min(winFightCount, lossFightCount);
+        var minimumSampleCount = Math.Min(winSampleCount, lossSampleCount);
+        if (minimumFightCount < 6)
+        {
+            return "Low";
+        }
+
+        if (!allowZeroSamples && minimumSampleCount < 3)
+        {
+            return "Low";
+        }
+
+        if (minimumFightCount >= 15 && (allowZeroSamples || minimumSampleCount >= 10))
+        {
+            return "High";
+        }
+
+        return "Medium";
+    }
+
+    private static string DeriveClassDetailDifferenceConfidence(int presentFightCount)
+    {
+        if (presentFightCount >= 30)
+        {
+            return "High";
+        }
+
+        return presentFightCount >= 10 ? "Medium" : "Low";
+    }
+
+    private static string BuildDifferenceDirectionLabel(double? delta)
+    {
+        if (!delta.HasValue || Math.Abs(delta.Value) < 0.05)
+        {
+            return "Even";
+        }
+
+        return delta.Value > 0.0 ? "Higher in wins" : "Higher in losses";
+    }
+
+    private static double GetDifferenceSortMagnitude(FightAnalysisDifferenceRowDto row)
+    {
+        var magnitude = Math.Abs(row.Delta ?? 0.0);
+        return row.Unit switch
+        {
+            "seconds" => magnitude / 15.0,
+            "players" => magnitude * 10.0,
+            "per fight" => magnitude * 12.0,
+            _ => magnitude
+        };
+    }
+
+    private static string BuildWinLossDifferenceSummary(
+        int winFightCount,
+        int lossFightCount,
+        string confidenceLabel,
+        IReadOnlyList<FightAnalysisDifferenceRowDto> topSignals)
+    {
+        if (topSignals.Count == 0)
+        {
+            return $"Compared {winFightCount} wins against {lossFightCount} losses. No comparable metric differences were available.";
+        }
+
+        var strongest = topSignals.Take(3)
+            .Select(row => $"{row.Label} {FormatSignedDifference(row.Delta, row.Unit)}")
+            .ToArray();
+        return $"Compared {winFightCount} wins against {lossFightCount} losses with {confidenceLabel.ToLowerInvariant()} confidence. Strongest separators: {string.Join(", ", strongest)}.";
+    }
+
+    private static string FormatSignedDifference(double? value, string unit)
+    {
+        if (!value.HasValue)
+        {
+            return "n/a";
+        }
+
+        var sign = value.Value > 0.0 ? "+" : string.Empty;
+        var suffix = unit switch
+        {
+            "%" => "%",
+            "seconds" => " sec",
+            "players" => " players",
+            "per fight" => "/fight",
+            _ => string.Empty
+        };
+        return $"{sign}{value.Value.ToString("0.#", CultureInfo.InvariantCulture)}{suffix}";
     }
 
     private static FightAnalysisMitigationSummaryDto? BuildMitigationSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -3581,6 +4093,20 @@ internal sealed record MergedPlayerFightImpactLaneSample(
 internal sealed record ClassFightCoverageSample(
     FightArtifactSummaryDto Fight,
     FightSideClassIndexDto ClassEntry);
+
+internal sealed record ClassDifferenceSideStats(
+    string ClassLabel,
+    int FightCount,
+    int TotalCount,
+    int CoverageSampleCount,
+    double AverageCountWhenPresent,
+    double AverageCoverage)
+{
+    public static ClassDifferenceSideStats Empty(string classLabel)
+    {
+        return new ClassDifferenceSideStats(classLabel, 0, 0, 0, 0.0, 0.0);
+    }
+}
 
 internal sealed record MergedPlayerFightProvidedBoonSample(
     FightArtifactSummaryDto Fight,
