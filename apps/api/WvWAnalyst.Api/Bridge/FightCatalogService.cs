@@ -22,6 +22,7 @@ public sealed class FightCatalogService
     private readonly object _cacheLock = new();
     private IReadOnlyList<FightArtifactSummaryDto>? _cachedCanonicalSummaries;
     private FightBrowserSnapshotDto? _cachedFightBrowserSnapshot;
+    private long _cacheVersion;
 
     public FightCatalogService(
         AppPathService paths,
@@ -39,6 +40,17 @@ public sealed class FightCatalogService
     {
         ValidateFightId(fightId);
         return Path.Combine(_paths.FightsPath, fightId);
+    }
+
+    public long CacheVersion
+    {
+        get
+        {
+            lock (_cacheLock)
+            {
+                return _cacheVersion;
+            }
+        }
     }
 
     public string CreateFightId(string sourceFileName)
@@ -751,6 +763,10 @@ public sealed class FightCatalogService
         {
             _cachedCanonicalSummaries = null;
             _cachedFightBrowserSnapshot = null;
+            unchecked
+            {
+                _cacheVersion++;
+            }
         }
     }
 

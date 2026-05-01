@@ -8,6 +8,7 @@ namespace WvWAnalyst.Api.Analysis;
 
 public sealed class FightAnalysisService
 {
+    private const int MaximumSnapshotCacheEntries = 12;
     private const int MinimumClassSampleCount = 40;
     private const int MinimumClassPlayerFightCount = 20;
     private const double CleanupPhaseImpactWeight = 0.25;
@@ -48,6 +49,9 @@ public sealed class FightAnalysisService
     private readonly FightCatalogService _fightCatalog;
     private readonly PatchMetadataService _patchMetadata;
     private readonly FightAttributeService _fightAttributes;
+    private readonly object _snapshotCacheLock = new();
+    private readonly Dictionary<string, CachedFightAnalysisSnapshot> _snapshotCache = new(StringComparer.Ordinal);
+    private long _snapshotCacheAccessCounter;
 
     public FightAnalysisService(
         FightCatalogService fightCatalog,
@@ -60,6 +64,53 @@ public sealed class FightAnalysisService
     }
 
     public FightAnalysisSnapshotDto BuildSnapshot(
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
+    {
+        var cacheKey = BuildSnapshotCacheKey(
+            _fightCatalog.CacheVersion,
+            commander,
+            startDate,
+            endDate,
+            outcomeCode,
+            squadIncludeClasses,
+            squadExcludeClasses,
+            enemyIncludeClasses,
+            enemyExcludeClasses,
+            patchScope,
+            patchEraIds,
+            fightAttributes);
+        if (TryGetCachedSnapshot(cacheKey, out var cachedSnapshot))
+        {
+            return cachedSnapshot;
+        }
+
+        var snapshot = BuildSnapshotUncached(
+            commander,
+            startDate,
+            endDate,
+            outcomeCode,
+            squadIncludeClasses,
+            squadExcludeClasses,
+            enemyIncludeClasses,
+            enemyExcludeClasses,
+            patchScope,
+            patchEraIds,
+            fightAttributes);
+        CacheSnapshot(cacheKey, snapshot);
+        return snapshot;
+    }
+
+    private FightAnalysisSnapshotDto BuildSnapshotUncached(
         string? commander,
         string? startDate,
         string? endDate,
@@ -161,6 +212,87 @@ public sealed class FightAnalysisService
                 filteredFights,
                 expectedScoreLookup,
                 fightAttributeDefinitions));
+    }
+
+    private bool TryGetCachedSnapshot(string cacheKey, out FightAnalysisSnapshotDto snapshot)
+    {
+        lock (_snapshotCacheLock)
+        {
+            if (_snapshotCache.TryGetValue(cacheKey, out var cached))
+            {
+                cached.LastAccessOrder = ++_snapshotCacheAccessCounter;
+                snapshot = cached.Snapshot;
+                return true;
+            }
+        }
+
+        snapshot = default!;
+        return false;
+    }
+
+    private void CacheSnapshot(string cacheKey, FightAnalysisSnapshotDto snapshot)
+    {
+        lock (_snapshotCacheLock)
+        {
+            _snapshotCache[cacheKey] = new CachedFightAnalysisSnapshot(snapshot, ++_snapshotCacheAccessCounter);
+            while (_snapshotCache.Count > MaximumSnapshotCacheEntries)
+            {
+                var oldestKey = _snapshotCache
+                    .OrderBy(entry => entry.Value.LastAccessOrder)
+                    .Select(entry => entry.Key)
+                    .FirstOrDefault();
+                if (oldestKey is null)
+                {
+                    break;
+                }
+
+                _snapshotCache.Remove(oldestKey);
+            }
+        }
+    }
+
+    private static string BuildSnapshotCacheKey(
+        long catalogVersion,
+        string? commander,
+        string? startDate,
+        string? endDate,
+        string? outcomeCode,
+        string? squadIncludeClasses,
+        string? squadExcludeClasses,
+        string? enemyIncludeClasses,
+        string? enemyExcludeClasses,
+        string? patchScope,
+        string? patchEraIds,
+        string? fightAttributes)
+    {
+        var keyBuilder = new StringBuilder();
+        AppendKeyPart(keyBuilder, "catalog", catalogVersion.ToString(CultureInfo.InvariantCulture));
+        AppendKeyPart(keyBuilder, "commander", NormalizeCacheValue(commander));
+        AppendKeyPart(keyBuilder, "start", NormalizeCacheValue(startDate));
+        AppendKeyPart(keyBuilder, "end", NormalizeCacheValue(endDate));
+        AppendKeyPart(keyBuilder, "outcome", NormalizeOutcomeFilter(outcomeCode));
+        AppendKeyPart(keyBuilder, "squadInclude", string.Join(",", NormalizeClassFilter(squadIncludeClasses)));
+        AppendKeyPart(keyBuilder, "squadExclude", string.Join(",", NormalizeClassFilter(squadExcludeClasses)));
+        AppendKeyPart(keyBuilder, "enemyInclude", string.Join(",", NormalizeClassFilter(enemyIncludeClasses)));
+        AppendKeyPart(keyBuilder, "enemyExclude", string.Join(",", NormalizeClassFilter(enemyExcludeClasses)));
+        AppendKeyPart(keyBuilder, "patchScope", NormalizeCacheValue(patchScope));
+        AppendKeyPart(keyBuilder, "patchEraIds", string.Join(",", NormalizeTokenFilter(patchEraIds)));
+        AppendKeyPart(keyBuilder, "attributes", string.Join(",", NormalizeTokenFilter(fightAttributes)));
+        return keyBuilder.ToString();
+    }
+
+    private static string NormalizeCacheValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant();
+    }
+
+    private static void AppendKeyPart(StringBuilder builder, string name, string value)
+    {
+        builder
+            .Append(name)
+            .Append('=')
+            .Append(value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("|", "\\|", StringComparison.Ordinal))
+            .Append('|');
     }
 
     private static FightAnalysisScopeDto BuildScope(
@@ -3971,6 +4103,19 @@ public sealed class FightAnalysisService
 internal sealed record PatchSelection(
     string Scope,
     IReadOnlyList<string> EraIds);
+
+internal sealed class CachedFightAnalysisSnapshot
+{
+    public CachedFightAnalysisSnapshot(FightAnalysisSnapshotDto snapshot, long lastAccessOrder)
+    {
+        Snapshot = snapshot;
+        LastAccessOrder = lastAccessOrder;
+    }
+
+    public FightAnalysisSnapshotDto Snapshot { get; }
+
+    public long LastAccessOrder { get; set; }
+}
 
 internal sealed record FightExpectedScoreSample(
     string FightId,
