@@ -575,7 +575,86 @@ public sealed class WvWAnalystMitigationSummaryDto
 
     public double TotalIncomingHealing { get; set; }
 
+    public WvWAnalystBarrierOvercapSummaryDto? BarrierOvercap { get; set; }
+
+    public WvWAnalystReflectSummaryDto? Reflects { get; set; }
+
     public IReadOnlyList<WvWAnalystNegatedHitSummaryDto> NegatedHitSummaries { get; set; } = Array.Empty<WvWAnalystNegatedHitSummaryDto>();
+}
+
+public sealed class WvWAnalystBarrierOvercapSummaryDto
+{
+    public bool Available { get; set; }
+
+    public double RawBarrierEvaluated { get; set; }
+
+    public double EstimatedOvercap { get; set; }
+
+    public double OvercapPercentOfEvaluated { get; set; }
+
+    public int EvaluatedApplicationGroups { get; set; }
+
+    public int OvercapApplicationGroups { get; set; }
+
+    public int HighConfidenceGroups { get; set; }
+
+    public int EstimatedHealthPoolGroups { get; set; }
+
+    public int SkippedNoBarrierStateGroups { get; set; }
+}
+
+public sealed class WvWAnalystReflectSummaryDto
+{
+    public bool HasMissileData { get; set; }
+
+    public int TotalReflectedProjectiles { get; set; }
+
+    public int TotalLandedHits { get; set; }
+
+    public double TotalLandedDamage { get; set; }
+
+    public int TotalEstimatedMitigatedProjectiles { get; set; }
+
+    public double TotalEstimatedMitigatedDamage { get; set; }
+
+    public int TotalUnestimatedMitigatedProjectiles { get; set; }
+
+    public int TotalDowns { get; set; }
+
+    public int TotalKills { get; set; }
+
+    public WvWAnalystReflectSideSummaryDto SquadToEnemy { get; set; } = new();
+
+    public WvWAnalystReflectSideSummaryDto EnemyToSquad { get; set; } = new();
+}
+
+public sealed class WvWAnalystReflectSideSummaryDto
+{
+    public int ReflectedProjectiles { get; set; }
+
+    public int LandedHits { get; set; }
+
+    public double LandedDamage { get; set; }
+
+    public int EstimatedMitigatedProjectiles { get; set; }
+
+    public double EstimatedMitigatedDamage { get; set; }
+
+    public int HighConfidenceMitigatedProjectiles { get; set; }
+
+    public double HighConfidenceMitigatedDamage { get; set; }
+
+    public int FallbackEstimatedMitigatedProjectiles { get; set; }
+
+    public double FallbackEstimatedMitigatedDamage { get; set; }
+
+    public int UnestimatedMitigatedProjectiles { get; set; }
+
+    public int DownEvents { get; set; }
+
+    public int KillEvents { get; set; }
+
+    public int MatchedDamageEvents { get; set; }
 }
 
 public sealed class WvWAnalystNegatedHitSummaryDto

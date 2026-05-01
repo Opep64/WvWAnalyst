@@ -170,6 +170,7 @@ const DEFAULT_COMP_HELPER_PACKAGE_TARGETS = [
     { key: "fury", label: "Fury", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: true },
     { key: "quickness", label: "Quickness", floor: 0, target: 65, weight: 0.55, mandatory: false, allowOvercap: true },
     { key: "resistance", label: "Resistance", floor: 0, target: 45, weight: 0.35, mandatory: false, allowOvercap: true },
+    { key: "regeneration", label: "Regeneration", floor: 0, target: 65, weight: 0.45, mandatory: false, allowOvercap: true },
     { key: "cc", label: "CC (combined)", floor: 35, target: 65, weight: 0.70, mandatory: false, allowOvercap: true }
 ];
 let compHelperLaneTargets = cloneCompHelperTargets(DEFAULT_COMP_HELPER_LANE_TARGETS);
@@ -185,7 +186,7 @@ const COMP_HELPER_PROFILE_FAVORITES = {
     },
     defense: {
         lanes: ["boonsupport", "recovery", "prevention", "rez"],
-        packages: ["stability", "healing", "cleanse", "protection", "barrier", "resistance"]
+        packages: ["stability", "healing", "cleanse", "protection", "barrier", "resistance", "regeneration"]
     },
     custom: {
         lanes: [],
@@ -2862,6 +2863,23 @@ function buildAnalysisOverviewStandardCard(card) {
     `;
 }
 
+function formatAveragePerFilteredFight(total, filteredFightCount, maximumFractionDigits = 0) {
+    const count = Number(filteredFightCount ?? 0);
+    if (count <= 0) {
+        return "n/a";
+    }
+
+    return `${formatNumber(Number(total ?? 0) / count, maximumFractionDigits)}/fight`;
+}
+
+function buildAnalysisAvailabilityLine(availableFightCount, filteredFightCount) {
+    const available = Number(availableFightCount ?? 0);
+    const filtered = Number(filteredFightCount ?? 0);
+    return available === filtered
+        ? "Available across all filtered fights."
+        : `Available in ${formatNumber(available)} of ${formatNumber(filtered)} filtered fights.`;
+}
+
 function formatMitigationEffectCounts(effectCounts, limit = 4) {
     if (!Array.isArray(effectCounts) || effectCounts.length === 0) {
         return "No effect detail retained.";
@@ -3011,6 +3029,10 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
 function buildAnalysisOverviewCards(snapshot) {
     const overview = snapshot.overview ?? {};
     const obliterateSummary = overview.obliterateSummary ?? null;
+    const mitigationSummary = overview.mitigationSummary ?? null;
+    const barrierOvercap = mitigationSummary?.barrierOvercap ?? null;
+    const reflects = mitigationSummary?.reflects ?? null;
+    const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
     const cards = [
         {
             title: "Average overall",
@@ -3052,6 +3074,36 @@ function buildAnalysisOverviewCards(snapshot) {
             value: overview.averageSupportScore != null ? formatNumber(overview.averageSupportScore, 1) : "n/a",
             detail: "Healing, cleanses, boons, prevention, and saved-player mitigation."
         },
+        ...(barrierOvercap ? [{
+            title: "Barrier overcap",
+            value: formatAveragePerFilteredFight(barrierOvercap.estimatedOvercap, filteredFightCount),
+            detail: "Estimated barrier waste per filtered fight.",
+            lines: [
+                `${formatNumber(barrierOvercap.estimatedOvercap, 0)} total overcap | ${formatPercent(barrierOvercap.overcapPercentOfEvaluated)} of evaluated barrier`,
+                `${formatNumber(barrierOvercap.overcapApplicationGroups)} overcap groups from ${formatNumber(barrierOvercap.evaluatedApplicationGroups)} evaluated applications`,
+                buildAnalysisAvailabilityLine(barrierOvercap.availableFightCount, filteredFightCount)
+            ]
+        }] : []),
+        ...(reflects?.squadToEnemy ? [{
+            title: "Squad reflects",
+            value: formatAveragePerFilteredFight(reflects.squadToEnemy.landedDamage, filteredFightCount),
+            detail: "Landed return damage onto enemy per filtered fight.",
+            lines: [
+                `${formatNumber(reflects.squadToEnemy.landedDamage, 0)} total landed | ${formatNumber(reflects.squadToEnemy.estimatedMitigatedDamage, 0)} mitigated estimate`,
+                `${formatNumber(reflects.squadToEnemy.reflectedProjectiles)} detected | ${formatNumber(reflects.squadToEnemy.landedHits)} landed hits | ${formatNumber(reflects.squadToEnemy.downEvents)} downs | ${formatNumber(reflects.squadToEnemy.killEvents)} kills`,
+                buildAnalysisAvailabilityLine(reflects.availableFightCount, filteredFightCount)
+            ]
+        }] : []),
+        ...(reflects?.enemyToSquad ? [{
+            title: "Enemy reflects",
+            value: formatAveragePerFilteredFight(reflects.enemyToSquad.landedDamage, filteredFightCount),
+            detail: "Landed reflected damage back onto squad per filtered fight.",
+            lines: [
+                `${formatNumber(reflects.enemyToSquad.landedDamage, 0)} total landed | ${formatNumber(reflects.enemyToSquad.estimatedMitigatedDamage, 0)} enemy mitigation estimate`,
+                `${formatNumber(reflects.enemyToSquad.reflectedProjectiles)} detected | ${formatNumber(reflects.enemyToSquad.landedHits)} landed hits | ${formatNumber(reflects.enemyToSquad.downEvents)} downs | ${formatNumber(reflects.enemyToSquad.killEvents)} kills`,
+                buildAnalysisAvailabilityLine(reflects.availableFightCount, filteredFightCount)
+            ]
+        }] : []),
         {
             title: "Average sizes",
             value: `${formatNumber(overview.averageSquadSize, 1)} vs ${formatNumber(overview.averageEnemySize, 1)}`,
@@ -3060,7 +3112,6 @@ function buildAnalysisOverviewCards(snapshot) {
     ];
 
     if (SHOW_ANALYSIS_OBLITERATE_CARD && obliterateSummary) {
-        const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
         const availabilityDetail = obliterateSummary.availableFightCount === filteredFightCount
             ? "Aggregated across all filtered fights."
             : `Available in ${formatNumber(obliterateSummary.availableFightCount)} of ${formatNumber(filteredFightCount)} filtered fights.`;
@@ -4218,6 +4269,8 @@ function buildCompHelperPackageNormalizers(candidates) {
         quicknessPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.quicknessPresencePerFight)),
         resistanceGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.resistanceGenerationPerFight)),
         resistancePresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.resistancePresencePerFight)),
+        regenerationGeneration: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.regenerationGenerationPerFight)),
+        regenerationPresence: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.regenerationPresencePerFight)),
         strip: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.stripPerFight)),
         effectiveCrowdControl: getCompHelperPercentileScale(candidates.map(candidate => candidate.packageInputs?.effectiveCrowdControlPerFight))
     };
@@ -4242,6 +4295,8 @@ function buildCompHelperPackageScores(packageInputs, laneMap, normalizers) {
     const quicknessPresence = getCompHelperNormalizedPackageValue(packageInputs?.quicknessPresencePerFight, normalizers.quicknessPresence);
     const resistanceGeneration = getCompHelperNormalizedPackageValue(packageInputs?.resistanceGenerationPerFight, normalizers.resistanceGeneration);
     const resistancePresence = getCompHelperNormalizedPackageValue(packageInputs?.resistancePresencePerFight, normalizers.resistancePresence);
+    const regenerationGeneration = getCompHelperNormalizedPackageValue(packageInputs?.regenerationGenerationPerFight, normalizers.regenerationGeneration);
+    const regenerationPresence = getCompHelperNormalizedPackageValue(packageInputs?.regenerationPresencePerFight, normalizers.regenerationPresence);
     const stripPerFight = getCompHelperNormalizedPackageValue(packageInputs?.stripPerFight, normalizers.strip);
     const effectiveCrowdControl = getCompHelperNormalizedPackageValue(packageInputs?.effectiveCrowdControlPerFight, normalizers.effectiveCrowdControl);
 
@@ -4257,6 +4312,7 @@ function buildCompHelperPackageScores(packageInputs, laneMap, normalizers) {
         fury: Math.round((furyGeneration * 0.45 + furyPresence * 0.55) * 10) / 10,
         quickness: Math.round((quicknessGeneration * 0.55 + quicknessPresence * 0.45) * 10) / 10,
         resistance: Math.round((resistanceGeneration * 0.25 + resistancePresence * 0.75) * 10) / 10,
+        regeneration: Math.round((regenerationGeneration * 0.25 + regenerationPresence * 0.75) * 10) / 10,
         cc: Math.round((effectiveCrowdControl * 0.55 + controlStrength * 0.45) * 10) / 10
     };
 }

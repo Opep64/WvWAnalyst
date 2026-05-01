@@ -136,7 +136,48 @@ public sealed record FightAnalysisMitigationSummaryDto(
     double TotalIncomingHealing,
     double? AverageLowestHealthPercent,
     double? LowestLowestHealthPercent,
+    FightAnalysisBarrierOvercapSummaryDto? BarrierOvercap,
+    FightAnalysisReflectSummaryDto? Reflects,
     IReadOnlyList<FightAnalysisNegatedHitSummaryDto> NegatedHitSummaries);
+
+public sealed record FightAnalysisBarrierOvercapSummaryDto(
+    int AvailableFightCount,
+    double RawBarrierEvaluated,
+    double EstimatedOvercap,
+    double OvercapPercentOfEvaluated,
+    int EvaluatedApplicationGroups,
+    int OvercapApplicationGroups,
+    int HighConfidenceGroups,
+    int EstimatedHealthPoolGroups,
+    int SkippedNoBarrierStateGroups);
+
+public sealed record FightAnalysisReflectSummaryDto(
+    int AvailableFightCount,
+    int TotalReflectedProjectiles,
+    int TotalLandedHits,
+    double TotalLandedDamage,
+    int TotalEstimatedMitigatedProjectiles,
+    double TotalEstimatedMitigatedDamage,
+    int TotalUnestimatedMitigatedProjectiles,
+    int TotalDowns,
+    int TotalKills,
+    FightAnalysisReflectSideSummaryDto SquadToEnemy,
+    FightAnalysisReflectSideSummaryDto EnemyToSquad);
+
+public sealed record FightAnalysisReflectSideSummaryDto(
+    int ReflectedProjectiles,
+    int LandedHits,
+    double LandedDamage,
+    int EstimatedMitigatedProjectiles,
+    double EstimatedMitigatedDamage,
+    int HighConfidenceMitigatedProjectiles,
+    double HighConfidenceMitigatedDamage,
+    int FallbackEstimatedMitigatedProjectiles,
+    double FallbackEstimatedMitigatedDamage,
+    int UnestimatedMitigatedProjectiles,
+    int DownEvents,
+    int KillEvents,
+    int MatchedDamageEvents);
 
 public sealed record FightAnalysisNegatedHitSummaryDto(
     string Key,
@@ -346,6 +387,8 @@ public sealed record FightAnalysisCharacterPackageInputsDto(
     double QuicknessPresencePerFight,
     double ResistanceGenerationPerFight,
     double ResistancePresencePerFight,
+    double RegenerationGenerationPerFight,
+    double RegenerationPresencePerFight,
     double StripPerFight,
     double ControlStrength,
     double EffectiveCrowdControlPerFight);

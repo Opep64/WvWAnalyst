@@ -405,7 +405,48 @@ public sealed record FightMitigationSummaryIndexDto(
     double LowestLowestHealthPercent,
     double TotalIncomingDamage,
     double TotalIncomingHealing,
+    FightBarrierOvercapSummaryIndexDto? BarrierOvercap,
+    FightReflectSummaryIndexDto? Reflects,
     IReadOnlyList<FightNegatedHitSummaryIndexDto> NegatedHitSummaries);
+
+public sealed record FightBarrierOvercapSummaryIndexDto(
+    bool Available,
+    double RawBarrierEvaluated,
+    double EstimatedOvercap,
+    double OvercapPercentOfEvaluated,
+    int EvaluatedApplicationGroups,
+    int OvercapApplicationGroups,
+    int HighConfidenceGroups,
+    int EstimatedHealthPoolGroups,
+    int SkippedNoBarrierStateGroups);
+
+public sealed record FightReflectSummaryIndexDto(
+    bool HasMissileData,
+    int TotalReflectedProjectiles,
+    int TotalLandedHits,
+    double TotalLandedDamage,
+    int TotalEstimatedMitigatedProjectiles,
+    double TotalEstimatedMitigatedDamage,
+    int TotalUnestimatedMitigatedProjectiles,
+    int TotalDowns,
+    int TotalKills,
+    FightReflectSideSummaryIndexDto SquadToEnemy,
+    FightReflectSideSummaryIndexDto EnemyToSquad);
+
+public sealed record FightReflectSideSummaryIndexDto(
+    int ReflectedProjectiles,
+    int LandedHits,
+    double LandedDamage,
+    int EstimatedMitigatedProjectiles,
+    double EstimatedMitigatedDamage,
+    int HighConfidenceMitigatedProjectiles,
+    double HighConfidenceMitigatedDamage,
+    int FallbackEstimatedMitigatedProjectiles,
+    double FallbackEstimatedMitigatedDamage,
+    int UnestimatedMitigatedProjectiles,
+    int DownEvents,
+    int KillEvents,
+    int MatchedDamageEvents);
 
 public sealed record FightNegatedHitSummaryIndexDto(
     string Key,

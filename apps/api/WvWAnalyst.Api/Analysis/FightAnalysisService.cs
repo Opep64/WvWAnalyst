@@ -40,6 +40,7 @@ public sealed class FightAnalysisService
         new(717, "Protection", false),
         new(873, "Resolution", false),
         new(26980, "Resistance", false),
+        new(718, "Regeneration", false),
         new(743, "Aegis", false),
         new(740, "Might", true),
         new(725, "Fury", false),
@@ -1097,6 +1098,50 @@ public sealed class FightAnalysisService
             .Min();
         bool hasBarrierCoverageWarnings = mitigationSamples.Any(sample => sample.Mitigation?.BarrierCoverageMayBeIncomplete ?? false);
 
+        var barrierOvercapSamples = mitigationSamples
+            .Select(sample => sample.Mitigation?.BarrierOvercap)
+            .Where(summary => summary is { Available: true })
+            .Cast<FightBarrierOvercapSummaryIndexDto>()
+            .ToArray();
+        FightAnalysisBarrierOvercapSummaryDto? barrierOvercap = null;
+        if (barrierOvercapSamples.Length > 0)
+        {
+            double rawBarrierEvaluated = Math.Round(barrierOvercapSamples.Sum(summary => Math.Max(0, summary.RawBarrierEvaluated)), 0);
+            double estimatedOvercap = Math.Round(barrierOvercapSamples.Sum(summary => Math.Max(0, summary.EstimatedOvercap)), 0);
+            barrierOvercap = new FightAnalysisBarrierOvercapSummaryDto(
+                AvailableFightCount: barrierOvercapSamples.Length,
+                RawBarrierEvaluated: rawBarrierEvaluated,
+                EstimatedOvercap: estimatedOvercap,
+                OvercapPercentOfEvaluated: rawBarrierEvaluated > 0 ? Math.Round(estimatedOvercap * 100.0 / rawBarrierEvaluated, 1) : 0,
+                EvaluatedApplicationGroups: barrierOvercapSamples.Sum(summary => Math.Max(0, summary.EvaluatedApplicationGroups)),
+                OvercapApplicationGroups: barrierOvercapSamples.Sum(summary => Math.Max(0, summary.OvercapApplicationGroups)),
+                HighConfidenceGroups: barrierOvercapSamples.Sum(summary => Math.Max(0, summary.HighConfidenceGroups)),
+                EstimatedHealthPoolGroups: barrierOvercapSamples.Sum(summary => Math.Max(0, summary.EstimatedHealthPoolGroups)),
+                SkippedNoBarrierStateGroups: barrierOvercapSamples.Sum(summary => Math.Max(0, summary.SkippedNoBarrierStateGroups)));
+        }
+
+        var reflectSamples = mitigationSamples
+            .Select(sample => sample.Mitigation?.Reflects)
+            .Where(summary => summary is { HasMissileData: true })
+            .Cast<FightReflectSummaryIndexDto>()
+            .ToArray();
+        FightAnalysisReflectSummaryDto? reflects = null;
+        if (reflectSamples.Length > 0)
+        {
+            reflects = new FightAnalysisReflectSummaryDto(
+                AvailableFightCount: reflectSamples.Length,
+                TotalReflectedProjectiles: reflectSamples.Sum(summary => Math.Max(0, summary.TotalReflectedProjectiles)),
+                TotalLandedHits: reflectSamples.Sum(summary => Math.Max(0, summary.TotalLandedHits)),
+                TotalLandedDamage: Math.Round(reflectSamples.Sum(summary => Math.Max(0, summary.TotalLandedDamage)), 0),
+                TotalEstimatedMitigatedProjectiles: reflectSamples.Sum(summary => Math.Max(0, summary.TotalEstimatedMitigatedProjectiles)),
+                TotalEstimatedMitigatedDamage: Math.Round(reflectSamples.Sum(summary => Math.Max(0, summary.TotalEstimatedMitigatedDamage)), 0),
+                TotalUnestimatedMitigatedProjectiles: reflectSamples.Sum(summary => Math.Max(0, summary.TotalUnestimatedMitigatedProjectiles)),
+                TotalDowns: reflectSamples.Sum(summary => Math.Max(0, summary.TotalDowns)),
+                TotalKills: reflectSamples.Sum(summary => Math.Max(0, summary.TotalKills)),
+                SquadToEnemy: BuildReflectSideSummary(reflectSamples.Select(summary => summary.SquadToEnemy)),
+                EnemyToSquad: BuildReflectSideSummary(reflectSamples.Select(summary => summary.EnemyToSquad)));
+        }
+
         var negatedHitSummaries = mitigationSamples
             .SelectMany(sample => sample.Mitigation?.NegatedHitSummaries ?? Array.Empty<FightNegatedHitSummaryIndexDto>())
             .GroupBy(summary => summary.Key ?? string.Empty, StringComparer.OrdinalIgnoreCase)
@@ -1139,7 +1184,32 @@ public sealed class FightAnalysisService
             TotalIncomingHealing: totalIncomingHealing,
             AverageLowestHealthPercent: averageLowestHealthPercent,
             LowestLowestHealthPercent: lowestLowestHealthPercent,
+            BarrierOvercap: barrierOvercap,
+            Reflects: reflects,
             NegatedHitSummaries: negatedHitSummaries);
+    }
+
+    private static FightAnalysisReflectSideSummaryDto BuildReflectSideSummary(IEnumerable<FightReflectSideSummaryIndexDto?> sides)
+    {
+        var sideSamples = sides
+            .Where(side => side is not null)
+            .Cast<FightReflectSideSummaryIndexDto>()
+            .ToArray();
+
+        return new FightAnalysisReflectSideSummaryDto(
+            ReflectedProjectiles: sideSamples.Sum(side => Math.Max(0, side.ReflectedProjectiles)),
+            LandedHits: sideSamples.Sum(side => Math.Max(0, side.LandedHits)),
+            LandedDamage: Math.Round(sideSamples.Sum(side => Math.Max(0, side.LandedDamage)), 0),
+            EstimatedMitigatedProjectiles: sideSamples.Sum(side => Math.Max(0, side.EstimatedMitigatedProjectiles)),
+            EstimatedMitigatedDamage: Math.Round(sideSamples.Sum(side => Math.Max(0, side.EstimatedMitigatedDamage)), 0),
+            HighConfidenceMitigatedProjectiles: sideSamples.Sum(side => Math.Max(0, side.HighConfidenceMitigatedProjectiles)),
+            HighConfidenceMitigatedDamage: Math.Round(sideSamples.Sum(side => Math.Max(0, side.HighConfidenceMitigatedDamage)), 0),
+            FallbackEstimatedMitigatedProjectiles: sideSamples.Sum(side => Math.Max(0, side.FallbackEstimatedMitigatedProjectiles)),
+            FallbackEstimatedMitigatedDamage: Math.Round(sideSamples.Sum(side => Math.Max(0, side.FallbackEstimatedMitigatedDamage)), 0),
+            UnestimatedMitigatedProjectiles: sideSamples.Sum(side => Math.Max(0, side.UnestimatedMitigatedProjectiles)),
+            DownEvents: sideSamples.Sum(side => Math.Max(0, side.DownEvents)),
+            KillEvents: sideSamples.Sum(side => Math.Max(0, side.KillEvents)),
+            MatchedDamageEvents: sideSamples.Sum(side => Math.Max(0, side.MatchedDamageEvents)));
     }
 
     private static FightAnalysisObliterateSummaryDto? BuildObliterateSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -3218,6 +3288,7 @@ public sealed class FightAnalysisService
         var fury = GetProvidedBoon(aggregatedProvidedBoons, "fury");
         var quickness = GetProvidedBoon(aggregatedProvidedBoons, "quickness");
         var resistance = GetProvidedBoon(aggregatedProvidedBoons, "resistance");
+        var regeneration = GetProvidedBoon(aggregatedProvidedBoons, "regeneration");
 
         return new FightAnalysisCharacterPackageInputsDto(
             PressureStrength: Math.Round(pressureLane?.OverallStrengthPercent ?? 0.0, 1),
@@ -3235,6 +3306,8 @@ public sealed class FightAnalysisService
             QuicknessPresencePerFight: Math.Round(quickness?.PresencePerFight ?? 0.0, 1),
             ResistanceGenerationPerFight: Math.Round(resistance?.GenerationPerFight ?? 0.0, 1),
             ResistancePresencePerFight: Math.Round(resistance?.PresencePerFight ?? 0.0, 1),
+            RegenerationGenerationPerFight: Math.Round(regeneration?.GenerationPerFight ?? 0.0, 1),
+            RegenerationPresencePerFight: Math.Round(regeneration?.PresencePerFight ?? 0.0, 1),
             StripPerFight: Math.Round(averageStrips, 1),
             ControlStrength: Math.Round(controlLane?.OverallStrengthPercent ?? 0.0, 1),
             EffectiveCrowdControlPerFight: Math.Round(effectiveCrowdControlPerFight, 1));

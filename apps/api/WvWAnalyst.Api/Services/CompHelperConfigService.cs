@@ -39,6 +39,7 @@ public sealed class CompHelperConfigService
         new("fury", "Fury", 0, 65, 0.55, false, true),
         new("quickness", "Quickness", 0, 65, 0.55, false, true),
         new("resistance", "Resistance", 0, 45, 0.35, false, true),
+        new("regeneration", "Regeneration", 0, 65, 0.45, false, true),
         new("cc", "CC (combined)", 35, 65, 0.70, false, true)
     ];
 

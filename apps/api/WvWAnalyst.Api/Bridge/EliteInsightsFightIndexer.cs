@@ -521,6 +521,8 @@ public sealed class EliteInsightsFightIndexer
                 LowestLowestHealthPercent: legacyDefenseSaves.LowestLowestHealthPercent,
                 TotalIncomingDamage: legacyDefenseSaves.TotalIncomingDamage,
                 TotalIncomingHealing: legacyDefenseSaves.TotalIncomingHealing,
+                BarrierOvercap: null,
+                Reflects: null,
                 NegatedHitSummaries: Array.Empty<FightNegatedHitSummaryIndexDto>());
         }
 
@@ -546,6 +548,8 @@ public sealed class EliteInsightsFightIndexer
             LowestLowestHealthPercent: summary.LowestLowestHealthPercent,
             TotalIncomingDamage: summary.TotalIncomingDamage,
             TotalIncomingHealing: summary.TotalIncomingHealing,
+            BarrierOvercap: BuildBarrierOvercapFromAnalystPayload(summary.BarrierOvercap),
+            Reflects: BuildReflectsFromAnalystPayload(summary.Reflects),
             NegatedHitSummaries: summary.NegatedHitSummaries?
                 .Select(negation => new FightNegatedHitSummaryIndexDto(
                     Key: NullIfWhiteSpace(negation.Key) ?? string.Empty,
@@ -561,6 +565,82 @@ public sealed class EliteInsightsFightIndexer
                         ?? Array.Empty<FightEffectCountSummaryIndexDto>()))
                 .ToArray()
                 ?? Array.Empty<FightNegatedHitSummaryIndexDto>());
+    }
+
+    private static FightBarrierOvercapSummaryIndexDto? BuildBarrierOvercapFromAnalystPayload(WvWAnalystBarrierOvercapSummaryDto? summary)
+    {
+        if (summary is null || !summary.Available)
+        {
+            return null;
+        }
+
+        return new FightBarrierOvercapSummaryIndexDto(
+            Available: summary.Available,
+            RawBarrierEvaluated: summary.RawBarrierEvaluated,
+            EstimatedOvercap: summary.EstimatedOvercap,
+            OvercapPercentOfEvaluated: summary.OvercapPercentOfEvaluated,
+            EvaluatedApplicationGroups: summary.EvaluatedApplicationGroups,
+            OvercapApplicationGroups: summary.OvercapApplicationGroups,
+            HighConfidenceGroups: summary.HighConfidenceGroups,
+            EstimatedHealthPoolGroups: summary.EstimatedHealthPoolGroups,
+            SkippedNoBarrierStateGroups: summary.SkippedNoBarrierStateGroups);
+    }
+
+    private static FightReflectSummaryIndexDto? BuildReflectsFromAnalystPayload(WvWAnalystReflectSummaryDto? summary)
+    {
+        if (summary is null || !summary.HasMissileData)
+        {
+            return null;
+        }
+
+        return new FightReflectSummaryIndexDto(
+            HasMissileData: summary.HasMissileData,
+            TotalReflectedProjectiles: summary.TotalReflectedProjectiles,
+            TotalLandedHits: summary.TotalLandedHits,
+            TotalLandedDamage: summary.TotalLandedDamage,
+            TotalEstimatedMitigatedProjectiles: summary.TotalEstimatedMitigatedProjectiles,
+            TotalEstimatedMitigatedDamage: summary.TotalEstimatedMitigatedDamage,
+            TotalUnestimatedMitigatedProjectiles: summary.TotalUnestimatedMitigatedProjectiles,
+            TotalDowns: summary.TotalDowns,
+            TotalKills: summary.TotalKills,
+            SquadToEnemy: BuildReflectSideFromAnalystPayload(summary.SquadToEnemy),
+            EnemyToSquad: BuildReflectSideFromAnalystPayload(summary.EnemyToSquad));
+    }
+
+    private static FightReflectSideSummaryIndexDto BuildReflectSideFromAnalystPayload(WvWAnalystReflectSideSummaryDto? summary)
+    {
+        if (summary is null)
+        {
+            return new FightReflectSideSummaryIndexDto(
+                ReflectedProjectiles: 0,
+                LandedHits: 0,
+                LandedDamage: 0,
+                EstimatedMitigatedProjectiles: 0,
+                EstimatedMitigatedDamage: 0,
+                HighConfidenceMitigatedProjectiles: 0,
+                HighConfidenceMitigatedDamage: 0,
+                FallbackEstimatedMitigatedProjectiles: 0,
+                FallbackEstimatedMitigatedDamage: 0,
+                UnestimatedMitigatedProjectiles: 0,
+                DownEvents: 0,
+                KillEvents: 0,
+                MatchedDamageEvents: 0);
+        }
+
+        return new FightReflectSideSummaryIndexDto(
+            ReflectedProjectiles: summary.ReflectedProjectiles,
+            LandedHits: summary.LandedHits,
+            LandedDamage: summary.LandedDamage,
+            EstimatedMitigatedProjectiles: summary.EstimatedMitigatedProjectiles,
+            EstimatedMitigatedDamage: summary.EstimatedMitigatedDamage,
+            HighConfidenceMitigatedProjectiles: summary.HighConfidenceMitigatedProjectiles,
+            HighConfidenceMitigatedDamage: summary.HighConfidenceMitigatedDamage,
+            FallbackEstimatedMitigatedProjectiles: summary.FallbackEstimatedMitigatedProjectiles,
+            FallbackEstimatedMitigatedDamage: summary.FallbackEstimatedMitigatedDamage,
+            UnestimatedMitigatedProjectiles: summary.UnestimatedMitigatedProjectiles,
+            DownEvents: summary.DownEvents,
+            KillEvents: summary.KillEvents,
+            MatchedDamageEvents: summary.MatchedDamageEvents);
     }
 
     private static FightObliterateIndexDto? BuildObliterateFromAnalystPayload(WvWAnalystObliterateSummaryDto? summary)
