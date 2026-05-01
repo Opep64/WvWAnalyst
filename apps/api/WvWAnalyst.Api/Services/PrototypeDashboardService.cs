@@ -126,12 +126,16 @@ public sealed class PrototypeDashboardService
 
     private static ManageActivityStatusDto BuildManageActivity(DirectoryImportJobStatusDto? activeBatchJob, int activeUploadCount)
     {
-        var parseRunning = activeBatchJob is not null && string.Equals(activeBatchJob.State, "running", StringComparison.OrdinalIgnoreCase);
+        var batchActive = activeBatchJob is not null
+            && (string.Equals(activeBatchJob.State, "running", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(activeBatchJob.State, "warming-analysis", StringComparison.OrdinalIgnoreCase));
         var uploadRunning = activeUploadCount > 0;
-        var summary = parseRunning
-            ? activeBatchJob!.ResetCatalog
-                ? "A full catalog rebuild is in progress. Starting another parse is disabled until it finishes."
-                : "A batch parse is in progress. Starting another parse is disabled until it finishes."
+        var summary = batchActive
+            ? string.Equals(activeBatchJob!.State, "warming-analysis", StringComparison.OrdinalIgnoreCase)
+                ? "Analysis is being recalculated after the batch parse. Starting another parse is disabled until it finishes."
+                : activeBatchJob.ResetCatalog
+                    ? "A full catalog rebuild is in progress. Starting another parse is disabled until it finishes."
+                    : "A batch parse is in progress. Starting another parse is disabled until it finishes."
             : uploadRunning
                 ? activeUploadCount == 1
                     ? "A log upload is in progress. Starting a batch parse is temporarily disabled."
@@ -139,11 +143,11 @@ public sealed class PrototypeDashboardService
                 : "No shared Manage operation is active.";
 
         return new ManageActivityStatusDto(
-            ParseRunning: parseRunning,
+            ParseRunning: batchActive,
             UploadRunning: uploadRunning,
             ActiveUploadCount: activeUploadCount,
             Summary: summary,
-            ActiveBatchJob: parseRunning ? activeBatchJob : null);
+            ActiveBatchJob: batchActive ? activeBatchJob : null);
     }
 
 }

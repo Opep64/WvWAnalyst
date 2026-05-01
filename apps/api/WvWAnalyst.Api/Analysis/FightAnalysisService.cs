@@ -462,15 +462,6 @@ public sealed class FightAnalysisService
                 group => CleanupAdjustedAverage(group.ToArray(), sample => (double)sample.Pillar.Score, sample => sample.Fight),
                 StringComparer.OrdinalIgnoreCase);
 
-        var gradeSource = executionScoreSamples
-            .Select(sample => sample.Execution!.Grade)
-            .Where(grade => !string.IsNullOrWhiteSpace(grade))
-            .GroupBy(grade => grade!, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(group => group.Count())
-            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault()
-            ?.Key;
-
         var expectedScoreSamples = fights
             .Select(fight => new
             {
@@ -493,15 +484,16 @@ public sealed class FightAnalysisService
             : Math.Round(fights.Average(fight => (fight.FightIndex?.DurationMilliseconds ?? 0) / 1000.0), 1);
         var mitigationSummary = BuildMitigationSummary(fights);
         var obliterateSummary = BuildObliterateSummary(fights);
+        var averageOverallScore = executionScoreSamples.Length == 0
+            ? null
+            : (double?)Math.Round(CleanupAdjustedAverage(
+                executionScoreSamples,
+                sample => (double)sample.Execution!.OverallScore!.Value,
+                sample => sample.Fight), 1);
 
         return new FightAnalysisOverviewDto(
-            AverageOverallScore: executionScoreSamples.Length == 0
-                ? null
-                : Math.Round(CleanupAdjustedAverage(
-                    executionScoreSamples,
-                    sample => (double)sample.Execution!.OverallScore!.Value,
-                    sample => sample.Fight), 1),
-            AverageOverallGrade: gradeSource,
+            AverageOverallScore: averageOverallScore,
+            AverageOverallGrade: averageOverallScore.HasValue ? ScoreToGrade(averageOverallScore.Value) : null,
             AverageExpectedScore: expectedScoreSamples.Length == 0
                 ? null
                 : Math.Round(CleanupAdjustedAverage(
@@ -528,6 +520,22 @@ public sealed class FightAnalysisService
             AverageDurationSeconds: averageDurationSeconds,
             MitigationSummary: mitigationSummary,
             ObliterateSummary: obliterateSummary);
+    }
+
+    private static string ScoreToGrade(double score)
+    {
+        return score switch
+        {
+            >= 90.0 => "A",
+            >= 82.0 => "A-",
+            >= 74.0 => "B+",
+            >= 66.0 => "B",
+            >= 58.0 => "B-",
+            >= 50.0 => "C+",
+            >= 42.0 => "C",
+            >= 34.0 => "D",
+            _ => "F",
+        };
     }
 
     private static FightAnalysisDifferenceReportDto BuildWinLossDifferences(

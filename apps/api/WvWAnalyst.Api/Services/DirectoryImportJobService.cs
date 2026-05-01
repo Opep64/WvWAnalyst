@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using WvWAnalyst.Api.Analysis;
 using WvWAnalyst.Api.Bridge;
 using WvWAnalyst.Contracts;
 
@@ -7,20 +9,23 @@ namespace WvWAnalyst.Api.Services;
 public sealed class DirectoryImportJobService
 {
     private readonly ParserImportService _parserImportService;
+    private readonly FightAnalysisService _fightAnalysisService;
     private readonly ILogger<DirectoryImportJobService> _logger;
     private readonly ConcurrentDictionary<string, DirectoryImportJobState> _jobs = new(StringComparer.OrdinalIgnoreCase);
 
     public DirectoryImportJobService(
         ParserImportService parserImportService,
+        FightAnalysisService fightAnalysisService,
         ILogger<DirectoryImportJobService> logger)
     {
         _parserImportService = parserImportService;
+        _fightAnalysisService = fightAnalysisService;
         _logger = logger;
     }
 
     public bool TryStartJob(DirectoryImportRequestDto request, out DirectoryImportJobStatusDto status)
     {
-        var runningJob = _jobs.Values.FirstOrDefault(job => string.Equals(job.State, "running", StringComparison.OrdinalIgnoreCase));
+        var runningJob = _jobs.Values.FirstOrDefault(job => IsActiveJobState(job.State));
         if (runningJob is not null)
         {
             status = runningJob.ToDto();
@@ -52,7 +57,14 @@ public sealed class DirectoryImportJobService
                     progress => jobState.ApplyProgress(progress),
                     CancellationToken.None);
 
-                jobState.Complete(result);
+                var completedResult = result;
+                if (result.ImportedCount > 0 || result.ResetCatalog)
+                {
+                    jobState.StartAnalysisWarmup(result);
+                    completedResult = WarmDefaultAnalysis(result);
+                }
+
+                jobState.Complete(completedResult);
             }
             catch (Exception exception)
             {
@@ -78,12 +90,12 @@ public sealed class DirectoryImportJobService
 
     public bool HasRunningJob()
     {
-        return _jobs.Values.Any(job => string.Equals(job.State, "running", StringComparison.OrdinalIgnoreCase));
+        return _jobs.Values.Any(job => IsActiveJobState(job.State));
     }
 
     public bool TryGetRunningJob(out DirectoryImportJobStatusDto status)
     {
-        var runningJob = _jobs.Values.FirstOrDefault(job => string.Equals(job.State, "running", StringComparison.OrdinalIgnoreCase));
+        var runningJob = _jobs.Values.FirstOrDefault(job => IsActiveJobState(job.State));
         if (runningJob is not null)
         {
             status = runningJob.ToDto();
@@ -93,6 +105,51 @@ public sealed class DirectoryImportJobService
         status = default!;
         return false;
     }
+
+    private DirectoryImportResultDto WarmDefaultAnalysis(DirectoryImportResultDto result)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            _fightAnalysisService.BuildSnapshot(
+                commander: null,
+                startDate: null,
+                endDate: null,
+                outcomeCode: null,
+                squadIncludeClasses: null,
+                squadExcludeClasses: null,
+                enemyIncludeClasses: null,
+                enemyExcludeClasses: null,
+                patchScope: null,
+                patchEraIds: null,
+                fightAttributes: null);
+            stopwatch.Stop();
+
+            return result with
+            {
+                Message = $"{result.Message} Analysis recalculated in {FormatElapsedSeconds(stopwatch.Elapsed)}."
+            };
+        }
+        catch (Exception exception)
+        {
+            stopwatch.Stop();
+            _logger.LogError(exception, "Analysis warm-up failed after directory import");
+            return result with
+            {
+                Message = $"{result.Message} Analysis warm-up failed: {exception.Message}"
+            };
+        }
+    }
+
+    private static string FormatElapsedSeconds(TimeSpan elapsed)
+    {
+        var seconds = Math.Max(0.1, Math.Round(elapsed.TotalSeconds, 1));
+        return $"{seconds:0.0}s";
+    }
+
+    private static bool IsActiveJobState(string? state)
+        => string.Equals(state, "running", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(state, "warming-analysis", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeMode(string? mode)
     {
@@ -209,6 +266,25 @@ public sealed class DirectoryImportJobService
                 CurrentFileName = null;
                 CurrentFilePath = null;
                 CompletedAtUtc = DateTimeOffset.UtcNow;
+                _items.Clear();
+                _items.AddRange(result.Items);
+            }
+        }
+
+        public void StartAnalysisWarmup(DirectoryImportResultDto result)
+        {
+            lock (_gate)
+            {
+                State = "warming-analysis";
+                Message = "Recalculating Analysis so the next Analysis load is warmed.";
+                DiscoveredCount = result.DiscoveredCount;
+                CompletedCount = result.ImportedCount + result.SkippedCount + result.ExcludedCount + result.FailedCount;
+                ImportedCount = result.ImportedCount;
+                SkippedCount = result.SkippedCount;
+                ExcludedCount = result.ExcludedCount;
+                FailedCount = result.FailedCount;
+                CurrentFileName = null;
+                CurrentFilePath = null;
                 _items.Clear();
                 _items.AddRange(result.Items);
             }

@@ -7751,13 +7751,16 @@ function renderFightDossierError(fightId, error) {
 function renderBatchStatus(result, success) {
     const container = document.querySelector("#batch-status");
     const state = String(result?.state ?? "").toLowerCase();
-    const isRunning = state === "running";
+    const isAnalysisWarmup = state === "warming-analysis";
+    const isRunning = state === "running" || isAnalysisWarmup;
     const isBlocked = state === "blocked";
     const isCatalogRebuild = Boolean(result?.resetCatalog);
     const totalCount = Number(result?.discoveredCount ?? 0);
     const completedCount = Number(result?.completedCount ?? 0);
     const maxParallelism = Number(result?.maxParallelism ?? 0);
-    const title = isRunning
+    const title = isAnalysisWarmup
+        ? "Recalculating Analysis"
+        : isRunning
         ? `${isCatalogRebuild ? "Rebuilding catalog" : "Parsing"} ${completedCount} / ${totalCount || "?"} logs`
         : isBlocked
             ? "Manage busy"
@@ -8640,7 +8643,7 @@ async function pollBatchJob(jobId) {
         renderBatchStatus(status, status.state !== "failed");
         renderBatchResults(status);
 
-        if (status.state === "running") {
+        if (status.state === "running" || status.state === "warming-analysis") {
             batchStatusPollHandle = window.setTimeout(() => pollBatchJob(jobId), 1000);
             return;
         }
