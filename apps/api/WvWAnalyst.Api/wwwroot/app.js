@@ -48,6 +48,7 @@ let compHelperFavoredPackageKeys = [];
 let activeAnalysisLaneDetailTab = "players";
 const MINIMUM_LANE_FILTER_APPEARANCES = 20;
 const MINIMUM_PLAYER_TABLE_FIGHTS = 40;
+const PREVENTION_VALUE_METRIC_KEY = "preventionValue";
 const ANALYSIS_TREND_ROLLING_WINDOW = 5;
 let analysisTrendMode = "fight";
 let analysisTrendSmoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW;
@@ -3748,6 +3749,23 @@ function normalizeAnalysisLaneOrderToken(value) {
     return String(value ?? "").trim().toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isAnalysisPreventionLane(laneKey) {
+    return normalizeAnalysisLaneOrderToken(laneKey) === "prevention";
+}
+
+function getLaneMetricByKey(lane, metricKey) {
+    return (lane?.metrics ?? []).find(metric => stringEqualsIgnoreCase(metric.key, metricKey)) ?? null;
+}
+
+function getLaneAverageMetricValue(lane, metricKey) {
+    const value = Number(getLaneMetricByKey(lane, metricKey)?.averagePerAppearance);
+    return Number.isFinite(value) ? value : null;
+}
+
+function getPreventionAverageValue(lane) {
+    return getLaneAverageMetricValue(lane, PREVENTION_VALUE_METRIC_KEY);
+}
+
 function getAnalysisLaneOrderEntry(lane) {
     const tokens = [
         lane?.laneKey,
@@ -4119,11 +4137,20 @@ function getQualifiedLaneClasses(snapshot, laneKey) {
                 return null;
             }
 
+            const preventionAverageValue = isAnalysisPreventionLane(laneKey)
+                ? getPreventionAverageValue(lane)
+                : null;
+            const usesPreventionValue = preventionAverageValue !== null;
+            const rankingScore = usesPreventionValue
+                ? preventionAverageValue
+                : Number(lane.overallStrengthPercent ?? 0);
+
             return {
                 classLabel: classRow.classLabel,
                 sampleCount: classRow.sampleCount,
                 impactScore: Number(lane.overallStrengthPercent ?? 0),
-                rankingScore: Number(lane.overallStrengthPercent ?? 0),
+                rankingScore,
+                rankingMetric: usesPreventionValue ? PREVENTION_VALUE_METRIC_KEY : "overallStrengthPercent",
                 topPlayerDisplayName: classRow.topPlayerDisplayName,
                 lane: {
                     ...lane,
@@ -4135,6 +4162,7 @@ function getQualifiedLaneClasses(snapshot, laneKey) {
         })
         .filter(Boolean)
         .sort((left, right) => Number(right.rankingScore ?? 0) - Number(left.rankingScore ?? 0)
+            || Number(right.lane?.overallStrengthPercent ?? 0) - Number(left.lane?.overallStrengthPercent ?? 0)
             || Number(right.lane?.overallSharePercent ?? 0) - Number(left.lane?.overallSharePercent ?? 0)
             || Number(right.sampleCount ?? 0) - Number(left.sampleCount ?? 0)
             || compareFightBrowserValues(String(left.classLabel ?? "").toLowerCase(), String(right.classLabel ?? "").toLowerCase()));
@@ -5598,8 +5626,12 @@ function buildCharacterLaneMetricCopy(lane, totalFights) {
             return `${formatCharacterLaneMetricPerFight(lane, "totalBoonSupport", totalFights)} total boon-seconds per filtered fight, split between ${formatCharacterLaneMetricPerFight(lane, "defensiveBoonSupport", totalFights)} defensive and ${formatCharacterLaneMetricPerFight(lane, "offensiveBoonSupport", totalFights)} offensive coverage.`;
         case "recovery":
             return `${formatCharacterLaneMetricPerFight(lane, "cleansesTotal", totalFights)} cleanses and ${formatCharacterLaneMetricPerFight(lane, "healingTotal", totalFights)} healing per filtered fight.`;
-        case "prevention":
-            return `${formatCharacterLaneMetricPerFight(lane, "barrierTotal", totalFights)} barrier, ${formatCharacterLaneMetricPerFight(lane, "negatedDamageTotal", totalFights)} estimated negated damage, and ${formatCharacterLaneMetricPerFight(lane, "petAbsorptionTotal", totalFights)} pet/minion absorption per filtered fight.`;
+        case "prevention": {
+            const preventionValueMetric = getCharacterLaneMetric(lane, "preventionValue");
+            return preventionValueMetric
+                ? `${formatCharacterLaneMetricPerFight(lane, "preventionValue", totalFights)} prevention value per filtered fight from ${formatCharacterLaneMetricPerFight(lane, "barrierTotal", totalFights)} barrier, ${formatCharacterLaneMetricPerFight(lane, "negatedDamageTotal", totalFights)} estimated negated damage, ${formatCharacterLaneMetricPerFight(lane, "petAbsorptionTotal", totalFights)} pet/minion absorption, and reduced defensive condition pressure.`
+                : `${formatCharacterLaneMetricPerFight(lane, "barrierTotal", totalFights)} barrier, ${formatCharacterLaneMetricPerFight(lane, "negatedDamageTotal", totalFights)} estimated negated damage, and ${formatCharacterLaneMetricPerFight(lane, "petAbsorptionTotal", totalFights)} pet/minion absorption per filtered fight.`;
+        }
         case "rez":
             return `${formatCharacterLaneMetricPerFight(lane, "squadRecoveryWindowsHelped", totalFights)} recoveries helped, ${formatCharacterLaneMetricPerFight(lane, "rezTimeOnRecoveries", totalFights)} rez time, and ${formatCharacterLaneMetricPerFight(lane, "downedHealingOnRecoveries", totalFights)} downed healing per filtered fight.`;
         default:
@@ -6824,12 +6856,19 @@ function buildLaneDetailPlayerRow(player) {
 }
 
 function buildLaneDetailClassRow(classRow) {
+    const usesPreventionValue = classRow.rankingMetric === PREVENTION_VALUE_METRIC_KEY;
+    const rankingValue = Number(classRow.rankingScore ?? classRow.impactScore ?? 0);
     const laneFitNote = Number(classRow.lane?.selectedLaneCount ?? 1) > 1
         ? `${formatPercent(classRow.lane.appearanceRatePercent)} avg appearance | ${formatPercent(classRow.lane.coverageRatePercent)} lane coverage`
         : `${formatPercent(classRow.lane.appearanceRatePercent)} appearance | ${formatPercent(classRow.lane.overallSharePercent)} overall share`;
-    const impactNote = Number(classRow.lane?.selectedLaneCount ?? 1) > 1
+    const impactNote = usesPreventionValue
+        ? `${formatNumber(rankingValue, 0)} avg prevention/player | ${formatPercent(classRow.lane.overallSharePercent)} overall share`
+        : Number(classRow.lane?.selectedLaneCount ?? 1) > 1
         ? `${formatPercent(classRow.lane.overallSharePercent)} overall share | ${classRow.lane.matchedLaneCount}/${classRow.lane.selectedLaneCount} lanes`
         : `${formatPercent(classRow.lane.overallSharePercent)} overall share`;
+    const performanceValue = usesPreventionValue
+        ? formatNumber(rankingValue, 0)
+        : formatPercent(rankingValue);
 
     return `
         <tr>
@@ -6842,7 +6881,7 @@ function buildLaneDetailClassRow(classRow) {
             </td>
             <td>
                 <div class="table-stack">
-                    <strong>${escapeHtml(formatPercent(classRow.rankingScore ?? classRow.impactScore))}</strong>
+                    <strong>${escapeHtml(performanceValue)}</strong>
                     <span class="table-inline-note">${escapeHtml(impactNote)}</span>
                 </div>
             </td>
@@ -6879,6 +6918,9 @@ function renderAnalysisLaneDetail(snapshot) {
     const laneClasses = isCombinedLaneView
         ? getQualifiedCombinedLaneClasses(snapshot, selectedLaneRows)
         : getQualifiedLaneClasses(snapshot, selectedLaneRows[0].laneKey);
+    const classPerformanceHeader = laneClasses.some(classRow => classRow.rankingMetric === PREVENTION_VALUE_METRIC_KEY)
+        ? "Avg prevention"
+        : "Performance";
     const laneThresholdCopy = isCombinedLaneView
         ? `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total appearances across the selected lanes. Best classes come from the qualified class list and are scored on the selected lanes together.`
         : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${getAnalysisLaneDisplayLabel(selectedLaneRows[0])} appearances. Best classes come from the qualified class list.`;
@@ -6943,7 +6985,7 @@ function renderAnalysisLaneDetail(snapshot) {
                         <tr>
                             <th>Class</th>
                             <th>Samples</th>
-                            <th>Performance</th>
+                            <th>${escapeHtml(classPerformanceHeader)}</th>
                             <th>Lane strength</th>
                             <th>Lane fit</th>
                             <th>Top player</th>

@@ -19,6 +19,8 @@ public sealed class FightAnalysisService
     private const int MinimumCharacterContextBucketSampleCount = 4;
     private const double MinimumCharacterContextDeltaMagnitude = 2.0;
     private const int MaximumCharacterContextFitCount = 6;
+    private const string PreventionLaneKey = "prevention";
+    private const string PreventionValueMetricKey = "preventionValue";
     private const double StrictExpectedScoreSizeRatioTolerance = 0.20;
     private const double BroadExpectedScoreSizeRatioTolerance = 0.35;
     private const double StrictExpectedScoreClassMixTolerance = 0.35;
@@ -2171,10 +2173,17 @@ public sealed class FightAnalysisService
                 var entries = group.ToArray();
                 var label = entries.Select(entry => entry.Lane.Label).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? group.Key;
                 var distinctFightCount = entries.Select(entry => entry.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                bool usePreventionValueRanking = IsPreventionLane(group.Key)
+                    && entries.Any(entry => GetLaneMetricValue(entry.Lane.Metrics, PreventionValueMetricKey) > 0.0);
                 var topClassLabel = entries
                     .Where(entry => !string.IsNullOrWhiteSpace(entry.ClassLabel))
                     .GroupBy(entry => entry.ClassLabel!, StringComparer.OrdinalIgnoreCase)
-                    .OrderByDescending(classGroup => CleanupAdjustedAverage(classGroup.ToArray(), entry => entry.Lane.StrengthPercent, entry => entry.Fight))
+                    .OrderByDescending(classGroup => CleanupAdjustedAverage(
+                        classGroup.ToArray(),
+                        entry => usePreventionValueRanking
+                            ? GetLaneMetricValue(entry.Lane.Metrics, PreventionValueMetricKey)
+                            : entry.Lane.StrengthPercent,
+                        entry => entry.Fight))
                     .ThenByDescending(classGroup => classGroup.Count())
                     .Select(classGroup => classGroup.Key)
                     .FirstOrDefault();
@@ -2183,7 +2192,12 @@ public sealed class FightAnalysisService
                     .Select(playerGroup => new
                     {
                         Display = playerGroup.Select(entry => entry.PlayerDisplayName).FirstOrDefault(),
-                        AverageStrength = CleanupAdjustedAverage(playerGroup.ToArray(), entry => entry.Lane.StrengthPercent, entry => entry.Fight),
+                        AverageStrength = CleanupAdjustedAverage(
+                            playerGroup.ToArray(),
+                            entry => usePreventionValueRanking
+                                ? GetLaneMetricValue(entry.Lane.Metrics, PreventionValueMetricKey)
+                                : entry.Lane.StrengthPercent,
+                            entry => entry.Fight),
                         Samples = playerGroup.Count()
                     })
                     .OrderByDescending(entry => entry.AverageStrength)
@@ -3376,6 +3390,22 @@ public sealed class FightAnalysisService
                 string.Equals(NormalizeLookupKey(item.Key), normalizedMetricKey, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(NormalizeLookupKey(item.Label), normalizedMetricKey, StringComparison.OrdinalIgnoreCase));
         return metric is null ? 0.0 : metric.TotalValue / sampleCount;
+    }
+
+    private static bool IsPreventionLane(string? laneKey)
+        => string.Equals(NormalizeLookupKey(laneKey), PreventionLaneKey, StringComparison.OrdinalIgnoreCase);
+
+    private static double GetLaneMetricValue(
+        IReadOnlyList<FightPlayerLaneMetricIndexDto>? metrics,
+        string metricKey)
+    {
+        string normalizedMetricKey = NormalizeLookupKey(metricKey);
+        return (metrics ?? Array.Empty<FightPlayerLaneMetricIndexDto>())
+            .Where(metric =>
+                string.Equals(NormalizeLookupKey(metric.Key), normalizedMetricKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(NormalizeLookupKey(metric.Label), normalizedMetricKey, StringComparison.OrdinalIgnoreCase))
+            .Select(metric => metric.Value)
+            .FirstOrDefault();
     }
 
     private static AggregatedProvidedBoonSample? GetProvidedBoon(
