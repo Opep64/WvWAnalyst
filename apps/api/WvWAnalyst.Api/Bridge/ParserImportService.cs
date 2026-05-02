@@ -363,7 +363,10 @@ public sealed class ParserImportService
             }
 
             var parserReportedSuccess = parserRun.ConsoleResult?.Parsed == true && parserRun.ExitCode == 0;
-            var exclusionDecision = fightIndex is null ? null : EvaluateImportExclusion(fightIndex.Data);
+            var unsupportedParserOutputDecision = fightIndex is null
+                ? EvaluateUnsupportedParserOutput(parserRun, stagedAnalysisArtifactPath)
+                : null;
+            var exclusionDecision = unsupportedParserOutputDecision ?? (fightIndex is null ? null : EvaluateImportExclusion(fightIndex.Data));
             var parseSucceeded = parserReportedSuccess && fightIndex is not null && exclusionDecision is null;
             var parserStatus = BuildParserStatus(parserRun, parseSucceeded, stagedAnalysisArtifactPath, exclusionDecision);
 
@@ -922,6 +925,97 @@ public sealed class ParserImportService
         }
 
         return parserRun.ConsoleResult?.Status ?? $"Parser exit code {parserRun.ExitCode}";
+    }
+
+    private static ExclusionDecision? EvaluateUnsupportedParserOutput(ParserRunResult parserRun, string? stagedAnalysisArtifactPath)
+    {
+        if (parserRun.ConsoleResult?.Parsed != true || parserRun.ExitCode != 0 || !string.IsNullOrWhiteSpace(stagedAnalysisArtifactPath))
+        {
+            return null;
+        }
+
+        var outputKind = ExtractParserOutputKind(parserRun.ConsoleResult);
+        if (string.Equals(outputKind, "detailed_gh", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(outputKind, "gh", StringComparison.OrdinalIgnoreCase))
+        {
+            var label = string.IsNullOrWhiteSpace(outputKind) ? "Guild Hall" : $"Guild Hall ({outputKind})";
+            return new ExclusionDecision(
+                ReasonCode: "unsupported-guild-hall",
+                Status: $"Excluded after parsing: EI classified this as {label}, so no WvWAnalyst analysis.json was produced.",
+                Detail: $"EI classified the log as {label}, not a detailed WvW map log; WvWAnalyst imports only detailed WvW fights.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(outputKind) &&
+            !string.Equals(outputKind, "detailed_wvw", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExclusionDecision(
+                ReasonCode: "unsupported-parser-output",
+                Status: $"Excluded after parsing: EI produced {outputKind} output, which does not include WvWAnalyst analysis.json.",
+                Detail: $"EI completed this log as {outputKind}, not detailed_wvw; WvWAnalyst imports only detailed WvW fights.");
+        }
+
+        return null;
+    }
+
+    private static string? ExtractParserOutputKind(ParserConsoleResult consoleResult)
+    {
+        if (!string.IsNullOrWhiteSpace(consoleResult.Status))
+        {
+            var tokens = consoleResult.Status.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (tokens.Length > 0 && LooksLikeParserOutputKind(tokens[^1]))
+            {
+                return tokens[^1];
+            }
+        }
+
+        var generatedFiles = consoleResult.GeneratedFiles ?? Array.Empty<string>();
+        foreach (var generatedFile in generatedFiles)
+        {
+            var outputKind = ExtractParserOutputKindFromFileName(generatedFile);
+            if (!string.IsNullOrWhiteSpace(outputKind))
+            {
+                return outputKind;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractParserOutputKindFromFileName(string filePath)
+    {
+        var stem = Path.GetFileNameWithoutExtension(filePath);
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            return null;
+        }
+
+        if (stem.EndsWith(".analysis", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = Path.GetFileNameWithoutExtension(stem);
+        }
+
+        var tokens = stem.Split('_', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 0; index < tokens.Length - 1; index++)
+        {
+            if (string.Equals(tokens[index], "detailed", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"detailed_{tokens[index + 1]}";
+            }
+        }
+
+        return tokens.FirstOrDefault(LooksLikeParserOutputKind);
+    }
+
+    private static bool LooksLikeParserOutputKind(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Contains('_', StringComparison.Ordinal) ||
+            string.Equals(value, "wvw", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "gh", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ExclusionDecision? EvaluateImportExclusion(FightIndexDto fightIndex)
