@@ -339,8 +339,11 @@ public sealed class EliteInsightsFightIndexer
             Damage: side.Totals?.Damage ?? 0,
             DamageTaken: side.Totals?.DamageTaken ?? 0,
             Strips: side.Totals?.Strips ?? 0,
+            Corrupts: side.Totals?.Corrupts ?? 0,
+            CorruptPercent: side.Totals?.CorruptPercent ?? 0,
             ReceivedCrowdControl: side.Totals?.ReceivedCrowdControl ?? 0,
             StripsPerMinute: side.Totals?.StripsPerMinute ?? 0,
+            CorruptsPerMinute: side.Totals?.CorruptsPerMinute ?? 0,
             CleansesPerMinute: side.Totals?.CleansesPerMinute ?? 0,
             Classes: classes);
     }
@@ -750,6 +753,8 @@ public sealed class EliteInsightsFightIndexer
                 Downs: player.Downs,
                 Kills: player.Kills,
                 Strips: player.Strips,
+                Corrupts: player.Corrupts,
+                CorruptPercent: player.CorruptPercent,
                 OutgoingCleanses: player.OutgoingCleanses,
                 Healing: player.Healing,
                 Barrier: player.Barrier,
@@ -790,7 +795,8 @@ public sealed class EliteInsightsFightIndexer
                         DemandLabel: NullIfWhiteSpace(lane.DemandLabel),
                         DemandWeightPercent: lane.DemandWeightPercent,
                         ImpactScore: lane.ImpactScore,
-                        EvidenceLine: NullIfWhiteSpace(lane.EvidenceLine)))
+                        EvidenceLine: NullIfWhiteSpace(lane.EvidenceLine),
+                        ContextLine: NullIfWhiteSpace(lane.ContextLine)))
                     .ToArray()
                     ?? Array.Empty<FightPlayerFightImpactLaneIndexDto>(),
                 EvaluationConfidenceLabel: NullIfWhiteSpace(player.EvaluationConfidenceLabel),
@@ -889,7 +895,10 @@ public sealed class EliteInsightsFightIndexer
                 Damage: player.Damage,
                 Dps: player.Dps,
                 Strips: player.Strips,
-                StripsPerMinute: player.StripsPerMinute))
+                Corrupts: player.Corrupts,
+                CorruptPercent: player.CorruptPercent,
+                StripsPerMinute: player.StripsPerMinute,
+                CorruptsPerMinute: player.CorruptsPerMinute))
             .ToArray();
     }
 
@@ -935,6 +944,8 @@ public sealed class EliteInsightsFightIndexer
                 TimeLabel: NullIfWhiteSpace(burst.TimeLabel),
                 Damage: burst.Damage,
                 Strips: burst.Strips,
+                Corrupts: burst.Corrupts,
+                CorruptPercent: burst.CorruptPercent,
                 Downs: burst.Downs,
                 Kills: burst.Kills,
                 TopPressure: BuildTopBurstActorFromAnalystPayload(burst.TopPressure),
@@ -987,7 +998,9 @@ public sealed class EliteInsightsFightIndexer
             Profession: NullIfWhiteSpace(actor.Profession),
             EliteSpec: NullIfWhiteSpace(actor.EliteSpec),
             Icon: NullIfWhiteSpace(actor.Icon),
-            Amount: actor.Amount);
+            Amount: actor.Amount,
+            Corrupts: actor.Corrupts,
+            CorruptPercent: actor.CorruptPercent);
     }
 
     private static FightOutcomeDto BuildUnavailableOutcome(string detail)

@@ -21,6 +21,8 @@ public sealed class FightAnalysisService
     private const int MaximumCharacterContextFitCount = 6;
     private const string PreventionLaneKey = "prevention";
     private const string PreventionValueMetricKey = "preventionValue";
+    private const string StripTotalMetricKey = "stripsTotal";
+    private const string StripCorruptsMetricKey = "stripCorruptsTotal";
     private const double StrictExpectedScoreSizeRatioTolerance = 0.20;
     private const double BroadExpectedScoreSizeRatioTolerance = 0.35;
     private const double StrictExpectedScoreClassMixTolerance = 0.35;
@@ -1739,6 +1741,8 @@ public sealed class FightAnalysisService
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
                 var averageStrips = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Strips, entry => entry.Fight), 1);
+                var averageCorrupts = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Corrupts, entry => entry.Fight), 1);
+                var stripCorruptPercent = ComputePercent(averageCorrupts, averageStrips);
                 var averageCleanses = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.OutgoingCleanses, entry => entry.Fight), 1);
                 var averageHealing = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Healing, entry => entry.Fight), 0);
                 var averageBarrier = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Barrier, entry => entry.Fight), 0);
@@ -1788,6 +1792,8 @@ public sealed class FightAnalysisService
                     AverageDownsPerFight: averageDowns,
                     AverageKillsPerFight: averageKills,
                     AverageStripsPerFight: averageStrips,
+                    AverageCorruptsPerFight: averageCorrupts,
+                    StripCorruptPercent: stripCorruptPercent,
                     AverageOutgoingCleansesPerFight: averageCleanses,
                     AverageHealingPerFight: averageHealing,
                     AverageBarrierPerFight: averageBarrier,
@@ -1838,7 +1844,11 @@ public sealed class FightAnalysisService
                 OverallSharePercent: lane.OverallSharePercent,
                 AppearanceRatePercent: lane.AppearanceRatePercent,
                 Samples: lane.Samples,
-                TotalSamplesAll: lane.TotalSamplesAll)))
+                TotalSamplesAll: lane.TotalSamplesAll,
+                AverageCorruptsPerAppearance: GetAnalysisLaneMetricAverage(lane.Metrics, StripCorruptsMetricKey),
+                StripCorruptPercent: ComputePercent(
+                    GetAnalysisLaneMetricTotal(lane.Metrics, StripCorruptsMetricKey),
+                    GetAnalysisLaneMetricTotal(lane.Metrics, StripTotalMetricKey)))))
             .OrderByDescending(lane => lane.OverallStrengthPercent)
             .ThenByDescending(lane => lane.TotalSamplesAll)
             .ThenBy(lane => lane.CharacterName, StringComparer.OrdinalIgnoreCase)
@@ -1864,6 +1874,8 @@ public sealed class FightAnalysisService
             AverageDownsPerFight: player.AverageDownsPerFight,
             AverageKillsPerFight: player.AverageKillsPerFight,
             AverageStripsPerFight: player.AverageStripsPerFight,
+            AverageCorruptsPerFight: player.AverageCorruptsPerFight,
+            StripCorruptPercent: player.StripCorruptPercent,
             AverageOutgoingCleansesPerFight: player.AverageOutgoingCleansesPerFight,
             AverageHealingPerFight: player.AverageHealingPerFight,
             AverageBarrierPerFight: player.AverageBarrierPerFight,
@@ -1924,6 +1936,8 @@ public sealed class FightAnalysisService
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
                 var averageStrips = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Strips, entry => entry.Fight), 1);
+                var averageCorrupts = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Corrupts, entry => entry.Fight), 1);
+                var stripCorruptPercent = ComputePercent(averageCorrupts, averageStrips);
                 var averageCleanses = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.OutgoingCleanses, entry => entry.Fight), 1);
                 var averageHealing = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Healing, entry => entry.Fight), 0);
                 var averageBarrier = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Barrier, entry => entry.Fight), 0);
@@ -1966,6 +1980,9 @@ public sealed class FightAnalysisService
                     DrawCount: drawCount,
                     WinRatePercent: winRatePercent,
                     ContributionScore: contributionScore,
+                    AverageStripsPerFight: averageStrips,
+                    AverageCorruptsPerFight: averageCorrupts,
+                    StripCorruptPercent: stripCorruptPercent,
                     TopPlayerDisplayName: topPlayerDisplayName,
                     AveragePrimaryLaneScore: laneScores.Length == 0
                         ? 0.0
@@ -2210,6 +2227,14 @@ public sealed class FightAnalysisService
                     .ThenByDescending(entry => entry.Lane.SharePercent)
                     .Select(entry => entry.Lane.EvidenceLine)
                     .FirstOrDefault();
+                double averageCorrupts = Math.Round(CleanupAdjustedAverage(
+                    entries,
+                    entry => GetLaneMetricValue(entry.Lane.Metrics, StripCorruptsMetricKey),
+                    entry => entry.Fight), 1);
+                double averageStrips = Math.Round(CleanupAdjustedAverage(
+                    entries,
+                    entry => GetLaneMetricValue(entry.Lane.Metrics, StripTotalMetricKey),
+                    entry => entry.Fight), 1);
                 return new FightAnalysisLaneRowDto(
                     LaneKey: group.Key,
                     LaneLabel: label,
@@ -2219,6 +2244,8 @@ public sealed class FightAnalysisService
                     AverageStrengthPercent: Math.Round(CleanupAdjustedAverage(entries, entry => entry.Lane.StrengthPercent, entry => entry.Fight), 1),
                     AverageSharePercent: Math.Round(CleanupAdjustedAverage(entries, entry => entry.Lane.SharePercent, entry => entry.Fight), 1),
                     AppearanceRatePercent: totalFightCount == 0 ? 0.0 : Math.Round(distinctFightCount * 100.0 / totalFightCount, 1),
+                    AverageCorruptsPerAppearance: averageCorrupts,
+                    StripCorruptPercent: ComputePercent(averageCorrupts, averageStrips),
                     TopClassLabel: topClassLabel,
                     TopPlayerDisplayName: topPlayerDisplayName,
                     EvidenceLine: evidenceLine);
@@ -2576,6 +2603,8 @@ public sealed class FightAnalysisService
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
                 var averageStrips = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Strips, entry => entry.Fight), 1);
+                var averageCorrupts = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Corrupts, entry => entry.Fight), 1);
+                var stripCorruptPercent = ComputePercent(averageCorrupts, averageStrips);
                 var averageCleanses = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.OutgoingCleanses, entry => entry.Fight), 1);
                 var averageHealing = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Healing, entry => entry.Fight), 0);
                 var averageBarrier = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Barrier, entry => entry.Fight), 0);
@@ -2655,6 +2684,9 @@ public sealed class FightAnalysisService
                     AverageLateralRiskRate: averageLateralRiskRate,
                     AverageDeathsPerFight: averageDeaths,
                     AverageRecoveriesPerFight: averageRecoveries,
+                    AverageStripsPerFight: averageStrips,
+                    AverageCorruptsPerFight: averageCorrupts,
+                    StripCorruptPercent: stripCorruptPercent,
                     AverageActivePresencePercent: Math.Round(ComputeAveragePresencePercent(mergedFightEntries, entry => entry.ActiveSeconds), 1),
                     AverageEngagedPresencePercent: Math.Round(ComputeAveragePresencePercent(mergedFightEntries, entry => entry.CombatSeconds), 1),
                     PackageInputs: packageInputs,
@@ -2794,6 +2826,8 @@ public sealed class FightAnalysisService
                 var averageDowns = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Downs, entry => entry.Fight), 1);
                 var averageKills = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Kills, entry => entry.Fight), 1);
                 var averageStrips = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Strips, entry => entry.Fight), 1);
+                var averageCorrupts = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.Corrupts, entry => entry.Fight), 1);
+                var stripCorruptPercent = ComputePercent(averageCorrupts, averageStrips);
                 var averageCleanses = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => entry.OutgoingCleanses, entry => entry.Fight), 1);
                 var averageHealing = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Healing, entry => entry.Fight), 0);
                 var averageBarrier = sampleCount == 0 ? 0.0 : Math.Round(CleanupAdjustedAverage(mergedFightEntries, entry => (double)entry.Barrier, entry => entry.Fight), 0);
@@ -2852,7 +2886,10 @@ public sealed class FightAnalysisService
                         : Math.Round(CleanupAdjustedAverage(laneScores, score => score.Score.Primary, score => score.Fight), 1),
                     AverageWeightedLaneScore: laneScores.Length == 0
                         ? 0.0
-                        : Math.Round(CleanupAdjustedAverage(laneScores, score => score.Score.Weighted, score => score.Fight), 1));
+                        : Math.Round(CleanupAdjustedAverage(laneScores, score => score.Score.Weighted, score => score.Fight), 1),
+                    AverageStripsPerFight: averageStrips,
+                    AverageCorruptsPerFight: averageCorrupts,
+                    StripCorruptPercent: stripCorruptPercent);
             })
             .Where(player => player.TotalFightCountAll >= MinimumClassPlayerFightCount)
             .OrderByDescending(player => player.ImpactScore)
@@ -3408,6 +3445,39 @@ public sealed class FightAnalysisService
             .FirstOrDefault();
     }
 
+    private static double GetAnalysisLaneMetricTotal(
+        IReadOnlyList<FightAnalysisLaneMetricDto>? metrics,
+        string metricKey)
+    {
+        string normalizedMetricKey = NormalizeLookupKey(metricKey);
+        return (metrics ?? Array.Empty<FightAnalysisLaneMetricDto>())
+            .Where(metric =>
+                string.Equals(NormalizeLookupKey(metric.Key), normalizedMetricKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(NormalizeLookupKey(metric.Label), normalizedMetricKey, StringComparison.OrdinalIgnoreCase))
+            .Select(metric => metric.TotalValue)
+            .FirstOrDefault();
+    }
+
+    private static double GetAnalysisLaneMetricAverage(
+        IReadOnlyList<FightAnalysisLaneMetricDto>? metrics,
+        string metricKey)
+    {
+        string normalizedMetricKey = NormalizeLookupKey(metricKey);
+        return (metrics ?? Array.Empty<FightAnalysisLaneMetricDto>())
+            .Where(metric =>
+                string.Equals(NormalizeLookupKey(metric.Key), normalizedMetricKey, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(NormalizeLookupKey(metric.Label), normalizedMetricKey, StringComparison.OrdinalIgnoreCase))
+            .Select(metric => metric.AveragePerAppearance)
+            .FirstOrDefault();
+    }
+
+    private static double ComputePercent(double numerator, double denominator)
+    {
+        return denominator <= 0.0
+            ? 0.0
+            : Math.Round(numerator * 100.0 / denominator, 1);
+    }
+
     private static AggregatedProvidedBoonSample? GetProvidedBoon(
         IReadOnlyDictionary<string, AggregatedProvidedBoonSample> aggregatedProvidedBoons,
         string boonName)
@@ -3730,6 +3800,7 @@ public sealed class FightAnalysisService
             Downs: entries.Sum(entry => entry.Player.Downs),
             Kills: entries.Sum(entry => entry.Player.Kills),
             Strips: entries.Sum(entry => entry.Player.Strips),
+            Corrupts: entries.Sum(entry => entry.Player.Corrupts),
             OutgoingCleanses: entries.Sum(entry => entry.Player.OutgoingCleanses),
             Healing: entries.Sum(entry => entry.Player.Healing),
             Barrier: entries.Sum(entry => entry.Player.Barrier),
@@ -4517,6 +4588,7 @@ internal sealed record MergedPlayerFightSample(
     int Downs,
     int Kills,
     int Strips,
+    int Corrupts,
     int OutgoingCleanses,
     long Healing,
     long Barrier,

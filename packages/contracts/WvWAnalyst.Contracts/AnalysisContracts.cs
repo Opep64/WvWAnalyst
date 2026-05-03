@@ -256,6 +256,8 @@ public sealed record FightAnalysisPlayerSummaryRowDto(
     double AverageDownsPerFight,
     double AverageKillsPerFight,
     double AverageStripsPerFight,
+    double AverageCorruptsPerFight,
+    double StripCorruptPercent,
     double AverageOutgoingCleansesPerFight,
     double AverageHealingPerFight,
     double AverageBarrierPerFight,
@@ -283,7 +285,9 @@ public sealed record FightAnalysisPlayerLaneSummaryDto(
     double OverallSharePercent,
     double AppearanceRatePercent,
     int Samples,
-    int TotalSamplesAll);
+    int TotalSamplesAll,
+    double AverageCorruptsPerAppearance,
+    double StripCorruptPercent);
 
 public sealed record FightAnalysisPlayerRowDto(
     string Account,
@@ -304,6 +308,8 @@ public sealed record FightAnalysisPlayerRowDto(
     double AverageDownsPerFight,
     double AverageKillsPerFight,
     double AverageStripsPerFight,
+    double AverageCorruptsPerFight,
+    double StripCorruptPercent,
     double AverageOutgoingCleansesPerFight,
     double AverageHealingPerFight,
     double AverageBarrierPerFight,
@@ -342,6 +348,9 @@ public sealed record FightAnalysisPlayerCharacterDto(
     double? AverageLateralRiskRate,
     double AverageDeathsPerFight,
     double AverageRecoveriesPerFight,
+    double AverageStripsPerFight,
+    double AverageCorruptsPerFight,
+    double StripCorruptPercent,
     double AverageActivePresencePercent,
     double AverageEngagedPresencePercent,
     FightAnalysisCharacterPackageInputsDto PackageInputs,
@@ -424,6 +433,9 @@ public sealed record FightAnalysisClassRowDto(
     int DrawCount,
     double WinRatePercent,
     double ContributionScore,
+    double AverageStripsPerFight,
+    double AverageCorruptsPerFight,
+    double StripCorruptPercent,
     string? TopPlayerDisplayName,
     double AveragePrimaryLaneScore,
     double AverageWeightedLaneScore,
@@ -486,7 +498,10 @@ public sealed record FightAnalysisClassPlayerRowDto(
     int FightImpactSampleCount,
     string? PrimaryLaneLabel,
     double AveragePrimaryLaneScore,
-    double AverageWeightedLaneScore);
+    double AverageWeightedLaneScore,
+    double AverageStripsPerFight,
+    double AverageCorruptsPerFight,
+    double StripCorruptPercent);
 
 public sealed record FightAnalysisLaneRowDto(
     string LaneKey,
@@ -497,6 +512,8 @@ public sealed record FightAnalysisLaneRowDto(
     double AverageStrengthPercent,
     double AverageSharePercent,
     double AppearanceRatePercent,
+    double AverageCorruptsPerAppearance,
+    double StripCorruptPercent,
     string? TopClassLabel,
     string? TopPlayerDisplayName,
     string? EvidenceLine);

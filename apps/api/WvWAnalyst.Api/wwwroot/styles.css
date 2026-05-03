@@ -1760,6 +1760,10 @@ h1 {
     max-height: 420px;
 }
 
+.analysis-split-panel-classes > .analysis-split-list .table-shell-analysis-classes {
+    max-height: min(720px, calc(100vh - 220px));
+}
+
 .table-shell-analysis-candidates {
     max-height: 420px;
 }

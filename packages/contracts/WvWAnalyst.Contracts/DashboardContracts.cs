@@ -323,8 +323,11 @@ public sealed record FightSideIndexDto(
     long Damage,
     long DamageTaken,
     long Strips,
+    long Corrupts,
+    double CorruptPercent,
     int ReceivedCrowdControl,
     double StripsPerMinute,
+    double CorruptsPerMinute,
     double CleansesPerMinute,
     IReadOnlyList<FightSideClassIndexDto> Classes);
 
@@ -479,6 +482,8 @@ public sealed record FightPlayerIndexDto(
     int Downs,
     int Kills,
     int Strips,
+    int Corrupts,
+    double CorruptPercent,
     int OutgoingCleanses,
     long Healing,
     long Barrier,
@@ -522,7 +527,8 @@ public sealed record FightPlayerFightImpactLaneIndexDto(
     string? DemandLabel,
     double DemandWeightPercent,
     double ImpactScore,
-    string? EvidenceLine);
+    string? EvidenceLine,
+    string? ContextLine);
 
 public sealed record FightEnemyPlayerIndexDto(
     int ActorId,
@@ -534,7 +540,10 @@ public sealed record FightEnemyPlayerIndexDto(
     long Damage,
     double Dps,
     int Strips,
-    double StripsPerMinute);
+    int Corrupts,
+    double CorruptPercent,
+    double StripsPerMinute,
+    double CorruptsPerMinute);
 
 public sealed record FightPlayerRoleMixIndexDto(
     string Label,
@@ -574,6 +583,8 @@ public sealed record FightTopBurstIndexDto(
     string? TimeLabel,
     long Damage,
     int Strips,
+    int Corrupts,
+    double CorruptPercent,
     int Downs,
     int Kills,
     FightTopBurstActorIndexDto? TopPressure,
@@ -588,7 +599,9 @@ public sealed record FightTopBurstActorIndexDto(
     string? Profession,
     string? EliteSpec,
     string? Icon,
-    double Amount);
+    double Amount,
+    int Corrupts,
+    double CorruptPercent);
 
 public sealed record FightPlayerThreatBoonIndexDto(
     long Id,

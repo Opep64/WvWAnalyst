@@ -284,9 +284,15 @@ public sealed class WvWAnalystSideTotalsDto
 
     public long Strips { get; set; }
 
+    public long Corrupts { get; set; }
+
+    public double CorruptPercent { get; set; }
+
     public int ReceivedCrowdControl { get; set; }
 
     public double StripsPerMinute { get; set; }
+
+    public double CorruptsPerMinute { get; set; }
 
     public double CleansesPerMinute { get; set; }
 }
@@ -716,6 +722,10 @@ public sealed class WvWAnalystPlayerSummaryDto
 
     public int Strips { get; set; }
 
+    public int Corrupts { get; set; }
+
+    public double CorruptPercent { get; set; }
+
     public int OutgoingCleanses { get; set; }
 
     public long Healing { get; set; }
@@ -802,6 +812,8 @@ public sealed class WvWAnalystPlayerFightImpactLaneDto
     public double ImpactScore { get; set; }
 
     public string EvidenceLine { get; set; } = string.Empty;
+
+    public string ContextLine { get; set; } = string.Empty;
 }
 
 public sealed class WvWAnalystEnemyPlayerSummaryDto
@@ -824,7 +836,13 @@ public sealed class WvWAnalystEnemyPlayerSummaryDto
 
     public int Strips { get; set; }
 
+    public int Corrupts { get; set; }
+
+    public double CorruptPercent { get; set; }
+
     public double StripsPerMinute { get; set; }
+
+    public double CorruptsPerMinute { get; set; }
 }
 
 public sealed class WvWAnalystPlayerRoleMixEntryDto
@@ -899,6 +917,10 @@ public sealed class WvWAnalystTopBurstDto
 
     public int Strips { get; set; }
 
+    public int Corrupts { get; set; }
+
+    public double CorruptPercent { get; set; }
+
     public int Downs { get; set; }
 
     public int Kills { get; set; }
@@ -927,6 +949,10 @@ public sealed class WvWAnalystTopBurstActorDto
     public string Icon { get; set; } = string.Empty;
 
     public double Amount { get; set; }
+
+    public int Corrupts { get; set; }
+
+    public double CorruptPercent { get; set; }
 }
 
 public sealed class WvWAnalystPlayerThreatBoonSummaryDto

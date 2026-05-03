@@ -49,6 +49,8 @@ let activeAnalysisLaneDetailTab = "players";
 const MINIMUM_LANE_FILTER_APPEARANCES = 20;
 const MINIMUM_PLAYER_TABLE_FIGHTS = 40;
 const PREVENTION_VALUE_METRIC_KEY = "preventionValue";
+const STRIP_TOTAL_METRIC_KEY = "stripsTotal";
+const STRIP_CORRUPTS_METRIC_KEY = "stripCorruptsTotal";
 const ANALYSIS_TREND_ROLLING_WINDOW = 5;
 let analysisTrendMode = "fight";
 let analysisTrendSmoothingWindow = ANALYSIS_TREND_ROLLING_WINDOW;
@@ -3396,6 +3398,8 @@ function getAnalysisPlayerSortValue(player, sortKey) {
             return Number(player.winRatePercent ?? 0);
         case "fightImpact":
             return Number(player.averageFightImpactScore ?? 0);
+        case "corrupts":
+            return Number(player.averageCorruptsPerFight ?? 0);
         case "performance":
         case "impact":
         default:
@@ -3450,6 +3454,8 @@ function getAnalysisClassSortValue(classRow, sortKey) {
             return Number(classRow.winRatePercent ?? 0);
         case "fightCoverage":
             return Number(classRow.averageFightCoverageScore ?? 0);
+        case "corrupts":
+            return Number(classRow.averageCorruptsPerFight ?? 0);
         case "performance":
         case "impact":
         default:
@@ -3506,6 +3512,8 @@ function getAnalysisClassPlayerSortValue(player, sortKey) {
             return Number(player.averagePrimaryLaneScore ?? 0);
         case "fightImpact":
             return Number(player.averageFightImpactScore ?? 0);
+        case "corrupts":
+            return Number(player.averageCorruptsPerFight ?? 0);
         case "performance":
         case "impact":
         default:
@@ -3753,6 +3761,11 @@ function isAnalysisPreventionLane(laneKey) {
     return normalizeAnalysisLaneOrderToken(laneKey) === "prevention";
 }
 
+function isAnalysisStripLane(laneKey) {
+    const token = normalizeAnalysisLaneOrderToken(laneKey);
+    return token === "strip" || token === "boonstrip";
+}
+
 function getLaneMetricByKey(lane, metricKey) {
     return (lane?.metrics ?? []).find(metric => stringEqualsIgnoreCase(metric.key, metricKey)) ?? null;
 }
@@ -3764,6 +3777,44 @@ function getLaneAverageMetricValue(lane, metricKey) {
 
 function getPreventionAverageValue(lane) {
     return getLaneAverageMetricValue(lane, PREVENTION_VALUE_METRIC_KEY);
+}
+
+function getLaneStripCorruptStats(lane) {
+    const averageCorrupts = Number.isFinite(Number(lane?.averageCorruptsPerAppearance))
+        ? Number(lane.averageCorruptsPerAppearance)
+        : Number(getLaneAverageMetricValue(lane, STRIP_CORRUPTS_METRIC_KEY) ?? 0);
+    const averageStrips = Number(getLaneAverageMetricValue(lane, STRIP_TOTAL_METRIC_KEY) ?? 0);
+    const stripCorruptPercent = Number.isFinite(Number(lane?.stripCorruptPercent))
+        ? Number(lane.stripCorruptPercent)
+        : averageStrips > 0
+        ? Math.round((averageCorrupts * 1000) / averageStrips) / 10
+        : 0;
+
+    return {
+        averageCorruptsPerAppearance: averageCorrupts,
+        stripCorruptPercent
+    };
+}
+
+function buildStripCorruptStack(averageCorrupts, corruptPercent, averageLabel = "fight") {
+    const corrupts = Number(averageCorrupts ?? 0);
+    const percent = Number(corruptPercent ?? 0);
+    return `
+        <div class="table-stack">
+            <strong>${escapeHtml(formatNumber(corrupts, 1))}</strong>
+            <span class="table-inline-note">${escapeHtml(`${formatPercent(percent)} of strips | avg/${averageLabel}`)}</span>
+        </div>
+    `;
+}
+
+function buildStripCorruptPercentStack(corruptPercent) {
+    const percent = Number(corruptPercent ?? 0);
+    return `
+        <div class="table-stack">
+            <strong>${escapeHtml(formatPercent(percent))}</strong>
+            <span class="table-inline-note">of strips</span>
+        </div>
+    `;
 }
 
 function getAnalysisLaneOrderEntry(lane) {
@@ -3912,6 +3963,8 @@ function buildCombinedLaneContribution(selectedLaneRows, laneContributions) {
         overallStrengthPercent: averageMetric(lane => lane.overallStrengthPercent),
         overallSharePercent: averageMetric(lane => lane.overallSharePercent),
         appearanceRatePercent: averageMetric(lane => lane.appearanceRatePercent),
+        averageCorruptsPerAppearance: averageMetric(lane => getLaneStripCorruptStats(lane).averageCorruptsPerAppearance),
+        stripCorruptPercent: averageMetric(lane => getLaneStripCorruptStats(lane).stripCorruptPercent),
         samples: matchedEntries.reduce((sum, entry) => sum + Number(entry.lane?.samples ?? 0), 0),
         totalSamplesAll: matchedEntries.reduce((sum, entry) => sum + Number(entry.lane?.totalSamplesAll ?? entry.lane?.samples ?? 0), 0),
         matchedLaneCount: matchedEntries.length,
@@ -4144,6 +4197,7 @@ function getQualifiedLaneClasses(snapshot, laneKey) {
             const rankingScore = usesPreventionValue
                 ? preventionAverageValue
                 : Number(lane.overallStrengthPercent ?? 0);
+            const corruptStats = getLaneStripCorruptStats(lane);
 
             return {
                 classLabel: classRow.classLabel,
@@ -4154,6 +4208,7 @@ function getQualifiedLaneClasses(snapshot, laneKey) {
                 topPlayerDisplayName: classRow.topPlayerDisplayName,
                 lane: {
                     ...lane,
+                    ...corruptStats,
                     matchedLaneCount: 1,
                     selectedLaneCount: 1,
                     coverageRatePercent: 100
@@ -5547,6 +5602,7 @@ function buildAnalysisPlayerRow(player, isSelected) {
                     <span class="table-inline-note">${escapeHtml(fightImpactDetail.note)}</span>
                 </div>
             </td>
+            <td>${buildStripCorruptStack(player.averageCorruptsPerFight, player.stripCorruptPercent)}</td>
             <td>${escapeHtml((player.classesPlayed ?? []).join(", ") || "-")}</td>
             <td>
                 <div class="table-stack">
@@ -5619,7 +5675,7 @@ function buildCharacterLaneMetricCopy(lane, totalFights) {
         case "conversion":
             return `${formatCharacterLaneMetricPerFight(lane, "finishContributionDamage", totalFights)} finish contribution and ${formatCharacterLaneMetricPerFight(lane, "againstDownedDamage", totalFights)} against-downed damage per filtered fight.`;
         case "strip":
-            return `${formatCharacterLaneMetricPerFight(lane, "stripsTotal", totalFights)} strips and ${formatCharacterLaneMetricPerFight(lane, "stripDownContribution", totalFights)} down-linked strips per filtered fight.`;
+            return `${formatCharacterLaneMetricPerFight(lane, "stripsTotal", totalFights)} strips, ${formatCharacterLaneMetricPerFight(lane, "stripCorruptsTotal", totalFights)} corrupts, and ${formatCharacterLaneMetricPerFight(lane, "stripDownContribution", totalFights)} down-linked strips per filtered fight.`;
         case "control":
             return `${formatCharacterLaneMetricPerFight(lane, "effectiveCrowdControlCount", totalFights)} effective CC events and ${formatCharacterLaneMetricPerFight(lane, "crowdControlDownContribution", totalFights)} CC-linked downs per filtered fight.`;
         case "boonsupport":
@@ -6276,6 +6332,8 @@ function buildAnalysisCharacterCard(character, player = null, compCandidateLooku
                     <span class="analysis-character-pill">${escapeHtml(`${character.fightCount} fights`)}</span>
                     <span class="analysis-character-pill">${escapeHtml(`${formatPercent(character.winRatePercent)} wins`)}</span>
                     <span class="analysis-character-pill">${escapeHtml(`Performance ${formatNumber(character.impactScore, 1)}`)}</span>
+                    <span class="analysis-character-pill">${escapeHtml(`${formatNumber(character.averageCorruptsPerFight, 1)} corrupts/fight`)}</span>
+                    <span class="analysis-character-pill">${escapeHtml(`${formatPercent(character.stripCorruptPercent)} strip corrupt`)}</span>
                     ${fightImpactNote ? `<span class="analysis-character-pill">${escapeHtml(`Fight Impact ${formatNumber(character.averageFightImpactScore, 1)}/100`)}</span>` : ""}
                     <span class="analysis-character-pill">${escapeHtml(`${character.confidenceLabel ?? "Unknown"} confidence`)}</span>
                 </div>
@@ -6393,7 +6451,7 @@ function renderAnalysisPlayers(snapshot) {
 
     if (filteredPlayers.length === 0) {
         selectedAnalysisPlayerAccount = null;
-        body.innerHTML = `<tr><td colspan="7">No player rows matched the current filters.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8">No player rows matched the current filters.</td></tr>`;
         renderAnalysisPlayerDetail(null);
         return;
     }
@@ -6443,6 +6501,7 @@ function buildAnalysisClassRow(classRow) {
                     <span class="table-inline-note">${escapeHtml(`${formatPercent(classRow.averageWeightedLaneScore)} weighted lane`)}</span>
                 </div>
             </td>
+            <td>${buildStripCorruptStack(classRow.averageCorruptsPerFight, classRow.stripCorruptPercent)}</td>
             <td>
                 <div class="table-stack">
                     <strong>${escapeHtml(fightCoverageDetail.value)}</strong>
@@ -6557,6 +6616,7 @@ function buildAnalysisClassPlayerRow(player) {
                     <span class="table-inline-note">${escapeHtml(fightImpactDetail.note)}</span>
                 </div>
             </td>
+            <td>${buildStripCorruptStack(player.averageCorruptsPerFight, player.stripCorruptPercent)}</td>
             <td>${escapeHtml(`${player.primaryLaneLabel ?? "Unclassified"} | ${formatPercent(player.averagePrimaryLaneScore)} primary`)}</td>
         </tr>
     `;
@@ -6610,6 +6670,8 @@ function renderAnalysisClassDetail(classRow) {
                         <span class="analysis-character-pill">${escapeHtml(`${classRow.sampleCount} samples`)}</span>
                         <span class="analysis-character-pill">${escapeHtml(`${formatPercent(classRow.winRatePercent)} wins`)}</span>
                         <span class="analysis-character-pill">${escapeHtml(`Performance ${formatNumber(classRow.contributionScore, 1)}`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`${formatNumber(classRow.averageCorruptsPerFight, 1)} corrupts/fight`)}</span>
+                        <span class="analysis-character-pill">${escapeHtml(`${formatPercent(classRow.stripCorruptPercent)} strip corrupt`)}</span>
                         ${fightCoverageNote ? `<span class="analysis-character-pill">${escapeHtml(`Fight Coverage ${formatNumber(classRow.averageFightCoverageScore, 1)}/100`)}</span>` : ""}
                     </div>
                 </div>
@@ -6639,13 +6701,14 @@ function renderAnalysisClassDetail(classRow) {
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="record">Record</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="performance">Performance</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="fightImpact">Fight Impact</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-class-player-sort="corrupts">Corrupts</button></th>
                         <th><button class="sort-header" type="button" data-analysis-class-player-sort="lanefit">Lane fit</button></th>
                     </tr>
                 </thead>
                 <tbody>
                     ${(sortedPlayers.length
                         ? sortedPlayers.map(buildAnalysisClassPlayerRow).join("")
-                        : `<tr><td colspan="6">No player rows were retained for this class.</td></tr>`)}
+                        : `<tr><td colspan="7">No player rows were retained for this class.</td></tr>`)}
                 </tbody>
             </table>
         </div>
@@ -6662,7 +6725,7 @@ function renderAnalysisClasses(snapshot) {
 
     if (sortedClasses.length === 0) {
         selectedAnalysisClassLabel = null;
-        body.innerHTML = `<tr><td colspan="6">No class rows matched the current filters.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="7">No class rows matched the current filters.</td></tr>`;
         renderAnalysisClassDetail(null);
         return;
     }
@@ -6817,7 +6880,7 @@ function setActiveAnalysisLaneDetailTab(tabKey) {
     });
 }
 
-function buildLaneDetailPlayerRow(player) {
+function buildLaneDetailPlayerRow(player, showCorrupts = false) {
     const playerNote = player.displayName && !stringEqualsIgnoreCase(player.displayName, player.account)
         ? `Most-played character: ${player.displayName}`
         : null;
@@ -6850,12 +6913,13 @@ function buildLaneDetailPlayerRow(player) {
                     <span class="table-inline-note">${escapeHtml(laneCoverageNote)}</span>
                 </div>
             </td>
+            ${showCorrupts ? `<td>${buildStripCorruptPercentStack(player.lane?.stripCorruptPercent)}</td>` : ""}
             <td>${escapeHtml(laneFitNote)}</td>
         </tr>
     `;
 }
 
-function buildLaneDetailClassRow(classRow) {
+function buildLaneDetailClassRow(classRow, showCorrupts = false) {
     const usesPreventionValue = classRow.rankingMetric === PREVENTION_VALUE_METRIC_KEY;
     const rankingValue = Number(classRow.rankingScore ?? classRow.impactScore ?? 0);
     const laneFitNote = Number(classRow.lane?.selectedLaneCount ?? 1) > 1
@@ -6885,6 +6949,7 @@ function buildLaneDetailClassRow(classRow) {
                     <span class="table-inline-note">${escapeHtml(impactNote)}</span>
                 </div>
             </td>
+            ${showCorrupts ? `<td>${buildStripCorruptPercentStack(classRow.lane?.stripCorruptPercent)}</td>` : ""}
             <td>${escapeHtml(formatPercent(classRow.lane.overallStrengthPercent))}</td>
             <td>${escapeHtml(laneFitNote)}</td>
             <td>${escapeHtml(classRow.topPlayerDisplayName ?? "-")}</td>
@@ -6902,12 +6967,15 @@ function renderAnalysisLaneDetail(snapshot) {
 
     const laneLabel = selectedLaneRows.map(getAnalysisLaneDisplayLabel).join(" + ");
     const isCombinedLaneView = selectedLaneRows.length > 1;
+    const showStripCorrupts = selectedLaneRows.length === 1 && isAnalysisStripLane(selectedLaneRows[0].laneKey);
     const combinedLane = {
         laneLabel,
         samples: selectedLaneRows.reduce((sum, lane) => sum + Number(lane.samples ?? 0), 0),
         averageStrengthPercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.averageStrengthPercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
         appearanceRatePercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.appearanceRatePercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
         averageSharePercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.averageSharePercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
+        averageCorruptsPerAppearance: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.averageCorruptsPerAppearance ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
+        stripCorruptPercent: Math.round((selectedLaneRows.reduce((sum, lane) => sum + Number(lane.stripCorruptPercent ?? 0), 0) / Math.max(1, selectedLaneRows.length)) * 10) / 10,
         evidenceLine: isCombinedLaneView
             ? "Selected lanes are scored together; missing lanes count against the combined fit so balanced cards rise."
             : selectedLaneRows[0].evidenceLine
@@ -6946,6 +7014,7 @@ function renderAnalysisLaneDetail(snapshot) {
                     <div class="analysis-character-meta">
                         <span class="analysis-character-pill">${escapeHtml(`${combinedLane.samples} samples`)}</span>
                         <span class="analysis-character-pill">${escapeHtml(`${formatPercent(combinedLane.averageStrengthPercent)} strength`)}</span>
+                        ${showStripCorrupts ? `<span class="analysis-character-pill">${escapeHtml(`${formatPercent(combinedLane.stripCorruptPercent)} strip corrupt`)}</span>` : ""}
                         <span class="analysis-character-pill">${escapeHtml(`${formatPercent(combinedLane.appearanceRatePercent)} fight coverage`)}</span>
                         ${isCombinedLaneView ? `<span class="analysis-character-pill">${escapeHtml(`${selectedLaneRows.length} lanes selected`)}</span>` : ""}
                     </div>
@@ -6967,13 +7036,14 @@ function renderAnalysisLaneDetail(snapshot) {
                             <th>Appearances</th>
                             <th>Record</th>
                             <th>Performance</th>
+                            ${showStripCorrupts ? "<th>Corrupts</th>" : ""}
                             <th>Lane fit</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${lanePlayers.length
-                            ? lanePlayers.map(buildLaneDetailPlayerRow).join("")
-                            : `<tr><td colspan="5">No players met the current lane thresholds.</td></tr>`}
+                            ? lanePlayers.map(player => buildLaneDetailPlayerRow(player, showStripCorrupts)).join("")
+                            : `<tr><td colspan="${showStripCorrupts ? 6 : 5}">No players met the current lane thresholds.</td></tr>`}
                     </tbody>
                 </table>
             </div>
@@ -6986,6 +7056,7 @@ function renderAnalysisLaneDetail(snapshot) {
                             <th>Class</th>
                             <th>Samples</th>
                             <th>${escapeHtml(classPerformanceHeader)}</th>
+                            ${showStripCorrupts ? "<th>Corrupts</th>" : ""}
                             <th>Lane strength</th>
                             <th>Lane fit</th>
                             <th>Top player</th>
@@ -6993,8 +7064,8 @@ function renderAnalysisLaneDetail(snapshot) {
                     </thead>
                     <tbody>
                         ${laneClasses.length
-                            ? laneClasses.map(buildLaneDetailClassRow).join("")
-                            : `<tr><td colspan="6">No classes met the current lane thresholds.</td></tr>`}
+                            ? laneClasses.map(classRow => buildLaneDetailClassRow(classRow, showStripCorrupts)).join("")
+                            : `<tr><td colspan="${showStripCorrupts ? 7 : 6}">No classes met the current lane thresholds.</td></tr>`}
                     </tbody>
                 </table>
             </div>
@@ -7509,9 +7580,9 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     });
     setInnerHtml("#analysis-scope-list", buildAnalysisScopeStaticChip(message));
     document.querySelector("#analysis-players-summary").textContent = message;
-    setInnerHtml("#analysis-players-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-players-body", `<tr><td colspan="8">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-player-detail", "");
-    setInnerHtml("#analysis-classes-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-classes-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-class-detail", "");
     document.querySelector("#analysis-enemies-summary").textContent = message;
     setInnerHtml("#analysis-enemies-body", `<tr><td colspan="10">${escapeHtml(message)}</td></tr>`);
