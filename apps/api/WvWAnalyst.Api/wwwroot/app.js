@@ -3183,6 +3183,15 @@ function getAnalysisDifferenceDirectionClass(row) {
     return delta > 0 ? "is-up" : "is-down";
 }
 
+function clampScorePercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+
+    return Math.max(0, Math.min(100, numeric));
+}
+
 function buildAnalysisDifferenceTopSignalCard(row) {
     return `
         <article class="analysis-card analysis-delta-card">
@@ -3308,6 +3317,85 @@ function renderAnalysisDifferences(snapshot) {
     setInnerHtml("#analysis-differences-boon-body", buildAnalysisDifferenceTableRows(report.boonDifferences, "No boon differences available."));
     setInnerHtml("#analysis-differences-class-body", buildAnalysisClassDifferenceTableRows(report.classDetails ?? [], "No class differences available."));
     setInnerHtml("#analysis-differences-enemy-body", buildAnalysisDifferenceTableRows(report.enemyDifferences, "No enemy differences available."));
+}
+
+function buildAnalysisPillarOutcomeRow(row) {
+    const winScore = clampScorePercent(row.winValue);
+    const lossScore = clampScorePercent(row.lossValue);
+    const directionClass = getAnalysisDifferenceDirectionClass(row);
+    const detail = row.detail ? `${row.detail} ` : "";
+
+    return `
+        <div class="analysis-pillar-outcome-row">
+            <div class="analysis-pillar-outcome-label">
+                <strong>${escapeHtml(row.label)}</strong>
+                <span>${escapeHtml(row.confidenceLabel ?? "Low")} confidence</span>
+            </div>
+            <div class="analysis-pillar-outcome-bars">
+                <div class="analysis-pillar-barline">
+                    <span>Wins</span>
+                    <div class="analysis-pillar-track" aria-hidden="true">
+                        <i class="analysis-pillar-fill analysis-pillar-fill-win" style="width: ${winScore}%"></i>
+                    </div>
+                    <strong>${escapeHtml(formatAnalysisDifferenceValue(row, row.winValue))}</strong>
+                </div>
+                <div class="analysis-pillar-barline">
+                    <span>Losses</span>
+                    <div class="analysis-pillar-track" aria-hidden="true">
+                        <i class="analysis-pillar-fill analysis-pillar-fill-loss" style="width: ${lossScore}%"></i>
+                    </div>
+                    <strong>${escapeHtml(formatAnalysisDifferenceValue(row, row.lossValue))}</strong>
+                </div>
+            </div>
+            <div class="analysis-pillar-outcome-delta">
+                <strong class="analysis-difference-delta ${directionClass}">${escapeHtml(formatAnalysisDifferenceDelta(row))}</strong>
+                <span>${escapeHtml(`${detail}${formatNumber(row.winSampleCount ?? 0)} wins | ${formatNumber(row.lossSampleCount ?? 0)} losses`)}</span>
+            </div>
+        </div>
+    `;
+}
+
+function buildAnalysisPillarOutcomeComparison(snapshot) {
+    const report = snapshot.winLossDifferences ?? null;
+    const pillarKeys = new Set(["cohesion", "pressure", "downstate", "support"]);
+    const rows = (report?.scoreDifferences ?? [])
+        .filter(row => pillarKeys.has(String(row.key ?? "").toLowerCase()));
+    const hasEnoughResults = Number(report?.winFightCount ?? 0) > 0 && Number(report?.lossFightCount ?? 0) > 0;
+
+    if (!report || rows.length === 0 || !hasEnoughResults) {
+        return `
+            <article class="analysis-card analysis-pillar-outcome-card">
+                <div class="analysis-pillar-outcome-header">
+                    <div>
+                        <strong>Pillar split by result</strong>
+                        <span class="table-inline-note">Needs at least one win and one loss in the current filter.</span>
+                    </div>
+                </div>
+            </article>
+        `;
+    }
+
+    return `
+        <article class="analysis-card analysis-pillar-outcome-card">
+            <div class="analysis-pillar-outcome-header">
+                <div>
+                    <strong>Pillar split by result</strong>
+                    <span class="table-inline-note">${escapeHtml(`Wins ${formatNumber(report.winFightCount)} | Losses ${formatNumber(report.lossFightCount)} | ${report.confidenceLabel ?? "Low"} confidence`)}</span>
+                </div>
+                <div class="analysis-pillar-outcome-legend" aria-hidden="true">
+                    <span><i class="analysis-pillar-legend-win"></i>Wins</span>
+                    <span><i class="analysis-pillar-legend-loss"></i>Losses</span>
+                </div>
+            </div>
+            <div class="analysis-pillar-outcome-grid">
+                ${rows.map(buildAnalysisPillarOutcomeRow).join("")}
+            </div>
+        </article>
+    `;
+}
+
+function renderAnalysisPillarOutcomeComparison(snapshot) {
+    setInnerHtml("#analysis-pillar-outcome-card", buildAnalysisPillarOutcomeComparison(snapshot));
 }
 
 function renderAnalysisMitigation(snapshot) {
@@ -7595,6 +7683,7 @@ function setActiveAnalysisTab(tabKey, options = {}) {
 function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-summary").textContent = message;
     setInnerHtml("#analysis-overview-cards", "");
+    setInnerHtml("#analysis-pillar-outcome-card", "");
     document.querySelector("#analysis-trend-summary").textContent = message;
     setInnerHtml("#analysis-trend-delta-grid", "");
     setInnerHtml("#analysis-chart-grid", "");
@@ -7645,6 +7734,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisFilterOptions(snapshot);
     setInnerHtml("#analysis-overview-cards", buildAnalysisOverviewCards(snapshot));
     renderAnalysisDifferences(snapshot);
+    renderAnalysisPillarOutcomeComparison(snapshot);
     renderAnalysisCharts(snapshot);
     renderAnalysisBurstTrends(snapshot);
     renderAnalysisMitigation(snapshot);

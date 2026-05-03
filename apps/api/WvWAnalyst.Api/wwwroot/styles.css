@@ -1471,6 +1471,154 @@ h1 {
     margin-bottom: 16px;
 }
 
+.analysis-pillar-outcome-section {
+    min-width: 0;
+}
+
+.analysis-pillar-outcome-card {
+    display: grid;
+    gap: 14px;
+}
+
+.analysis-pillar-outcome-header,
+.analysis-pillar-outcome-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.analysis-pillar-outcome-header {
+    justify-content: space-between;
+}
+
+.analysis-pillar-outcome-header strong {
+    margin-bottom: 3px;
+}
+
+.analysis-pillar-outcome-legend {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.analysis-pillar-outcome-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.analysis-pillar-legend-win,
+.analysis-pillar-legend-loss {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+}
+
+.analysis-pillar-legend-win {
+    background: var(--success);
+}
+
+.analysis-pillar-legend-loss {
+    background: var(--danger);
+}
+
+.analysis-pillar-outcome-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.analysis-pillar-outcome-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.56fr) minmax(280px, 1.22fr) minmax(170px, 0.62fr);
+    gap: 14px;
+    align-items: center;
+    min-width: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.analysis-pillar-outcome-row:first-child {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.analysis-pillar-outcome-label,
+.analysis-pillar-outcome-delta {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.analysis-pillar-outcome-label strong {
+    margin: 0;
+}
+
+.analysis-pillar-outcome-label span,
+.analysis-pillar-outcome-delta span {
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.analysis-pillar-outcome-bars {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+}
+
+.analysis-pillar-barline {
+    display: grid;
+    grid-template-columns: 52px minmax(120px, 1fr) 42px;
+    gap: 9px;
+    align-items: center;
+    min-width: 0;
+}
+
+.analysis-pillar-barline span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.analysis-pillar-barline strong {
+    margin: 0;
+    text-align: right;
+    font-size: 0.82rem;
+}
+
+.analysis-pillar-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(159, 176, 195, 0.10);
+    border: 1px solid rgba(159, 176, 195, 0.12);
+}
+
+.analysis-pillar-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+}
+
+.analysis-pillar-fill-win {
+    background: linear-gradient(90deg, rgba(118, 215, 165, 0.55), var(--success));
+}
+
+.analysis-pillar-fill-loss {
+    background: linear-gradient(90deg, rgba(255, 143, 143, 0.48), var(--danger));
+}
+
+.analysis-pillar-outcome-delta {
+    justify-items: end;
+    text-align: right;
+}
+
+.analysis-pillar-outcome-delta strong {
+    margin: 0;
+}
+
 .analysis-split-panel {
     display: grid;
     grid-template-columns: minmax(520px, 0.85fr) minmax(720px, 1.3fr);
@@ -3055,6 +3203,14 @@ h1 {
         grid-template-columns: 1fr;
     }
 
+    .analysis-pillar-outcome-row {
+        grid-template-columns: minmax(140px, 0.55fr) minmax(260px, 1fr);
+    }
+
+    .analysis-pillar-outcome-delta {
+        grid-column: 2;
+    }
+
     .analysis-split-detail {
         position: static;
         max-height: none;
@@ -3139,5 +3295,29 @@ h1 {
     .analysis-overview-summary {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .analysis-pillar-outcome-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .analysis-pillar-outcome-legend {
+        justify-content: flex-start;
+    }
+
+    .analysis-pillar-outcome-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .analysis-pillar-outcome-delta {
+        grid-column: auto;
+        justify-items: start;
+        text-align: left;
+    }
+
+    .analysis-pillar-barline {
+        grid-template-columns: 48px minmax(0, 1fr) 40px;
     }
 }
