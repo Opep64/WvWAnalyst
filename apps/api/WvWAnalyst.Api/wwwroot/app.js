@@ -3749,6 +3749,27 @@ function getBestAnalysisPlayerLaneMatch(player, laneKey) {
     return matches[0] ?? null;
 }
 
+function getAnalysisPlayerLaneAppearanceTotal(player, laneKey) {
+    if (!laneKey || stringEqualsIgnoreCase(laneKey, "all")) {
+        return Number(player?.totalFightCountAll ?? player?.fightCount ?? 0);
+    }
+
+    return getAnalysisPlayerLaneSummaries(player)
+        .filter(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey))
+        .reduce((sum, lane) => sum + Number(lane.totalSamplesAll ?? lane.samples ?? 0), 0);
+}
+
+function getAnalysisPlayerCombinedLaneAppearanceTotal(player, selectedLaneRows) {
+    if (!selectedLaneRows?.length) {
+        return 0;
+    }
+
+    const selectedKeys = new Set(selectedLaneRows.map(lane => normalizeAnalysisLaneOrderToken(lane.laneKey)));
+    return getAnalysisPlayerLaneSummaries(player)
+        .filter(lane => selectedKeys.has(normalizeAnalysisLaneOrderToken(lane.laneKey)))
+        .reduce((sum, lane) => sum + Number(lane.totalSamplesAll ?? lane.samples ?? 0), 0);
+}
+
 function getLaneContributionByKey(collection, laneKey) {
     return (collection ?? []).find(lane => stringEqualsIgnoreCase(lane.laneKey, laneKey)) ?? null;
 }
@@ -4087,8 +4108,7 @@ function shouldIncludeAnalysisPlayerForSelectedLane(player) {
         return true;
     }
 
-    const match = getBestAnalysisPlayerLaneMatch(player, laneKey);
-    return Number(match?.lane?.totalSamplesAll ?? match?.lane?.samples ?? 0) >= MINIMUM_LANE_FILTER_APPEARANCES;
+    return getAnalysisPlayerLaneAppearanceTotal(player, laneKey) >= MINIMUM_LANE_FILTER_APPEARANCES;
 }
 
 function getQualifiedLanePlayers(snapshot, laneKey) {
@@ -4096,7 +4116,8 @@ function getQualifiedLanePlayers(snapshot, laneKey) {
         .filter(player => Number(player.totalFightCountAll ?? player.fightCount ?? 0) >= MINIMUM_PLAYER_TABLE_FIGHTS)
         .map(player => {
             const match = getBestAnalysisPlayerLaneMatch(player, laneKey);
-            if (!match || Number(match.lane?.totalSamplesAll ?? match.lane?.samples ?? 0) < MINIMUM_LANE_FILTER_APPEARANCES) {
+            const accountLaneAppearances = getAnalysisPlayerLaneAppearanceTotal(player, laneKey);
+            if (!match || accountLaneAppearances < MINIMUM_LANE_FILTER_APPEARANCES) {
                 return null;
             }
 
@@ -4109,6 +4130,7 @@ function getQualifiedLanePlayers(snapshot, laneKey) {
                 classLabel: match.character.classLabel,
                 lane: {
                     ...match.lane,
+                    accountTotalSamplesAll: accountLaneAppearances,
                     matchedLaneCount: 1,
                     selectedLaneCount: 1,
                     coverageRatePercent: 100
@@ -4130,10 +4152,15 @@ function getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows) {
     return (snapshot.topPlayers ?? [])
         .filter(player => Number(player.totalFightCountAll ?? player.fightCount ?? 0) >= MINIMUM_PLAYER_TABLE_FIGHTS)
         .map(player => {
+            const accountLaneAppearances = getAnalysisPlayerCombinedLaneAppearanceTotal(player, selectedLaneRows);
+            if (accountLaneAppearances < MINIMUM_LANE_FILTER_APPEARANCES) {
+                return null;
+            }
+
             const bestCharacter = getAnalysisPlayerCharacterLaneSummaryGroups(player)
                 .map(group => {
                     const lane = buildCombinedLaneContribution(selectedLaneRows, group.laneContributions ?? []);
-                    if (!lane || Number(lane.totalSamplesAll ?? 0) < MINIMUM_LANE_FILTER_APPEARANCES) {
+                    if (!lane) {
                         return null;
                     }
 
@@ -4167,7 +4194,10 @@ function getQualifiedCombinedLanePlayers(snapshot, selectedLaneRows) {
                 totalFightCount: player.totalFightCountAll ?? player.fightCount,
                 characterName: bestCharacter.character.characterName,
                 classLabel: bestCharacter.character.classLabel,
-                lane: bestCharacter.lane,
+                lane: {
+                    ...bestCharacter.lane,
+                    accountTotalSamplesAll: accountLaneAppearances
+                },
                 impactScore: Number(bestCharacter.lane.overallStrengthPercent ?? 0),
                 rankingScore: Number(bestCharacter.rankingScore ?? 0),
                 winRatePercent: Number(bestCharacter.character.winRatePercent ?? 0),
@@ -6440,7 +6470,7 @@ function renderAnalysisPlayers(snapshot) {
     const hasSearchValue = Boolean(document.querySelector("#analysis-player-search")?.value.trim());
     const laneScopeSummary = stringEqualsIgnoreCase(getSelectedAnalysisPlayerLaneKey(), "all")
         ? "Performance is the existing Analyst score across each player's character/spec cards; Fight Impact is the separate parser-derived average."
-        : `Performance shows the best ${selectedLaneLabel} value from any character/spec card with at least 10 total fights, and only players with at least ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneLabel} appearances are shown. Fight Impact remains the overall demand-adjusted average.`;
+        : `Performance shows the best ${selectedLaneLabel} value from any character/spec card with at least 10 total fights, and only players with at least ${MINIMUM_LANE_FILTER_APPEARANCES} total ${selectedLaneLabel} appearances across their Guild Wars ID are shown. Fight Impact remains the overall demand-adjusted average.`;
     const thresholdSummary = hasSearchValue
         ? `Search override is active, so matching players below ${MINIMUM_PLAYER_TABLE_FIGHTS} total imported fights can still appear.`
         : `By default only players with at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total imported fights are shown.`;
@@ -6990,8 +7020,8 @@ function renderAnalysisLaneDetail(snapshot) {
         ? "Avg prevention"
         : "Performance";
     const laneThresholdCopy = isCombinedLaneView
-        ? `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total appearances across the selected lanes. Best classes come from the qualified class list and are scored on the selected lanes together.`
-        : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${getAnalysisLaneDisplayLabel(selectedLaneRows[0])} appearances. Best classes come from the qualified class list.`;
+        ? `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total appearances across the selected lanes for their Guild Wars ID. Best classes come from the qualified class list and are scored on the selected lanes together.`
+        : `Best players require at least ${MINIMUM_PLAYER_TABLE_FIGHTS} total fights plus ${MINIMUM_LANE_FILTER_APPEARANCES} total ${getAnalysisLaneDisplayLabel(selectedLaneRows[0])} appearances for their Guild Wars ID. Best classes come from the qualified class list.`;
     const laneProfileCopy = isCombinedLaneView
         ? `${formatPercent(combinedLane.averageSharePercent)} average share across the selected lanes.`
         : `${formatPercent(combinedLane.averageSharePercent)} average share across retained lane samples.`;
