@@ -1892,6 +1892,10 @@ h1 {
     max-height: 340px;
 }
 
+.table-shell-manage-commanders {
+    max-height: 360px;
+}
+
 .table-shell-fight-browser {
     max-height: 520px;
 }
@@ -2005,6 +2009,11 @@ h1 {
 .table-actions a {
     color: var(--accent);
     text-decoration: none;
+    font-size: 0.88rem;
+}
+
+.table-actions .action-link-button {
+    padding: 6px 10px;
     font-size: 0.88rem;
 }
 

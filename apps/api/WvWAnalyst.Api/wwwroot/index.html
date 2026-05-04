@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260430differences1">
+    <link rel="stylesheet" href="/styles.css?v=20260504commanders1">
 </head>
 <body>
     <div class="page-shell">
@@ -114,6 +114,29 @@
                         <tbody id="batch-results-body"></tbody>
                     </table>
                 </div>
+            </section>
+
+            <section class="panel panel-wide" data-app-panel="manage">
+                <div class="section-heading">
+                    <div>
+                        <h2>Fights by Commander</h2>
+                        <p>Delete a commander slice from the stored catalog and remove the archived source logs so rebuild-all does not bring those fights back.</p>
+                    </div>
+                    <p class="workspace-note" id="manage-commanders-summary"></p>
+                </div>
+                <div class="table-shell table-shell-scroll table-shell-manage-commanders">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Commander</th>
+                                <th>Fights</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manage-commanders-body"></tbody>
+                    </table>
+                </div>
+                <div class="import-status" id="manage-commanders-status">No commander fights have been deleted in this browser session yet.</div>
             </section>
 
             <section class="panel panel-wide" data-app-panel="manage">
@@ -1069,6 +1092,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260430differences1" defer></script>
+    <script src="/app.js?v=20260504commanders1" defer></script>
 </body>
 </html>

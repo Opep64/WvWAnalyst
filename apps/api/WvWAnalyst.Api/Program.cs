@@ -52,6 +52,7 @@ builder.Services.AddSingleton<ParserImportService>();
 builder.Services.AddSingleton<DirectoryImportJobService>();
 builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
 builder.Services.AddSingleton<WorkspaceResetService>();
+builder.Services.AddSingleton<CommanderFightManagementService>();
 builder.Services.AddSingleton<PatchMetadataService>();
 builder.Services.AddSingleton<CompHelperConfigService>();
 builder.Services.AddSingleton<FightAttributeService>();
@@ -276,6 +277,40 @@ app.MapPost("/api/manage/reset", (AppPathService paths, DirectoryImportJobServic
     }
 
     var result = resetService.Reset(cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+}).DisableAntiforgery();
+app.MapPost("/api/manage/commanders/delete", (DeleteCommanderFightsRequestDto request, DirectoryImportJobService jobService, ConfiguredLogDirectoryUploadService uploadService, CommanderFightManagementService service, CancellationToken cancellationToken) =>
+{
+    var commander = request.Commander?.Trim() ?? string.Empty;
+    if (jobService.HasRunningJob())
+    {
+        return Results.Conflict(new DeleteCommanderFightsResultDto(
+            Success: false,
+            Message: "Wait for the active batch parse to finish before deleting fights by commander.",
+            Commander: commander,
+            MatchedFightCount: 0,
+            DeletedFightCount: 0,
+            DeletedLogFileCount: 0,
+            MissingLogFileCount: 0,
+            SkippedLogFileCount: 0,
+            AnalysisRecalculationSeconds: 0.0));
+    }
+
+    if (uploadService.HasActiveUpload())
+    {
+        return Results.Conflict(new DeleteCommanderFightsResultDto(
+            Success: false,
+            Message: "Wait for active uploads to finish before deleting fights by commander.",
+            Commander: commander,
+            MatchedFightCount: 0,
+            DeletedFightCount: 0,
+            DeletedLogFileCount: 0,
+            MissingLogFileCount: 0,
+            SkippedLogFileCount: 0,
+            AnalysisRecalculationSeconds: 0.0));
+    }
+
+    var result = service.DeleteCommanderFights(commander, cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
 app.MapGet("/api/imports/directory/jobs/{jobId}", (string jobId, DirectoryImportJobService service) =>

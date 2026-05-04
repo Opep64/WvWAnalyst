@@ -22,6 +22,7 @@ let showFightBrowserTopBursts = false;
 let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY) === "true";
 let logFileUploadBusy = false;
 let manageResetBusy = false;
+let manageCommanderDeleteBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -1727,6 +1728,24 @@ async function resetCompHelperConfig() {
     const payload = await readApiPayload(response);
     if (!response.ok) {
         throw new Error(payload?.message ?? `Comp Helper config reset failed with status ${response.status}`);
+    }
+
+    return payload;
+}
+
+async function deleteCommanderFights(commander) {
+    const response = await fetch("/api/manage/commanders/delete", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ commander })
+    });
+    const payload = await readApiPayload(response);
+    if (!response.ok) {
+        const error = new Error(payload?.message ?? `Commander fight delete failed with status ${response.status}`);
+        error.payload = payload;
+        throw error;
     }
 
     return payload;
@@ -7808,6 +7827,75 @@ function buildRecentParseRow(fight, selectedFightId) {
     `;
 }
 
+function buildManageCommanderGroups(snapshot) {
+    const groupsByCommander = new Map();
+    const fights = snapshot?.fightBrowser?.fights ?? [];
+    for (const fight of fights) {
+        const commanders = fight.fightIndex?.commanderDisplayNames ?? [];
+        for (const commanderValue of commanders) {
+            const commander = String(commanderValue ?? "").trim();
+            if (!commander) {
+                continue;
+            }
+
+            if (!groupsByCommander.has(commander.toLocaleLowerCase())) {
+                groupsByCommander.set(commander.toLocaleLowerCase(), {
+                    commander,
+                    fightCount: 0
+                });
+            }
+
+            groupsByCommander.get(commander.toLocaleLowerCase()).fightCount += 1;
+        }
+    }
+
+    return [...groupsByCommander.values()]
+        .sort((left, right) =>
+            right.fightCount - left.fightCount
+            || left.commander.localeCompare(right.commander, undefined, { sensitivity: "base" }));
+}
+
+function renderManageCommanderFights(snapshot) {
+    const body = document.querySelector("#manage-commanders-body");
+    const summary = document.querySelector("#manage-commanders-summary");
+    if (!body || !summary) {
+        return;
+    }
+
+    const commanderGroups = buildManageCommanderGroups(snapshot);
+    const fightAssignmentCount = commanderGroups.reduce((total, group) => total + group.fightCount, 0);
+    summary.textContent = commanderGroups.length > 0
+        ? `${formatNumber(commanderGroups.length)} commander(s), ${formatNumber(fightAssignmentCount)} commander fight assignment(s).`
+        : "No commander-tagged fights are stored.";
+
+    if (commanderGroups.length === 0) {
+        body.innerHTML = `
+            <tr>
+                <td colspan="3">No commander-tagged fights are stored yet.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    body.innerHTML = commanderGroups
+        .map(group => `
+            <tr>
+                <td>
+                    <span class="table-title">${escapeHtml(group.commander)}</span>
+                </td>
+                <td><strong>${escapeHtml(formatNumber(group.fightCount))}</strong></td>
+                <td>
+                    <div class="table-actions">
+                        <button class="action-link action-link-button danger-button manage-commander-delete-button" type="button" data-manage-commander-delete="${escapeHtml(group.commander)}" data-manage-commander-fights="${escapeHtml(String(group.fightCount))}">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `)
+        .join("");
+
+    syncManageControls();
+}
+
 function renderRecentParses(snapshot, selectedFightId) {
     const body = document.querySelector("#recent-parses-body");
     const summary = document.querySelector("#recent-parses-summary");
@@ -8858,11 +8946,12 @@ function syncManageControls() {
     const uploadButton = document.querySelector("#log-file-upload-button");
     const dropzone = document.querySelector("#log-file-dropzone");
     const resetButton = document.querySelector("#manage-reset-button");
+    const commanderDeleteButtons = document.querySelectorAll(".manage-commander-delete-button");
     const sharedManageActivity = currentDashboardSnapshot?.manageActivity ?? null;
     const sharedParseRunning = Boolean(sharedManageActivity?.parseRunning);
     const sharedUploadRunning = Boolean(sharedManageActivity?.uploadRunning);
     const parseBusy = parseButton?.dataset.busy === "true";
-    const disableManageActions = parseBusy || logFileUploadBusy || manageResetBusy;
+    const disableManageActions = parseBusy || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy;
 
     if (parseButton) {
         parseButton.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning || !hasConfiguredDirectory;
@@ -8885,6 +8974,10 @@ function syncManageControls() {
     if (resetButton) {
         resetButton.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
     }
+
+    commanderDeleteButtons.forEach(button => {
+        button.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
+    });
 }
 
 function setLogFileUploadBusy(isBusy) {
@@ -8904,6 +8997,11 @@ function setManageResetBusy(isBusy) {
         button.textContent = isBusy ? "Resetting..." : "Delete logs and reset state";
     }
 
+    syncManageControls();
+}
+
+function setManageCommanderDeleteBusy(isBusy) {
+    manageCommanderDeleteBusy = isBusy;
     syncManageControls();
 }
 
@@ -9089,6 +9187,48 @@ function renderManageResetResult(result, success) {
     `;
 }
 
+function renderManageCommanderDeleteResult(result, success) {
+    const container = document.querySelector("#manage-commanders-status");
+    if (!container) {
+        return;
+    }
+
+    if (!result) {
+        container.textContent = "No commander fights have been deleted in this browser session yet.";
+        return;
+    }
+
+    const counts = [];
+    if (typeof result.matchedFightCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.matchedFightCount} matched`)}</span>`);
+    }
+    if (typeof result.deletedFightCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedFightCount} fights deleted`)}</span>`);
+    }
+    if (typeof result.deletedLogFileCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedLogFileCount} logs deleted`)}</span>`);
+    }
+    if (typeof result.missingLogFileCount === "number" && result.missingLogFileCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.missingLogFileCount} logs missing`)}</span>`);
+    }
+    if (typeof result.skippedLogFileCount === "number" && result.skippedLogFileCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.skippedLogFileCount} logs skipped`)}</span>`);
+    }
+    if (typeof result.analysisRecalculationSeconds === "number" && result.analysisRecalculationSeconds > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${formatNumber(result.analysisRecalculationSeconds, 1)}s analysis`)}</span>`);
+    }
+
+    container.innerHTML = `
+        <div class="batch-status-grid">
+            <div class="batch-status-header">
+                <div class="${success ? "status status-ok" : "status status-error"}">${escapeHtml(success ? "Commander fights deleted" : "Needs attention")}</div>
+                <div class="batch-progress-row">${counts.join("")}</div>
+            </div>
+            <p>${escapeHtml(result.message ?? "No message returned.")}</p>
+        </div>
+    `;
+}
+
 function buildRebuildAllConfirmationMessage(directoryPath) {
     return [
         "Are you sure you want to rebuild the catalog from the archived logs?",
@@ -9106,6 +9246,17 @@ function buildManageResetConfirmationMessage() {
             ? `This deletes every .evtc, .zevtc, and .zip file under:\n${pendingDirectoryPath || "(pending queue not configured)"}\n\nand\n\n${archiveDirectoryPath || "(archive log store not configured)"}`
             : "No configured pending or archive log directory is set, so this will only clear the stored fight catalog.",
         "Retained HTML reports, parser logs, and catalog entries will also be removed. This cannot be undone."
+    ].join("\n\n");
+}
+
+function buildCommanderDeleteConfirmationMessage(commander, fightCount) {
+    const archiveDirectoryPath = getArchiveLogDirectoryPath().trim();
+    return [
+        `Delete ${fightCount} stored fight${fightCount === 1 ? "" : "s"} for ${commander}?`,
+        archiveDirectoryPath
+            ? `This deletes the stored fight data and the associated source log files under:\n${archiveDirectoryPath}`
+            : "This deletes the stored fight data and any associated source log files found in the configured log stores.",
+        "A rebuild-all parse will not bring these fights back unless the source logs are restored. This cannot be undone."
     ].join("\n\n");
 }
 
@@ -9206,7 +9357,7 @@ async function uploadLogFiles(fileList) {
 }
 
 async function handleManageReset() {
-    if (manageResetBusy) {
+    if (manageResetBusy || manageCommanderDeleteBusy) {
         return;
     }
 
@@ -9243,6 +9394,69 @@ async function handleManageReset() {
         }, false);
     } finally {
         setManageResetBusy(false);
+    }
+}
+
+async function handleManageCommanderDelete(button) {
+    if (manageCommanderDeleteBusy || !button) {
+        return;
+    }
+
+    const commander = button.dataset.manageCommanderDelete ?? "";
+    const fightCount = Number(button.dataset.manageCommanderFights) || 0;
+    if (!commander) {
+        renderManageCommanderDeleteResult({
+            message: "No commander was selected.",
+            matchedFightCount: 0,
+            deletedFightCount: 0,
+            deletedLogFileCount: 0,
+            missingLogFileCount: 0,
+            skippedLogFileCount: 0,
+            analysisRecalculationSeconds: 0
+        }, false);
+        return;
+    }
+
+    if (!window.confirm(buildCommanderDeleteConfirmationMessage(commander, fightCount))) {
+        return;
+    }
+
+    setManageCommanderDeleteBusy(true);
+    button.textContent = "Deleting...";
+    renderManageCommanderDeleteResult({
+        message: `Deleting fights for ${commander} and removing associated source logs...`,
+        matchedFightCount: fightCount,
+        deletedFightCount: 0,
+        deletedLogFileCount: 0,
+        missingLogFileCount: 0,
+        skippedLogFileCount: 0,
+        analysisRecalculationSeconds: 0
+    }, true);
+
+    try {
+        const result = await deleteCommanderFights(commander);
+        renderManageCommanderDeleteResult(result, true);
+        if (result.success) {
+            currentAnalysisSnapshot = null;
+            resetAnalysisPlayerDetailState();
+            await main();
+            renderManageCommanderDeleteResult(result, true);
+        }
+    } catch (error) {
+        const payload = error?.payload ?? {
+            message: error instanceof Error ? error.message : String(error),
+            commander,
+            matchedFightCount: fightCount,
+            deletedFightCount: 0,
+            deletedLogFileCount: 0,
+            missingLogFileCount: 0,
+            skippedLogFileCount: 0,
+            analysisRecalculationSeconds: 0
+        };
+        renderManageCommanderDeleteResult(payload, false);
+    } finally {
+        button.textContent = "Delete";
+        setManageCommanderDeleteBusy(false);
     }
 }
 
@@ -9617,6 +9831,7 @@ async function main() {
 
         renderWorkspace(snapshot);
         renderCompHelperConfigEditor();
+        renderManageCommanderFights(snapshot);
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
@@ -9660,8 +9875,16 @@ document.querySelector("#directory-mode").addEventListener("change", () => {
 document.querySelector("#manage-reset-button").addEventListener("click", () => {
     void handleManageReset();
 });
+document.querySelector("#manage-commanders-body").addEventListener("click", event => {
+    const button = event.target.closest("[data-manage-commander-delete]");
+    if (!button) {
+        return;
+    }
+
+    void handleManageCommanderDelete(button);
+});
 document.querySelector("#log-file-upload-button").addEventListener("click", () => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
         return;
     }
 
@@ -9675,7 +9898,7 @@ document.querySelector("#log-file-dropzone").addEventListener("click", event => 
         return;
     }
 
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
         return;
     }
 
@@ -9687,7 +9910,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     }
 
     event.preventDefault();
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
         return;
     }
 
@@ -9696,7 +9919,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
 ["dragenter", "dragover"].forEach(eventName => {
     document.querySelector("#log-file-dropzone").addEventListener(eventName, event => {
         event.preventDefault();
-        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
+        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
             return;
         }
 
@@ -9710,7 +9933,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     });
 });
 document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
         return;
     }
 

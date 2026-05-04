@@ -154,6 +154,20 @@ public sealed record WorkspaceResetResultDto(
     int DeletedHtmlReportCount,
     bool DeletedDatabase);
 
+public sealed record DeleteCommanderFightsRequestDto(
+    string Commander);
+
+public sealed record DeleteCommanderFightsResultDto(
+    bool Success,
+    string Message,
+    string Commander,
+    int MatchedFightCount,
+    int DeletedFightCount,
+    int DeletedLogFileCount,
+    int MissingLogFileCount,
+    int SkippedLogFileCount,
+    double AnalysisRecalculationSeconds);
+
 public sealed record DirectoryImportItemDto(
     string SourceFileName,
     string SourceFilePath,

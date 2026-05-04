@@ -149,6 +149,23 @@ public sealed class FightCatalogService
         };
     }
 
+    public IReadOnlyList<FightCatalogManagementItem> GetManagementItems()
+    {
+        return EnumerateCatalogItems()
+            .Where(item => item.Manifest is { Parsed: true })
+            .Select(item =>
+            {
+                var manifest = item.Manifest!;
+                return new FightCatalogManagementItem(
+                    FightId: manifest.FightId,
+                    SourceFileName: manifest.SourceFileName,
+                    SourceFilePath: manifest.SourceFilePath,
+                    SourceFileSha256: manifest.SourceFileSha256,
+                    CommanderDisplayNames: manifest.FightIndex?.Data.CommanderDisplayNames ?? Array.Empty<string>());
+            })
+            .ToList();
+    }
+
     public FightArtifactManifest? TryFindReplacementFight(string? sourceFileSha256, string? fightFingerprint)
     {
         var manifests = EnumerateCatalogItems()
@@ -212,6 +229,38 @@ public sealed class FightCatalogService
         }
 
         InvalidateCatalogCache();
+    }
+
+    public int DeleteFightDirectories(IEnumerable<string> fightIds, CancellationToken cancellationToken)
+    {
+        _paths.EnsureStorageDirectories();
+
+        var fightsRootPath = Path.GetFullPath(_paths.FightsPath);
+        var deletedCount = 0;
+        foreach (var fightId in fightIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fightDirectoryPath = Path.GetFullPath(GetFightDirectoryPath(fightId));
+            if (!IsPathInsideDirectory(fightDirectoryPath, fightsRootPath))
+            {
+                throw new InvalidOperationException($"Refusing to delete fight folder outside the configured fight store: {fightDirectoryPath}");
+            }
+
+            if (!Directory.Exists(fightDirectoryPath))
+            {
+                continue;
+            }
+
+            Directory.Delete(fightDirectoryPath, recursive: true);
+            deletedCount++;
+        }
+
+        if (deletedCount > 0)
+        {
+            InvalidateCatalogCache();
+        }
+
+        return deletedCount;
     }
 
     public bool TryGetFightDetail(string fightId, out FightDetailDto detail)
@@ -586,6 +635,15 @@ public sealed class FightCatalogService
         return resolvedPath;
     }
 
+    private static bool IsPathInsideDirectory(string path, string directoryPath)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        var normalizedDirectoryPath = Path.GetFullPath(directoryPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        return normalizedPath.StartsWith(normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static long GetDirectorySize(DirectoryInfo directory)
     {
         if (!directory.Exists)
@@ -861,3 +919,10 @@ public enum FightArtifactKind
     ParserConsoleLog,
     RawLog
 }
+
+public sealed record FightCatalogManagementItem(
+    string FightId,
+    string SourceFileName,
+    string? SourceFilePath,
+    string? SourceFileSha256,
+    IReadOnlyList<string> CommanderDisplayNames);
