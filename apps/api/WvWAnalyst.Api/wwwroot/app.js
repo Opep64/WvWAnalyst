@@ -23,6 +23,7 @@ let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY
 let logFileUploadBusy = false;
 let manageResetBusy = false;
 let manageCommanderDeleteBusy = false;
+let manageDateRangeDeleteBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -1744,6 +1745,24 @@ async function deleteCommanderFights(commander) {
     const payload = await readApiPayload(response);
     if (!response.ok) {
         const error = new Error(payload?.message ?? `Commander fight delete failed with status ${response.status}`);
+        error.payload = payload;
+        throw error;
+    }
+
+    return payload;
+}
+
+async function deleteDateRangeFights(startDate, endDate) {
+    const response = await fetch("/api/manage/date-range/delete", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ startDate, endDate })
+    });
+    const payload = await readApiPayload(response);
+    if (!response.ok) {
+        const error = new Error(payload?.message ?? `Date-range fight delete failed with status ${response.status}`);
         error.payload = payload;
         throw error;
     }
@@ -7896,6 +7915,71 @@ function renderManageCommanderFights(snapshot) {
     syncManageControls();
 }
 
+function getManageDatedFights(snapshot) {
+    return (snapshot?.fightBrowser?.fights ?? [])
+        .map(fight => ({
+            fight,
+            fightDate: getFightLocalDateString(fight)
+        }))
+        .filter(item => item.fightDate);
+}
+
+function getManageDateRangeSelection() {
+    return {
+        startDate: document.querySelector("#manage-date-range-start-date")?.value || "",
+        endDate: document.querySelector("#manage-date-range-end-date")?.value || ""
+    };
+}
+
+function getManageDateRangeMatchedFights(snapshot) {
+    const { startDate, endDate } = getManageDateRangeSelection();
+    if (!startDate || !endDate || startDate > endDate) {
+        return [];
+    }
+
+    return getManageDatedFights(snapshot)
+        .filter(item => item.fightDate >= startDate && item.fightDate <= endDate)
+        .map(item => item.fight);
+}
+
+function renderManageDateRangeFights(snapshot) {
+    const summary = document.querySelector("#manage-date-range-summary");
+    const startInput = document.querySelector("#manage-date-range-start-date");
+    const endInput = document.querySelector("#manage-date-range-end-date");
+    const deleteButton = document.querySelector("#manage-date-range-delete-button");
+    if (!summary || !startInput || !endInput || !deleteButton) {
+        return;
+    }
+
+    const datedFights = getManageDatedFights(snapshot);
+    const fightDates = [...new Set(datedFights.map(item => item.fightDate))].sort();
+    const minFightDate = fightDates[0] ?? "";
+    const maxFightDate = fightDates[fightDates.length - 1] ?? "";
+    startInput.min = minFightDate;
+    startInput.max = maxFightDate;
+    endInput.min = minFightDate;
+    endInput.max = maxFightDate;
+
+    const { startDate, endDate } = getManageDateRangeSelection();
+    const matchedFights = getManageDateRangeMatchedFights(snapshot);
+    deleteButton.dataset.manageDateRangeFights = String(matchedFights.length);
+
+    if (datedFights.length === 0) {
+        summary.textContent = "No dated fights are stored.";
+    } else if (!startDate || !endDate) {
+        summary.textContent = `Catalog spans ${minFightDate} through ${maxFightDate} across ${formatNumber(datedFights.length)} dated fight(s).`;
+    } else if (startDate > endDate) {
+        summary.textContent = "Start date must be on or before end date.";
+    } else if (matchedFights.length === 0) {
+        summary.textContent = `No stored fights match ${startDate} through ${endDate}.`;
+    } else {
+        const uniqueMatchedDates = new Set(matchedFights.map(getFightLocalDateString)).size;
+        summary.textContent = `${formatNumber(matchedFights.length)} fight(s) across ${formatNumber(uniqueMatchedDates)} date(s) match ${startDate} through ${endDate}.`;
+    }
+
+    syncManageControls();
+}
+
 function renderRecentParses(snapshot, selectedFightId) {
     const body = document.querySelector("#recent-parses-body");
     const summary = document.querySelector("#recent-parses-summary");
@@ -8947,11 +9031,17 @@ function syncManageControls() {
     const dropzone = document.querySelector("#log-file-dropzone");
     const resetButton = document.querySelector("#manage-reset-button");
     const commanderDeleteButtons = document.querySelectorAll(".manage-commander-delete-button");
+    const dateRangeStartInput = document.querySelector("#manage-date-range-start-date");
+    const dateRangeEndInput = document.querySelector("#manage-date-range-end-date");
+    const dateRangeDeleteButton = document.querySelector("#manage-date-range-delete-button");
+    const dateRangeStartDate = dateRangeStartInput?.value || "";
+    const dateRangeEndDate = dateRangeEndInput?.value || "";
+    const dateRangeMatchedFightCount = Number(dateRangeDeleteButton?.dataset.manageDateRangeFights ?? "0") || 0;
     const sharedManageActivity = currentDashboardSnapshot?.manageActivity ?? null;
     const sharedParseRunning = Boolean(sharedManageActivity?.parseRunning);
     const sharedUploadRunning = Boolean(sharedManageActivity?.uploadRunning);
     const parseBusy = parseButton?.dataset.busy === "true";
-    const disableManageActions = parseBusy || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy;
+    const disableManageActions = parseBusy || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy;
 
     if (parseButton) {
         parseButton.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning || !hasConfiguredDirectory;
@@ -8978,6 +9068,24 @@ function syncManageControls() {
     commanderDeleteButtons.forEach(button => {
         button.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
     });
+
+    if (dateRangeStartInput) {
+        dateRangeStartInput.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
+    }
+
+    if (dateRangeEndInput) {
+        dateRangeEndInput.disabled = disableManageActions || sharedParseRunning || sharedUploadRunning;
+    }
+
+    if (dateRangeDeleteButton) {
+        dateRangeDeleteButton.disabled = disableManageActions
+            || sharedParseRunning
+            || sharedUploadRunning
+            || !dateRangeStartDate
+            || !dateRangeEndDate
+            || dateRangeStartDate > dateRangeEndDate
+            || dateRangeMatchedFightCount <= 0;
+    }
 }
 
 function setLogFileUploadBusy(isBusy) {
@@ -9002,6 +9110,16 @@ function setManageResetBusy(isBusy) {
 
 function setManageCommanderDeleteBusy(isBusy) {
     manageCommanderDeleteBusy = isBusy;
+    syncManageControls();
+}
+
+function setManageDateRangeDeleteBusy(isBusy) {
+    manageDateRangeDeleteBusy = isBusy;
+    const button = document.querySelector("#manage-date-range-delete-button");
+    if (button) {
+        button.textContent = isBusy ? "Deleting..." : "Delete date range";
+    }
+
     syncManageControls();
 }
 
@@ -9229,6 +9347,48 @@ function renderManageCommanderDeleteResult(result, success) {
     `;
 }
 
+function renderManageDateRangeDeleteResult(result, success) {
+    const container = document.querySelector("#manage-date-range-status");
+    if (!container) {
+        return;
+    }
+
+    if (!result) {
+        container.textContent = "No date-range fights have been deleted in this browser session yet.";
+        return;
+    }
+
+    const counts = [];
+    if (typeof result.matchedFightCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.matchedFightCount} matched`)}</span>`);
+    }
+    if (typeof result.deletedFightCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedFightCount} fights deleted`)}</span>`);
+    }
+    if (typeof result.deletedLogFileCount === "number") {
+        counts.push(`<span class="pill">${escapeHtml(`${result.deletedLogFileCount} logs deleted`)}</span>`);
+    }
+    if (typeof result.missingLogFileCount === "number" && result.missingLogFileCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.missingLogFileCount} logs missing`)}</span>`);
+    }
+    if (typeof result.skippedLogFileCount === "number" && result.skippedLogFileCount > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${result.skippedLogFileCount} logs skipped`)}</span>`);
+    }
+    if (typeof result.analysisRecalculationSeconds === "number" && result.analysisRecalculationSeconds > 0) {
+        counts.push(`<span class="pill">${escapeHtml(`${formatNumber(result.analysisRecalculationSeconds, 1)}s analysis`)}</span>`);
+    }
+
+    container.innerHTML = `
+        <div class="batch-status-grid">
+            <div class="batch-status-header">
+                <div class="${success ? "status status-ok" : "status status-error"}">${escapeHtml(success ? "Date range deleted" : "Needs attention")}</div>
+                <div class="batch-progress-row">${counts.join("")}</div>
+            </div>
+            <p>${escapeHtml(result.message ?? "No message returned.")}</p>
+        </div>
+    `;
+}
+
 function buildRebuildAllConfirmationMessage(directoryPath) {
     return [
         "Are you sure you want to rebuild the catalog from the archived logs?",
@@ -9253,6 +9413,17 @@ function buildCommanderDeleteConfirmationMessage(commander, fightCount) {
     const archiveDirectoryPath = getArchiveLogDirectoryPath().trim();
     return [
         `Delete ${fightCount} stored fight${fightCount === 1 ? "" : "s"} for ${commander}?`,
+        archiveDirectoryPath
+            ? `This deletes the stored fight data and the associated source log files under:\n${archiveDirectoryPath}`
+            : "This deletes the stored fight data and any associated source log files found in the configured log stores.",
+        "A rebuild-all parse will not bring these fights back unless the source logs are restored. This cannot be undone."
+    ].join("\n\n");
+}
+
+function buildDateRangeDeleteConfirmationMessage(startDate, endDate, fightCount) {
+    const archiveDirectoryPath = getArchiveLogDirectoryPath().trim();
+    return [
+        `Delete ${fightCount} stored fight${fightCount === 1 ? "" : "s"} from ${startDate} through ${endDate}?`,
         archiveDirectoryPath
             ? `This deletes the stored fight data and the associated source log files under:\n${archiveDirectoryPath}`
             : "This deletes the stored fight data and any associated source log files found in the configured log stores.",
@@ -9357,7 +9528,7 @@ async function uploadLogFiles(fileList) {
 }
 
 async function handleManageReset() {
-    if (manageResetBusy || manageCommanderDeleteBusy) {
+    if (manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
         return;
     }
 
@@ -9398,7 +9569,7 @@ async function handleManageReset() {
 }
 
 async function handleManageCommanderDelete(button) {
-    if (manageCommanderDeleteBusy || !button) {
+    if (manageCommanderDeleteBusy || manageDateRangeDeleteBusy || !button) {
         return;
     }
 
@@ -9457,6 +9628,76 @@ async function handleManageCommanderDelete(button) {
     } finally {
         button.textContent = "Delete";
         setManageCommanderDeleteBusy(false);
+    }
+}
+
+async function handleManageDateRangeDelete() {
+    if (manageDateRangeDeleteBusy || manageCommanderDeleteBusy) {
+        return;
+    }
+
+    const { startDate, endDate } = getManageDateRangeSelection();
+    const fightCount = Number(document.querySelector("#manage-date-range-delete-button")?.dataset.manageDateRangeFights ?? "0") || 0;
+    if (!startDate || !endDate || startDate > endDate || fightCount <= 0) {
+        renderManageDateRangeDeleteResult({
+            message: !startDate || !endDate
+                ? "Choose both a start date and an end date before deleting fights."
+                : startDate > endDate
+                    ? "Start date must be on or before end date."
+                    : "No stored fights matched the selected date range.",
+            startDate,
+            endDate,
+            matchedFightCount: fightCount,
+            deletedFightCount: 0,
+            deletedLogFileCount: 0,
+            missingLogFileCount: 0,
+            skippedLogFileCount: 0,
+            analysisRecalculationSeconds: 0
+        }, false);
+        return;
+    }
+
+    if (!window.confirm(buildDateRangeDeleteConfirmationMessage(startDate, endDate, fightCount))) {
+        return;
+    }
+
+    setManageDateRangeDeleteBusy(true);
+    renderManageDateRangeDeleteResult({
+        message: `Deleting fights from ${startDate} through ${endDate} and removing associated source logs...`,
+        startDate,
+        endDate,
+        matchedFightCount: fightCount,
+        deletedFightCount: 0,
+        deletedLogFileCount: 0,
+        missingLogFileCount: 0,
+        skippedLogFileCount: 0,
+        analysisRecalculationSeconds: 0
+    }, true);
+
+    try {
+        const result = await deleteDateRangeFights(startDate, endDate);
+        renderManageDateRangeDeleteResult(result, true);
+        if (result.success) {
+            currentAnalysisSnapshot = null;
+            resetAnalysisPlayerDetailState();
+            await main();
+            renderManageDateRangeDeleteResult(result, true);
+        }
+    } catch (error) {
+        const payload = error?.payload ?? {
+            message: error instanceof Error ? error.message : String(error),
+            startDate,
+            endDate,
+            matchedFightCount: fightCount,
+            deletedFightCount: 0,
+            deletedLogFileCount: 0,
+            missingLogFileCount: 0,
+            skippedLogFileCount: 0,
+            analysisRecalculationSeconds: 0
+        };
+        renderManageDateRangeDeleteResult(payload, false);
+    } finally {
+        setManageDateRangeDeleteBusy(false);
     }
 }
 
@@ -9832,6 +10073,7 @@ async function main() {
         renderWorkspace(snapshot);
         renderCompHelperConfigEditor();
         renderManageCommanderFights(snapshot);
+        renderManageDateRangeFights(snapshot);
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
@@ -9883,8 +10125,17 @@ document.querySelector("#manage-commanders-body").addEventListener("click", even
 
     void handleManageCommanderDelete(button);
 });
+document.querySelector("#manage-date-range-start-date").addEventListener("change", () => {
+    renderManageDateRangeFights(currentDashboardSnapshot);
+});
+document.querySelector("#manage-date-range-end-date").addEventListener("change", () => {
+    renderManageDateRangeFights(currentDashboardSnapshot);
+});
+document.querySelector("#manage-date-range-delete-button").addEventListener("click", () => {
+    void handleManageDateRangeDelete();
+});
 document.querySelector("#log-file-upload-button").addEventListener("click", () => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
         return;
     }
 
@@ -9898,7 +10149,7 @@ document.querySelector("#log-file-dropzone").addEventListener("click", event => 
         return;
     }
 
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
         return;
     }
 
@@ -9910,7 +10161,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     }
 
     event.preventDefault();
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
         return;
     }
 
@@ -9919,7 +10170,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
 ["dragenter", "dragover"].forEach(eventName => {
     document.querySelector("#log-file-dropzone").addEventListener(eventName, event => {
         event.preventDefault();
-        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
+        if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
             return;
         }
 
@@ -9933,7 +10184,7 @@ document.querySelector("#log-file-dropzone").addEventListener("keydown", event =
     });
 });
 document.querySelector("#log-file-dropzone").addEventListener("drop", event => {
-    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy) {
+    if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
         return;
     }
 

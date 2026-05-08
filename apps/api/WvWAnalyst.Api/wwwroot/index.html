@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260504commanders1">
+    <link rel="stylesheet" href="/styles.css?v=20260507daterange1">
 </head>
 <body>
     <div class="page-shell">
@@ -137,6 +137,31 @@
                     </table>
                 </div>
                 <div class="import-status" id="manage-commanders-status">No commander fights have been deleted in this browser session yet.</div>
+            </section>
+
+            <section class="panel panel-wide" data-app-panel="manage">
+                <div class="section-heading">
+                    <div>
+                        <h2>Fights by Date Range</h2>
+                        <p>Delete a local-date slice from the stored catalog and remove the associated source logs so rebuild-all does not bring those fights back.</p>
+                    </div>
+                    <p class="workspace-note" id="manage-date-range-summary"></p>
+                </div>
+                <div class="browser-controls manage-date-range-controls">
+                    <label class="browser-field">
+                        <span>Start date</span>
+                        <input id="manage-date-range-start-date" type="date">
+                    </label>
+                    <label class="browser-field">
+                        <span>End date</span>
+                        <input id="manage-date-range-end-date" type="date">
+                    </label>
+                    <div class="browser-field button-field">
+                        <span>Action</span>
+                        <button id="manage-date-range-delete-button" class="danger-button" type="button" data-manage-date-range-fights="0">Delete date range</button>
+                    </div>
+                </div>
+                <div class="import-status" id="manage-date-range-status">No date-range fights have been deleted in this browser session yet.</div>
             </section>
 
             <section class="panel panel-wide" data-app-panel="manage">
@@ -1092,6 +1117,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260504commanders1" defer></script>
+    <script src="/app.js?v=20260507daterange1" defer></script>
 </body>
 </html>

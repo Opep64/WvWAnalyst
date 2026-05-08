@@ -168,6 +168,22 @@ public sealed record DeleteCommanderFightsResultDto(
     int SkippedLogFileCount,
     double AnalysisRecalculationSeconds);
 
+public sealed record DeleteDateRangeFightsRequestDto(
+    string StartDate,
+    string EndDate);
+
+public sealed record DeleteDateRangeFightsResultDto(
+    bool Success,
+    string Message,
+    string StartDate,
+    string EndDate,
+    int MatchedFightCount,
+    int DeletedFightCount,
+    int DeletedLogFileCount,
+    int MissingLogFileCount,
+    int SkippedLogFileCount,
+    double AnalysisRecalculationSeconds);
+
 public sealed record DirectoryImportItemDto(
     string SourceFileName,
     string SourceFilePath,

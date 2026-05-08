@@ -161,6 +161,7 @@ public sealed class FightCatalogService
                     SourceFileName: manifest.SourceFileName,
                     SourceFilePath: manifest.SourceFilePath,
                     SourceFileSha256: manifest.SourceFileSha256,
+                    FightLocalDate: GetFightLocalDate(manifest.FightIndex?.Data, manifest.ImportedAtUtc),
                     CommanderDisplayNames: manifest.FightIndex?.Data.CommanderDisplayNames ?? Array.Empty<string>());
             })
             .ToList();
@@ -925,4 +926,5 @@ public sealed record FightCatalogManagementItem(
     string SourceFileName,
     string? SourceFilePath,
     string? SourceFileSha256,
+    DateOnly? FightLocalDate,
     IReadOnlyList<string> CommanderDisplayNames);

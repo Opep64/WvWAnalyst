@@ -313,6 +313,43 @@ app.MapPost("/api/manage/commanders/delete", (DeleteCommanderFightsRequestDto re
     var result = service.DeleteCommanderFights(commander, cancellationToken);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
+app.MapPost("/api/manage/date-range/delete", (DeleteDateRangeFightsRequestDto request, DirectoryImportJobService jobService, ConfiguredLogDirectoryUploadService uploadService, CommanderFightManagementService service, CancellationToken cancellationToken) =>
+{
+    var startDate = request.StartDate?.Trim() ?? string.Empty;
+    var endDate = request.EndDate?.Trim() ?? string.Empty;
+    if (jobService.HasRunningJob())
+    {
+        return Results.Conflict(new DeleteDateRangeFightsResultDto(
+            Success: false,
+            Message: "Wait for the active batch parse to finish before deleting fights by date range.",
+            StartDate: startDate,
+            EndDate: endDate,
+            MatchedFightCount: 0,
+            DeletedFightCount: 0,
+            DeletedLogFileCount: 0,
+            MissingLogFileCount: 0,
+            SkippedLogFileCount: 0,
+            AnalysisRecalculationSeconds: 0.0));
+    }
+
+    if (uploadService.HasActiveUpload())
+    {
+        return Results.Conflict(new DeleteDateRangeFightsResultDto(
+            Success: false,
+            Message: "Wait for active uploads to finish before deleting fights by date range.",
+            StartDate: startDate,
+            EndDate: endDate,
+            MatchedFightCount: 0,
+            DeletedFightCount: 0,
+            DeletedLogFileCount: 0,
+            MissingLogFileCount: 0,
+            SkippedLogFileCount: 0,
+            AnalysisRecalculationSeconds: 0.0));
+    }
+
+    var result = service.DeleteDateRangeFights(startDate, endDate, cancellationToken);
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+}).DisableAntiforgery();
 app.MapGet("/api/imports/directory/jobs/{jobId}", (string jobId, DirectoryImportJobService service) =>
     service.TryGetJob(jobId, out var status)
         ? Results.Ok(status)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using WvWAnalyst.Api.Analysis;
 using WvWAnalyst.Api.Bridge;
@@ -99,30 +100,9 @@ public sealed class CommanderFightManagementService
         string analysisMessage;
         if (deletedFightCount > 0)
         {
-            try
-            {
-                var stopwatch = Stopwatch.StartNew();
-                _fightAnalysis.BuildSnapshot(
-                    commander: null,
-                    startDate: null,
-                    endDate: null,
-                    outcomeCode: null,
-                    squadIncludeClasses: null,
-                    squadExcludeClasses: null,
-                    enemyIncludeClasses: null,
-                    enemyExcludeClasses: null,
-                    patchScope: null,
-                    patchEraIds: null,
-                    fightAttributes: null);
-                stopwatch.Stop();
-                analysisSeconds = Math.Max(0.1, Math.Round(stopwatch.Elapsed.TotalSeconds, 1));
-                analysisMessage = $"Analysis recalculated in {analysisSeconds:0.0}s.";
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Analysis warm-up failed after deleting fights for commander {Commander}", normalizedCommander);
-                analysisMessage = $"Analysis warm-up failed: {exception.Message}";
-            }
+            var warmUp = WarmUpAnalysisAfterDeletion($"commander {normalizedCommander}");
+            analysisSeconds = warmUp.Seconds;
+            analysisMessage = warmUp.Message;
         }
         else
         {
@@ -156,6 +136,119 @@ public sealed class CommanderFightManagementService
             AnalysisRecalculationSeconds: analysisSeconds);
     }
 
+    public DeleteDateRangeFightsResultDto DeleteDateRangeFights(string? startDate, string? endDate, CancellationToken cancellationToken)
+    {
+        if (!TryParseDateRange(startDate, endDate, out var parsedStartDate, out var parsedEndDate, out var validationMessage))
+        {
+            return new DeleteDateRangeFightsResultDto(
+                Success: false,
+                Message: validationMessage,
+                StartDate: startDate?.Trim() ?? string.Empty,
+                EndDate: endDate?.Trim() ?? string.Empty,
+                MatchedFightCount: 0,
+                DeletedFightCount: 0,
+                DeletedLogFileCount: 0,
+                MissingLogFileCount: 0,
+                SkippedLogFileCount: 0,
+                AnalysisRecalculationSeconds: 0.0);
+        }
+
+        var normalizedStartDate = parsedStartDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var normalizedEndDate = parsedEndDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var matchingFights = _fightCatalog.GetManagementItems()
+            .Where(item => item.FightLocalDate is { } fightDate && fightDate >= parsedStartDate && fightDate <= parsedEndDate)
+            .ToList();
+
+        if (matchingFights.Count == 0)
+        {
+            return new DeleteDateRangeFightsResultDto(
+                Success: false,
+                Message: $"No stored fights were found from {normalizedStartDate} through {normalizedEndDate}.",
+                StartDate: normalizedStartDate,
+                EndDate: normalizedEndDate,
+                MatchedFightCount: 0,
+                DeletedFightCount: 0,
+                DeletedLogFileCount: 0,
+                MissingLogFileCount: 0,
+                SkippedLogFileCount: 0,
+                AnalysisRecalculationSeconds: 0.0);
+        }
+
+        SourceLogDeleteResult logDeleteResult;
+        try
+        {
+            logDeleteResult = DeleteAssociatedSourceLogs(matchingFights, cancellationToken);
+        }
+        catch (IOException exception)
+        {
+            return BuildDateRangeLogDeleteFailure(normalizedStartDate, normalizedEndDate, matchingFights.Count, exception.Message);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return BuildDateRangeLogDeleteFailure(normalizedStartDate, normalizedEndDate, matchingFights.Count, exception.Message);
+        }
+
+        if (logDeleteResult.Failures.Count > 0)
+        {
+            var failureSummary = string.Join(" ", logDeleteResult.Failures.Take(3));
+            return new DeleteDateRangeFightsResultDto(
+                Success: false,
+                Message: $"Stopped before deleting stored fight data because one or more associated log files could not be deleted. {failureSummary}",
+                StartDate: normalizedStartDate,
+                EndDate: normalizedEndDate,
+                MatchedFightCount: matchingFights.Count,
+                DeletedFightCount: 0,
+                DeletedLogFileCount: logDeleteResult.DeletedLogFileCount,
+                MissingLogFileCount: logDeleteResult.MissingLogFileCount,
+                SkippedLogFileCount: logDeleteResult.SkippedLogFileCount,
+                AnalysisRecalculationSeconds: 0.0);
+        }
+
+        var deletedFightCount = _fightCatalog.DeleteFightDirectories(
+            matchingFights.Select(fight => fight.FightId),
+            cancellationToken);
+
+        var analysisSeconds = 0.0;
+        string analysisMessage;
+        if (deletedFightCount > 0)
+        {
+            var warmUp = WarmUpAnalysisAfterDeletion($"date range {normalizedStartDate} through {normalizedEndDate}");
+            analysisSeconds = warmUp.Seconds;
+            analysisMessage = warmUp.Message;
+        }
+        else
+        {
+            analysisMessage = "No stored fight folders needed deletion.";
+        }
+
+        var messageParts = new List<string>
+        {
+            $"Deleted {deletedFightCount} stored fight(s) from {normalizedStartDate} through {normalizedEndDate}.",
+            $"Deleted {logDeleteResult.DeletedLogFileCount} associated source log file(s)."
+        };
+        if (logDeleteResult.MissingLogFileCount > 0)
+        {
+            messageParts.Add($"{logDeleteResult.MissingLogFileCount} source log reference(s) were already missing.");
+        }
+        if (logDeleteResult.SkippedLogFileCount > 0)
+        {
+            messageParts.Add($"{logDeleteResult.SkippedLogFileCount} source log reference(s) were outside the configured pending/archive stores and were left alone.");
+        }
+        messageParts.Add(analysisMessage);
+
+        return new DeleteDateRangeFightsResultDto(
+            Success: true,
+            Message: string.Join(" ", messageParts),
+            StartDate: normalizedStartDate,
+            EndDate: normalizedEndDate,
+            MatchedFightCount: matchingFights.Count,
+            DeletedFightCount: deletedFightCount,
+            DeletedLogFileCount: logDeleteResult.DeletedLogFileCount,
+            MissingLogFileCount: logDeleteResult.MissingLogFileCount,
+            SkippedLogFileCount: logDeleteResult.SkippedLogFileCount,
+            AnalysisRecalculationSeconds: analysisSeconds);
+    }
+
     private static DeleteCommanderFightsResultDto BuildLogDeleteFailure(string commander, int matchedFightCount, string message)
     {
         return new DeleteCommanderFightsResultDto(
@@ -168,6 +261,88 @@ public sealed class CommanderFightManagementService
             MissingLogFileCount: 0,
             SkippedLogFileCount: 0,
             AnalysisRecalculationSeconds: 0.0);
+    }
+
+    private static DeleteDateRangeFightsResultDto BuildDateRangeLogDeleteFailure(string startDate, string endDate, int matchedFightCount, string message)
+    {
+        return new DeleteDateRangeFightsResultDto(
+            Success: false,
+            Message: $"Stopped before deleting stored fight data because an associated source log could not be checked or deleted. {message}",
+            StartDate: startDate,
+            EndDate: endDate,
+            MatchedFightCount: matchedFightCount,
+            DeletedFightCount: 0,
+            DeletedLogFileCount: 0,
+            MissingLogFileCount: 0,
+            SkippedLogFileCount: 0,
+            AnalysisRecalculationSeconds: 0.0);
+    }
+
+    private static bool TryParseDateRange(
+        string? startDate,
+        string? endDate,
+        out DateOnly parsedStartDate,
+        out DateOnly parsedEndDate,
+        out string message)
+    {
+        parsedStartDate = default;
+        parsedEndDate = default;
+        var normalizedStartDate = startDate?.Trim();
+        var normalizedEndDate = endDate?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedStartDate) || string.IsNullOrWhiteSpace(normalizedEndDate))
+        {
+            message = "Choose both a start date and an end date before deleting fights.";
+            return false;
+        }
+
+        if (!DateOnly.TryParseExact(normalizedStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedStartDate))
+        {
+            message = "Start date must use YYYY-MM-DD format.";
+            return false;
+        }
+
+        if (!DateOnly.TryParseExact(normalizedEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedEndDate))
+        {
+            message = "End date must use YYYY-MM-DD format.";
+            return false;
+        }
+
+        if (parsedStartDate > parsedEndDate)
+        {
+            message = "Start date must be on or before end date.";
+            return false;
+        }
+
+        message = string.Empty;
+        return true;
+    }
+
+    private AnalysisWarmUpResult WarmUpAnalysisAfterDeletion(string deleteScope)
+    {
+        try
+        {
+            var stopwatch = Stopwatch.StartNew();
+            _fightAnalysis.BuildSnapshot(
+                commander: null,
+                startDate: null,
+                endDate: null,
+                outcomeCode: null,
+                squadIncludeClasses: null,
+                squadExcludeClasses: null,
+                enemyIncludeClasses: null,
+                enemyExcludeClasses: null,
+                patchScope: null,
+                patchEraIds: null,
+                fightAttributes: null);
+            stopwatch.Stop();
+            var seconds = Math.Max(0.1, Math.Round(stopwatch.Elapsed.TotalSeconds, 1));
+            return new AnalysisWarmUpResult(seconds, $"Analysis recalculated in {seconds:0.0}s.");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Analysis warm-up failed after deleting fights for {DeleteScope}", deleteScope);
+            return new AnalysisWarmUpResult(0.0, $"Analysis warm-up failed: {exception.Message}");
+        }
     }
 
     private SourceLogDeleteResult DeleteAssociatedSourceLogs(
@@ -415,4 +590,6 @@ public sealed class CommanderFightManagementService
         int MissingLogFileCount,
         int SkippedLogFileCount,
         IReadOnlyList<string> Failures);
+
+    private sealed record AnalysisWarmUpResult(double Seconds, string Message);
 }
