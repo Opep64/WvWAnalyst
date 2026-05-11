@@ -716,9 +716,13 @@ public sealed class WvWAnalystPlayerSummaryDto
 
     public long Damage { get; set; }
 
+    public long DamageToDownedTargets { get; set; }
+
     public int Downs { get; set; }
 
     public int Kills { get; set; }
+
+    public int DownContribution { get; set; }
 
     public int Strips { get; set; }
 
@@ -730,15 +734,27 @@ public sealed class WvWAnalystPlayerSummaryDto
 
     public long Healing { get; set; }
 
+    public long DownedHealing { get; set; }
+
     public long Barrier { get; set; }
 
     public int Resurrects { get; set; }
+
+    public int IllusionOfLifeRezzes { get; set; }
 
     public int Deaths { get; set; }
 
     public int Recoveries { get; set; }
 
     public long DamageTaken { get; set; }
+
+    public long PetDamageAbsorbed { get; set; }
+
+    public double DamageReflectedOnEnemy { get; set; }
+
+    public long MysticRebukeDamage { get; set; }
+
+    public int Pulls { get; set; }
 
     public int ReceivedCrowdControl { get; set; }
 

@@ -674,6 +674,7 @@
                         <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
                         <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
                         <button class="analysis-tab" id="analysis-tab-enemies" type="button" data-analysis-tab="enemies" role="tab" aria-selected="false">Enemies</button>
+                        <button class="analysis-tab" id="analysis-tab-top-five" type="button" data-analysis-tab="top-five" role="tab" aria-selected="false">Top 5</button>
                     </div>
                 </div>
                 <div class="analysis-panel analysis-panel-overview is-active" id="analysis-panel-overview" data-analysis-panel="overview" role="tabpanel" aria-labelledby="analysis-tab-overview">
@@ -1112,11 +1113,18 @@
                         </table>
                     </div>
                 </div>
+                <div class="analysis-panel" id="analysis-panel-top-five" data-analysis-panel="top-five" role="tabpanel" aria-labelledby="analysis-tab-top-five" hidden>
+                    <div class="analysis-top-five-toolbar">
+                        <p class="workspace-note analysis-panel-note" id="analysis-top-five-summary">Top account totals across the selected fights.</p>
+                        <button class="action-link action-link-button" id="analysis-top-five-export-button" type="button" disabled>Export HTML</button>
+                    </div>
+                    <div class="analysis-top-five-grid" id="analysis-top-five-categories"></div>
+                </div>
             </section>
 
         </main>
     </div>
 
-    <script src="/app.js?v=20260507daterange1" defer></script>
+    <script src="/app.js?v=20260511top5export" defer></script>
 </body>
 </html>

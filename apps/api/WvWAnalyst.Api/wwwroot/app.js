@@ -6969,6 +6969,788 @@ function renderAnalysisEnemies(snapshot) {
         : `<tr><td colspan="10">No enemy class summaries matched the current filters.</td></tr>`;
 }
 
+function formatAnalysisTopFiveValue(category, value) {
+    if (category?.unit === "percent") {
+        return formatPercent(value);
+    }
+
+    if (category?.unit === "boon") {
+        return formatNumber(value, 1);
+    }
+
+    return formatNumber(value);
+}
+
+function getAnalysisTopFiveTotalHeader(category) {
+    if (category?.key === "stability-produced") {
+        return {
+            label: "Stack Gen",
+            title: "Generated average Stability stacks summed across the selected fights."
+        };
+    }
+
+    if (category?.key === "protection-produced") {
+        return {
+            label: "Uptime Gen",
+            title: "Generated Protection uptime percentage-points summed across the selected fights."
+        };
+    }
+
+    return {
+        label: "Total",
+        title: "Total value across the selected fights."
+    };
+}
+
+function getAnalysisTopFivePrimaryCharacter(row) {
+    const characters = row.characters ?? [];
+    if (characters.length === 0) {
+        return null;
+    }
+
+    return [...characters].sort((left, right) =>
+        (right.fightCount ?? 0) - (left.fightCount ?? 0)
+        || (right.value ?? 0) - (left.value ?? 0)
+        || (left.characterName ?? "").localeCompare(right.characterName ?? ""))[0];
+}
+
+function buildAnalysisTopFiveCharacterTooltip(category, row) {
+    const characters = row.characters ?? [];
+    if (characters.length === 0) {
+        return row.classesPlayed?.length ? row.classesPlayed.join("\n") : "No character detail";
+    }
+
+    return characters
+        .map(character => `${character.characterName} | ${character.classLabel} | ${formatNumber(character.fightCount)} fights | ${formatAnalysisTopFiveValue(category, character.value)}`)
+        .join("\n");
+}
+
+function buildAnalysisTopFiveCharacterPills(category, row) {
+    const characters = row.characters ?? [];
+    if (characters.length === 0) {
+        const classes = row.classesPlayed ?? [];
+        if (classes.length === 0) {
+            return `<span class="table-inline-note">No character detail</span>`;
+        }
+
+        return classes.map(classLabel => `
+            <span class="analysis-top-five-character-pill">
+                <span>${escapeHtml(classLabel)}</span>
+            </span>
+        `).join("");
+    }
+
+    return characters.map(character => `
+        <span class="analysis-top-five-character-pill" title="${escapeHtml(`${character.characterName} | ${character.classLabel} | ${formatNumber(character.fightCount)} fights | ${formatAnalysisTopFiveValue(category, character.value)}`)}">
+            ${character.icon ? `<img class="analysis-top-five-character-pill-icon" src="${escapeHtml(character.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">` : ""}
+            <span>${escapeHtml(character.characterName)}</span>
+            <span class="table-inline-note">${escapeHtml(character.classLabel)}</span>
+        </span>
+    `).join("");
+}
+
+function buildAnalysisTopFiveCharacterCount(category, row) {
+    const characterCount = (row.characters ?? []).length || (row.classesPlayed ?? []).length || 0;
+    return `
+        <span class="analysis-top-five-character-hover" tabindex="0" aria-label="${escapeHtml(buildAnalysisTopFiveCharacterTooltip(category, row))}">
+            <span class="analysis-top-five-character-count">${escapeHtml(formatNumber(characterCount))}</span>
+            <span class="analysis-top-five-character-tooltip" role="tooltip">
+                <span class="analysis-top-five-character-tooltip-title">Characters / classes</span>
+                <span class="analysis-top-five-character-pill-list">
+                    ${buildAnalysisTopFiveCharacterPills(category, row)}
+                </span>
+            </span>
+        </span>`;
+}
+
+function buildAnalysisTopFiveRow(category, row) {
+    const valueDetail = row.valueDetail
+        ? `<span class="table-inline-note">${escapeHtml(row.valueDetail)}</span>`
+        : "";
+    const primaryCharacter = getAnalysisTopFivePrimaryCharacter(row);
+    const primaryIcon = primaryCharacter?.icon
+        ? `<img class="analysis-top-five-player-icon" src="${escapeHtml(primaryCharacter.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+        : "";
+    const primaryClass = primaryCharacter?.classLabel
+        ? `<span class="table-inline-note">${escapeHtml(primaryCharacter.classLabel)}</span>`
+        : "";
+    return `
+        <tr>
+            <td class="analysis-top-five-rank">${escapeHtml(`#${row.rank}`)}</td>
+            <td>
+                <div class="analysis-top-five-player-cell">
+                    ${primaryIcon}
+                    <div class="table-stack">
+                        <strong>${escapeHtml(row.displayName ?? row.account ?? "Unknown player")}</strong>
+                        <span class="table-inline-note">${escapeHtml(row.account ?? "")}</span>
+                        ${primaryClass}
+                    </div>
+                </div>
+            </td>
+            <td class="analysis-top-five-total">
+                <div class="table-stack">
+                    <strong>${escapeHtml(formatAnalysisTopFiveValue(category, row.value))}</strong>
+                    ${valueDetail}
+                </div>
+            </td>
+            <td class="analysis-top-five-fights">
+                <div class="table-stack">
+                    <span>${escapeHtml(`${formatNumber(row.fightCount)} fights`)}</span>
+                </div>
+            </td>
+            <td class="analysis-top-five-character-count-cell">${buildAnalysisTopFiveCharacterCount(category, row)}</td>
+        </tr>`;
+}
+
+function buildAnalysisTopFiveCategoryCard(category) {
+    const rows = category.rows ?? [];
+    const totalHeader = getAnalysisTopFiveTotalHeader(category);
+    return `
+        <article class="analysis-card analysis-top-five-card">
+            <div class="analysis-top-five-card-heading">
+                <div>
+                    <h3>${escapeHtml(category.label)}</h3>
+                    <p>${escapeHtml(category.detail ?? "")}</p>
+                </div>
+            </div>
+            <div class="table-shell table-shell-top-five">
+                <table class="data-table data-table-compact analysis-top-five-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Player</th>
+                            <th title="${escapeHtml(totalHeader.title)}">${escapeHtml(totalHeader.label)}</th>
+                            <th>Fights</th>
+                            <th title="Character/class combinations played. Hover a row value for the full list.">Chars</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.length > 0
+                            ? rows.map(row => buildAnalysisTopFiveRow(category, row)).join("")
+                            : `<tr><td colspan="5">No retained player samples met the 10% fight appearance threshold for this category.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </article>`;
+}
+
+function hasAnalysisTopFiveExportData(snapshot) {
+    return (snapshot?.topFive ?? []).some(category => (category.rows ?? []).length > 0);
+}
+
+function setAnalysisTopFiveExportEnabled(enabled) {
+    const button = document.querySelector("#analysis-top-five-export-button");
+    if (button) {
+        button.disabled = !enabled;
+    }
+}
+
+function parseLocalDateOnly(value) {
+    const normalized = String(value ?? "").trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+    if (!match) {
+        return null;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year
+        && date.getMonth() === month - 1
+        && date.getDate() === day
+        ? date
+        : null;
+}
+
+function getDateOnlyDayDelta(start, end) {
+    const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+    const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.round((endUtc - startUtc) / 86400000);
+}
+
+function isFullCalendarMonth(start, end) {
+    const lastDay = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+    return start.getFullYear() === end.getFullYear()
+        && start.getMonth() === end.getMonth()
+        && start.getDate() === 1
+        && end.getDate() === lastDay;
+}
+
+function formatAnalysisExportDate(date) {
+    return date.toLocaleDateString(undefined, {
+        month: "long",
+        day: "numeric",
+        year: "numeric"
+    });
+}
+
+function formatAnalysisExportMonthYear(date) {
+    return date.toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric"
+    });
+}
+
+function buildAnalysisTopFiveExportWindowLabel(snapshot) {
+    const start = parseLocalDateOnly(snapshot?.selection?.startDate);
+    const end = parseLocalDateOnly(snapshot?.selection?.endDate);
+
+    if (start && end) {
+        const orderedStart = start <= end ? start : end;
+        const orderedEnd = start <= end ? end : start;
+
+        if (isFullCalendarMonth(orderedStart, orderedEnd)) {
+            return formatAnalysisExportMonthYear(orderedStart);
+        }
+
+        if (getDateOnlyDayDelta(orderedStart, orderedEnd) === 6) {
+            return `Week of ${formatAnalysisExportDate(orderedStart)}`;
+        }
+
+        return `${formatAnalysisExportDate(orderedStart)} - ${formatAnalysisExportDate(orderedEnd)}`;
+    }
+
+    if (start) {
+        return `Since ${formatAnalysisExportDate(start)}`;
+    }
+
+    if (end) {
+        return `Through ${formatAnalysisExportDate(end)}`;
+    }
+
+    return "All Dates";
+}
+
+function slugifyTopFiveExportLabel(value) {
+    return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "all-dates";
+}
+
+function collectAnalysisTopFiveIconUrls(categories) {
+    const iconUrls = new Set();
+    (categories ?? []).forEach(category => {
+        (category.rows ?? []).forEach(row => {
+            (row.characters ?? []).forEach(character => {
+                if (character.icon) {
+                    iconUrls.add(character.icon);
+                }
+            });
+        });
+    });
+
+    return Array.from(iconUrls);
+}
+
+function readBlobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function fetchIconAsDataUrl(url) {
+    if (String(url).startsWith("data:")) {
+        return url;
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Icon request failed with status ${response.status}.`);
+    }
+
+    return readBlobAsDataUrl(await response.blob());
+}
+
+async function buildAnalysisTopFiveIconDataMap(categories) {
+    const iconUrls = collectAnalysisTopFiveIconUrls(categories);
+    const results = await Promise.allSettled(iconUrls.map(async url => ({
+        url,
+        dataUrl: await fetchIconAsDataUrl(url)
+    })));
+    const iconDataByUrl = new Map();
+
+    results.forEach(result => {
+        if (result.status === "fulfilled" && result.value.dataUrl) {
+            iconDataByUrl.set(result.value.url, result.value.dataUrl);
+        }
+    });
+
+    return iconDataByUrl;
+}
+
+function buildAnalysisTopFiveExportIcon(icon, className, iconDataByUrl) {
+    const dataUrl = icon ? iconDataByUrl.get(icon) : null;
+    return dataUrl
+        ? `<img class="${escapeHtml(className)}" src="${escapeHtml(dataUrl)}" alt="">`
+        : "";
+}
+
+function buildAnalysisTopFiveExportCharacterPills(category, row, iconDataByUrl) {
+    const characters = row.characters ?? [];
+    if (characters.length === 0) {
+        const classes = row.classesPlayed ?? [];
+        if (classes.length === 0) {
+            return `<span class="table-inline-note">No character detail</span>`;
+        }
+
+        return classes.map(classLabel => `
+            <span class="analysis-top-five-character-pill">
+                <span>${escapeHtml(classLabel)}</span>
+            </span>
+        `).join("");
+    }
+
+    return characters.map(character => `
+        <span class="analysis-top-five-character-pill" title="${escapeHtml(`${character.characterName} | ${character.classLabel} | ${formatNumber(character.fightCount)} fights | ${formatAnalysisTopFiveValue(category, character.value)}`)}">
+            ${buildAnalysisTopFiveExportIcon(character.icon, "analysis-top-five-character-pill-icon", iconDataByUrl)}
+            <span>${escapeHtml(character.characterName)}</span>
+            <span class="table-inline-note">${escapeHtml(character.classLabel)}</span>
+        </span>
+    `).join("");
+}
+
+function buildAnalysisTopFiveExportCharacterCount(category, row, iconDataByUrl) {
+    const characterCount = (row.characters ?? []).length || (row.classesPlayed ?? []).length || 0;
+    return `
+        <span class="analysis-top-five-character-hover" tabindex="0" aria-label="${escapeHtml(buildAnalysisTopFiveCharacterTooltip(category, row))}">
+            <span class="analysis-top-five-character-count">${escapeHtml(formatNumber(characterCount))}</span>
+            <span class="analysis-top-five-character-tooltip" role="tooltip">
+                <span class="analysis-top-five-character-tooltip-title">Characters / classes</span>
+                <span class="analysis-top-five-character-pill-list">
+                    ${buildAnalysisTopFiveExportCharacterPills(category, row, iconDataByUrl)}
+                </span>
+            </span>
+        </span>`;
+}
+
+function buildAnalysisTopFiveExportRow(category, row, iconDataByUrl) {
+    const valueDetail = row.valueDetail
+        ? `<span class="table-inline-note">${escapeHtml(row.valueDetail)}</span>`
+        : "";
+    const primaryCharacter = getAnalysisTopFivePrimaryCharacter(row);
+    const primaryIcon = buildAnalysisTopFiveExportIcon(primaryCharacter?.icon, "analysis-top-five-player-icon", iconDataByUrl);
+    const primaryClass = primaryCharacter?.classLabel
+        ? `<span class="table-inline-note">${escapeHtml(primaryCharacter.classLabel)}</span>`
+        : "";
+    return `
+        <tr>
+            <td class="analysis-top-five-rank">${escapeHtml(`#${row.rank}`)}</td>
+            <td>
+                <div class="analysis-top-five-player-cell">
+                    ${primaryIcon}
+                    <div class="table-stack">
+                        <strong>${escapeHtml(row.displayName ?? row.account ?? "Unknown player")}</strong>
+                        <span class="table-inline-note">${escapeHtml(row.account ?? "")}</span>
+                        ${primaryClass}
+                    </div>
+                </div>
+            </td>
+            <td class="analysis-top-five-total">
+                <div class="table-stack">
+                    <strong>${escapeHtml(formatAnalysisTopFiveValue(category, row.value))}</strong>
+                    ${valueDetail}
+                </div>
+            </td>
+            <td class="analysis-top-five-fights">
+                <div class="table-stack">
+                    <span>${escapeHtml(`${formatNumber(row.fightCount)} fights`)}</span>
+                </div>
+            </td>
+            <td class="analysis-top-five-character-count-cell">${buildAnalysisTopFiveExportCharacterCount(category, row, iconDataByUrl)}</td>
+        </tr>`;
+}
+
+function buildAnalysisTopFiveExportCategoryCard(category, iconDataByUrl) {
+    const rows = category.rows ?? [];
+    const totalHeader = getAnalysisTopFiveTotalHeader(category);
+    return `
+        <article class="analysis-card analysis-top-five-card">
+            <div class="analysis-top-five-card-heading">
+                <h2>${escapeHtml(category.label)}</h2>
+                <p>${escapeHtml(category.detail ?? "")}</p>
+            </div>
+            <div class="table-shell table-shell-top-five">
+                <table class="data-table data-table-compact analysis-top-five-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Player</th>
+                            <th title="${escapeHtml(totalHeader.title)}">${escapeHtml(totalHeader.label)}</th>
+                            <th>Fights</th>
+                            <th title="Character/class combinations played. Hover a row value for the full list.">Chars</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.length > 0
+                            ? rows.map(row => buildAnalysisTopFiveExportRow(category, row, iconDataByUrl)).join("")
+                            : `<tr><td colspan="5">No retained player samples met the 10% fight appearance threshold for this category.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </article>`;
+}
+
+function getAnalysisTopFiveExportStyles() {
+    return `
+        :root {
+            color-scheme: dark;
+            --bg: #0d1218;
+            --panel-strong: #1a2431;
+            --line: rgba(177, 194, 214, 0.16);
+            --ink: #e9f0f7;
+            --muted: #9fb0c3;
+            --accent: #53b7ff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "Bahnschrift", sans-serif;
+            color: var(--ink);
+            background: #0d1218;
+        }
+
+        main {
+            width: min(100% - 32px, 1500px);
+            margin: 0 auto;
+            padding: 28px 0 40px;
+        }
+
+        .export-header {
+            margin-bottom: 18px;
+        }
+
+        .export-kicker {
+            margin: 0 0 6px;
+            color: var(--accent);
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        h1,
+        h2 {
+            margin: 0;
+            font-family: "Palatino Linotype", "Book Antiqua", serif;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            line-height: 1.05;
+        }
+
+        .export-summary,
+        .table-inline-note,
+        .analysis-top-five-card-heading p {
+            color: var(--muted);
+        }
+
+        .export-summary {
+            margin: 8px 0 0;
+        }
+
+        .analysis-top-five-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+            gap: 12px;
+        }
+
+        .analysis-card {
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel-strong);
+        }
+
+        .analysis-top-five-card-heading h2 {
+            font-size: 1.16rem;
+        }
+
+        .analysis-top-five-card-heading p {
+            margin: 4px 0 12px;
+            line-height: 1.35;
+        }
+
+        .data-table {
+            width: 100%;
+            min-width: 0;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        th,
+        td {
+            padding: 10px 8px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+            text-align: left;
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .analysis-top-five-rank {
+            color: var(--accent);
+            font-weight: 800;
+        }
+
+        .analysis-top-five-table th:nth-child(1),
+        .analysis-top-five-table td:nth-child(1) {
+            width: 50px;
+        }
+
+        .analysis-top-five-table th:nth-child(3),
+        .analysis-top-five-table td:nth-child(3) {
+            width: 104px;
+        }
+
+        .analysis-top-five-table th:nth-child(4),
+        .analysis-top-five-table td:nth-child(4) {
+            width: 76px;
+        }
+
+        .analysis-top-five-table th:nth-child(5),
+        .analysis-top-five-table td:nth-child(5) {
+            width: 56px;
+            text-align: center;
+        }
+
+        .analysis-top-five-player-cell {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .analysis-top-five-player-icon,
+        .analysis-top-five-character-pill-icon {
+            flex: 0 0 auto;
+            border-radius: 4px;
+            object-fit: cover;
+        }
+
+        .analysis-top-five-player-icon {
+            width: 20px;
+            height: 20px;
+            margin-top: 1px;
+        }
+
+        .analysis-top-five-character-pill-icon {
+            width: 18px;
+            height: 18px;
+        }
+
+        .table-stack {
+            display: grid;
+            gap: 3px;
+            min-width: 0;
+        }
+
+        .table-stack strong,
+        .analysis-top-five-total strong,
+        .analysis-top-five-fights span {
+            font-weight: 800;
+        }
+
+        .analysis-top-five-total strong,
+        .analysis-top-five-fights span {
+            white-space: nowrap;
+        }
+
+        .table-inline-note {
+            font-size: 0.82rem;
+            overflow-wrap: anywhere;
+        }
+
+        .analysis-top-five-character-hover {
+            position: relative;
+            display: inline-flex;
+            justify-content: center;
+        }
+
+        .analysis-top-five-character-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            min-height: 24px;
+            padding: 2px 7px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(83, 183, 255, 0.10);
+            color: var(--ink);
+            font-weight: 800;
+            cursor: help;
+        }
+
+        .analysis-top-five-character-tooltip {
+            position: absolute;
+            z-index: 10;
+            top: calc(100% + 8px);
+            right: 0;
+            display: none;
+            width: max-content;
+            max-width: min(360px, calc(100vw - 48px));
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(10, 15, 22, 0.98);
+            box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
+            text-align: left;
+        }
+
+        .analysis-top-five-character-hover:hover .analysis-top-five-character-tooltip,
+        .analysis-top-five-character-hover:focus-within .analysis-top-five-character-tooltip {
+            display: grid;
+            gap: 8px;
+        }
+
+        .analysis-top-five-character-tooltip-title {
+            color: var(--muted);
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .analysis-top-five-character-pill-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .analysis-top-five-character-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 100%;
+            padding: 4px 7px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.82);
+            white-space: nowrap;
+        }
+    `;
+}
+
+function buildAnalysisTopFiveExportHtml(snapshot, windowLabel, iconDataByUrl) {
+    const categories = snapshot.topFive ?? [];
+    const populatedCategories = categories.filter(category => (category.rows ?? []).length > 0).length;
+    const filteredFightCount = Number(snapshot.scope?.filteredFightCount ?? 0);
+    const record = `${formatNumber(snapshot.scope?.winCount ?? 0)}-${formatNumber(snapshot.scope?.lossCount ?? 0)}-${formatNumber(snapshot.scope?.drawCount ?? 0)}`;
+    const title = `Top 5 - ${windowLabel}`;
+    const summary = `${formatNumber(populatedCategories)} Top 5 categories across ${formatNumber(filteredFightCount)} filtered fights, grouped by Guild Wars account. ${record} record. Generated ${new Date().toLocaleString()}.`;
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(title)}</title>
+    <style>${getAnalysisTopFiveExportStyles()}</style>
+</head>
+<body>
+    <main>
+        <header class="export-header">
+            <p class="export-kicker">WvWAnalyst</p>
+            <h1>${escapeHtml(title)}</h1>
+            <p class="export-summary">${escapeHtml(summary)}</p>
+        </header>
+        <section class="analysis-top-five-grid" aria-label="Top 5 categories">
+            ${categories.length > 0
+                ? categories.map(category => buildAnalysisTopFiveExportCategoryCard(category, iconDataByUrl)).join("")
+                : `<article class="analysis-card"><p class="export-summary">No Top 5 categories are available for this selection.</p></article>`}
+        </section>
+    </main>
+</body>
+</html>`;
+}
+
+function downloadTextFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function handleAnalysisTopFiveExport() {
+    const button = document.querySelector("#analysis-top-five-export-button");
+    const originalLabel = button?.textContent ?? "Export HTML";
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Exporting...";
+    }
+
+    try {
+        const snapshot = currentAnalysisSnapshot ?? await ensureAnalysisLoaded();
+        if (!hasAnalysisTopFiveExportData(snapshot)) {
+            return;
+        }
+
+        const windowLabel = buildAnalysisTopFiveExportWindowLabel(snapshot);
+        const iconDataByUrl = await buildAnalysisTopFiveIconDataMap(snapshot.topFive ?? []);
+        const html = buildAnalysisTopFiveExportHtml(snapshot, windowLabel, iconDataByUrl);
+        const filename = `wvwanalyst-top-5-${slugifyTopFiveExportLabel(windowLabel)}.html`;
+        downloadTextFile(filename, html, "text/html;charset=utf-8");
+    } catch (error) {
+        console.error(error);
+        if (button) {
+            button.textContent = "Export failed";
+            setTimeout(() => {
+                button.textContent = originalLabel;
+            }, 1800);
+        }
+    } finally {
+        if (button) {
+            setTimeout(() => {
+                button.textContent = originalLabel;
+                setAnalysisTopFiveExportEnabled(hasAnalysisTopFiveExportData(currentAnalysisSnapshot));
+            }, button.textContent === "Export failed" ? 1800 : 0);
+        }
+    }
+}
+
+function renderAnalysisTopFive(snapshot) {
+    const categories = snapshot.topFive ?? [];
+    const populatedCategories = categories.filter(category => (category.rows ?? []).length > 0).length;
+    const summary = document.querySelector("#analysis-top-five-summary");
+
+    if (summary) {
+        summary.textContent = populatedCategories > 0
+            ? `${populatedCategories} Top 5 categories across ${formatNumber(snapshot.scope.filteredFightCount)} filtered fights, grouped by Guild Wars account.`
+            : "No retained player stat samples matched the current filters. Rebuild the catalog with updated fight data to populate every category.";
+    }
+
+    setInnerHtml(
+        "#analysis-top-five-categories",
+        categories.length > 0
+            ? categories.map(buildAnalysisTopFiveCategoryCard).join("")
+            : `<article class="analysis-card"><p class="workspace-note">No Top 5 categories are available for this selection.</p></article>`);
+    setAnalysisTopFiveExportEnabled(hasAnalysisTopFiveExportData(snapshot));
+}
+
 function renderAnalysisLanes(snapshot) {
     const laneSelectionContainer = document.querySelector("#analysis-lane-selection");
     const orderedLanes = getOrderedAnalysisLanes(snapshot.topLanes ?? []);
@@ -7743,6 +8525,9 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-class-detail", "");
     document.querySelector("#analysis-enemies-summary").textContent = message;
     setInnerHtml("#analysis-enemies-body", `<tr><td colspan="10">${escapeHtml(message)}</td></tr>`);
+    document.querySelector("#analysis-top-five-summary").textContent = message;
+    setInnerHtml("#analysis-top-five-categories", "");
+    setAnalysisTopFiveExportEnabled(false);
     setInnerHtml("#analysis-lanes-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-lane-selection", "");
     setInnerHtml("#analysis-lane-detail", "");
@@ -7782,6 +8567,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisPlayers(snapshot);
     renderAnalysisClasses(snapshot);
     renderAnalysisEnemies(snapshot);
+    renderAnalysisTopFive(snapshot);
     renderAnalysisLanes(snapshot);
     renderAnalysisBoons(snapshot);
     renderAnalysisCompHelperPlaceholder("Open Comp Helper to load candidate player cards for the current filter.");
@@ -10507,6 +11293,7 @@ document.querySelector("#analysis-clear-filters-button").addEventListener("click
     resetAnalysisFiltersToDefaults();
     void refreshAnalysis();
 });
+document.querySelector("#analysis-top-five-export-button").addEventListener("click", () => void handleAnalysisTopFiveExport());
 document.querySelectorAll("[data-app-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
 });

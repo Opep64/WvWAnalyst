@@ -301,6 +301,7 @@ public sealed class FightAnalysisService
             TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
+            TopFive: BuildTopFive(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
             TopBoons: BuildTopBoons(filteredFights),
@@ -1671,6 +1672,646 @@ public sealed class FightAnalysisService
     private static double GetClassProfileShare(IReadOnlyDictionary<string, double> profile, string classKey)
     {
         return profile.TryGetValue(classKey, out double share) ? share : 0.0;
+    }
+
+    private static IReadOnlyList<FightAnalysisTopFiveCategoryDto> BuildTopFive(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var samples = fights
+            .SelectMany(fight => (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .Where(player => !string.IsNullOrWhiteSpace(player.Account))
+                .Select(player => new PlayerFightSample(fight, player)))
+            .ToArray();
+        int minimumAppearanceFightCount = BuildTopFiveMinimumAppearanceFightCount(fights.Count);
+        IReadOnlyDictionary<string, int> accountFightCounts = BuildTopFiveAccountFightCounts(samples);
+
+        return
+        [
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "damage",
+                label: "Pain Train",
+                unit: "damage",
+                detail: "Total target damage to enemy players across the selected fights.",
+                selector: sample => sample.Player.Damage),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "down-contribution",
+                label: "Down Payment",
+                unit: "count",
+                detail: "Total down contribution against enemy players across the selected fights.",
+                selector: sample => sample.Player.DownContribution),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "damage-to-downed",
+                label: "Finish the Job",
+                unit: "damage",
+                detail: "Total damage dealt to enemy players while they were downed across the selected fights.",
+                selector: sample => sample.Player.DamageToDownedTargets),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "downs",
+                label: "Sit Down",
+                unit: "count",
+                detail: "Enemy player downs credited across the selected fights.",
+                selector: sample => sample.Player.Downs),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "kills",
+                label: "And Stay Down",
+                unit: "count",
+                detail: "Enemy player kills credited across the selected fights.",
+                selector: sample => sample.Player.Kills),
+            BuildTopFiveWeightedAverageCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "in-position",
+                label: "Tag Hugger",
+                unit: "percent",
+                detail: "Weighted in-position percentage using each player's positioning samples across the selected fights.",
+                selector: sample => sample.Player.InPositionRate,
+                weightSelector: sample => sample.Player.HasPositioningData ? Math.Max(sample.Player.PositioningSamples, 0) : 0),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "stability-produced",
+                label: "Stand Your Ground",
+                unit: "boon",
+                detail: "Total Stability generation across the selected fights.",
+                selector: sample => GetProvidedBoonGeneration(sample.Player, "stability")),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "protection-produced",
+                label: "Protected Assets",
+                unit: "boon",
+                detail: "Total Protection generation across the selected fights.",
+                selector: sample => GetProvidedBoonGeneration(sample.Player, "protection")),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "healing",
+                label: "Health Department",
+                unit: "healing",
+                detail: "Total outgoing healing across the selected fights.",
+                selector: sample => sample.Player.Healing),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "downed-healing",
+                label: "Emergency Room",
+                unit: "healing",
+                detail: "Total outgoing healing applied to downed allies across the selected fights.",
+                selector: sample => sample.Player.DownedHealing),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "illusion-of-life-rezzes",
+                label: "Encore",
+                unit: "count",
+                detail: "Successful squad recovery windows where this player applied Illusion of Life.",
+                selector: sample => sample.Player.IllusionOfLifeRezzes),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "cleanses",
+                label: "Squeaky Clean",
+                unit: "count",
+                detail: "Total outgoing condition cleanses across the selected fights.",
+                selector: sample => sample.Player.OutgoingCleanses),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "strips",
+                label: "Strip Miner",
+                unit: "count",
+                detail: "Total boon strips across the selected fights.",
+                selector: sample => sample.Player.Strips),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "boon-corruptions",
+                label: "Corrupting Influence",
+                unit: "count",
+                detail: "Total boon corruptions attributed across the selected fights.",
+                selector: sample => sample.Player.Corrupts),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "barrier",
+                label: "Shields Up",
+                unit: "barrier",
+                detail: "Total outgoing barrier across the selected fights.",
+                selector: sample => sample.Player.Barrier),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "pet-damage-absorbed",
+                label: "Pet Insurance",
+                unit: "damage",
+                detail: "Incoming damage absorbed by owned pets and minions across the selected fights.",
+                selector: sample => sample.Player.PetDamageAbsorbed),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "damage-reflected-on-enemy",
+                label: "Back Atcha",
+                unit: "damage",
+                detail: "Enemy damage from squad-to-enemy reflected projectiles.",
+                selector: sample => sample.Player.DamageReflectedOnEnemy),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "mystic-rebuke-damage",
+                label: "Mystic Payback",
+                unit: "damage",
+                detail: "Total Mystic Rebuke damage to enemy players across the selected fights.",
+                selector: sample => sample.Player.MysticRebukeDamage),
+            BuildTopFiveWinLossCategory(samples, minimumAppearanceFightCount),
+            BuildTopFiveBurstActorCategory(
+                fights,
+                accountFightCounts,
+                minimumAppearanceFightCount,
+                key: "top-damage-bursts",
+                label: "Focus Fire",
+                detail: "Number of selected-fight squad burst windows where this account appeared in the top damage actors.",
+                actorSelector: burst => burst.TopPressureActors ?? Array.Empty<FightTopBurstActorIndexDto>()),
+            BuildTopFiveBurstActorCategory(
+                fights,
+                accountFightCounts,
+                minimumAppearanceFightCount,
+                key: "top-strip-bursts",
+                label: "Boon Breaker",
+                detail: "Number of selected-fight squad burst windows where this account appeared in the top strip actors.",
+                actorSelector: burst => burst.TopStripActors ?? Array.Empty<FightTopBurstActorIndexDto>()),
+            BuildTopFiveSumCategory(
+                samples,
+                minimumAppearanceFightCount,
+                key: "pulls",
+                label: "Get Over Here",
+                unit: "count",
+                detail: "Total outgoing knockback/pull crowd-control events against enemy players across the selected fights.",
+                selector: sample => sample.Player.Pulls),
+            BuildTopFiveDistinctClassesCategory(samples, minimumAppearanceFightCount)
+        ];
+    }
+
+    private static FightAnalysisTopFiveCategoryDto BuildTopFiveSumCategory(
+        IReadOnlyList<PlayerFightSample> samples,
+        int minimumAppearanceFightCount,
+        string key,
+        string label,
+        string unit,
+        string detail,
+        Func<PlayerFightSample, double> selector)
+    {
+        var rows = samples
+            .GroupBy(sample => sample.Player.Account!, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                double value = RoundTopFiveValue(entries.Sum(selector), unit);
+                var characters = BuildTopFiveSumCharacters(entries, selector, unit);
+                var classesPlayed = entries
+                    .Select(entry => BuildClassLabel(entry.Player))
+                    .Where(label => !string.IsNullOrWhiteSpace(label))
+                    .Select(label => label!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    Account = group.Key,
+                    DisplayName = PickMostCommonNonEmpty(entries.Select(entry => NormalizeAnalysisCharacterName(entry.Player.Character))) ?? group.Key,
+                    Value = value,
+                    ValueDetail = (string?)null,
+                    FightCount = entries.Select(entry => entry.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    CharacterSampleCount = entries.Length,
+                    ClassesPlayed = classesPlayed,
+                    Characters = characters
+                };
+            })
+            .Where(row => row.Value > 0.0 && row.FightCount >= minimumAppearanceFightCount)
+            .OrderByDescending(row => row.Value)
+            .ThenByDescending(row => row.FightCount)
+            .ThenBy(row => row.Account, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select((row, index) => new FightAnalysisTopFiveRowDto(
+                Rank: index + 1,
+                Account: row.Account,
+                DisplayName: row.DisplayName,
+                Value: row.Value,
+                ValueDetail: row.ValueDetail,
+                FightCount: row.FightCount,
+                CharacterSampleCount: row.CharacterSampleCount,
+                ClassesPlayed: row.ClassesPlayed,
+                Characters: row.Characters))
+            .ToArray();
+
+        return new FightAnalysisTopFiveCategoryDto(
+            Key: key,
+            Label: label,
+            Unit: unit,
+            Detail: detail,
+            Rows: rows);
+    }
+
+    private static FightAnalysisTopFiveCategoryDto BuildTopFiveWeightedAverageCategory(
+        IReadOnlyList<PlayerFightSample> samples,
+        int minimumAppearanceFightCount,
+        string key,
+        string label,
+        string unit,
+        string detail,
+        Func<PlayerFightSample, double> selector,
+        Func<PlayerFightSample, double> weightSelector)
+    {
+        var rows = samples
+            .GroupBy(sample => sample.Player.Account!, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                double weight = entries.Sum(weightSelector);
+                double value = weight <= 0.0 ? 0.0 : RoundTopFiveValue(entries.Sum(entry => selector(entry) * weightSelector(entry)) / weight, unit);
+                var classesPlayed = entries
+                    .Select(entry => BuildClassLabel(entry.Player))
+                    .Where(classLabel => !string.IsNullOrWhiteSpace(classLabel))
+                    .Select(classLabel => classLabel!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(classLabel => classLabel, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    Account = group.Key,
+                    DisplayName = PickMostCommonNonEmpty(entries.Select(entry => NormalizeAnalysisCharacterName(entry.Player.Character))) ?? group.Key,
+                    Value = value,
+                    Weight = weight,
+                    FightCount = entries.Select(entry => entry.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    CharacterSampleCount = entries.Length,
+                    ClassesPlayed = classesPlayed,
+                    Characters = BuildTopFiveWeightedAverageCharacters(entries, selector, weightSelector, unit)
+                };
+            })
+            .Where(row => row.Weight > 0.0 && row.FightCount >= minimumAppearanceFightCount)
+            .OrderByDescending(row => row.Value)
+            .ThenByDescending(row => row.Weight)
+            .ThenBy(row => row.Account, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select((row, index) => new FightAnalysisTopFiveRowDto(
+                Rank: index + 1,
+                Account: row.Account,
+                DisplayName: row.DisplayName,
+                Value: row.Value,
+                ValueDetail: null,
+                FightCount: row.FightCount,
+                CharacterSampleCount: row.CharacterSampleCount,
+                ClassesPlayed: row.ClassesPlayed,
+                Characters: row.Characters))
+            .ToArray();
+
+        return new FightAnalysisTopFiveCategoryDto(
+            Key: key,
+            Label: label,
+            Unit: unit,
+            Detail: detail,
+            Rows: rows);
+    }
+
+    private static FightAnalysisTopFiveCategoryDto BuildTopFiveDistinctClassesCategory(IReadOnlyList<PlayerFightSample> samples, int minimumAppearanceFightCount)
+    {
+        var rows = samples
+            .GroupBy(sample => sample.Player.Account!, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                var classesPlayed = entries
+                    .Select(entry => BuildClassLabel(entry.Player))
+                    .Where(classLabel => !string.IsNullOrWhiteSpace(classLabel))
+                    .Select(classLabel => classLabel!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(classLabel => classLabel, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    Account = group.Key,
+                    DisplayName = PickMostCommonNonEmpty(entries.Select(entry => NormalizeAnalysisCharacterName(entry.Player.Character))) ?? group.Key,
+                    Value = (double)classesPlayed.Length,
+                    FightCount = entries.Select(entry => entry.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    CharacterSampleCount = entries.Length,
+                    ClassesPlayed = classesPlayed,
+                    Characters = BuildTopFiveSumCharacters(entries, _ => 1.0, "count")
+                };
+            })
+            .Where(row => row.Value > 0.0 && row.FightCount >= minimumAppearanceFightCount)
+            .OrderByDescending(row => row.Value)
+            .ThenByDescending(row => row.FightCount)
+            .ThenBy(row => row.Account, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select((row, index) => new FightAnalysisTopFiveRowDto(
+                Rank: index + 1,
+                Account: row.Account,
+                DisplayName: row.DisplayName,
+                Value: row.Value,
+                ValueDetail: string.Join(", ", row.ClassesPlayed),
+                FightCount: row.FightCount,
+                CharacterSampleCount: row.CharacterSampleCount,
+                ClassesPlayed: row.ClassesPlayed,
+                Characters: row.Characters))
+            .ToArray();
+
+        return new FightAnalysisTopFiveCategoryDto(
+            Key: "classes-played",
+            Label: "Can't Make Up My Mind",
+            Unit: "count",
+            Detail: "Distinct professions or elite specializations played by each Guild Wars 2 account in the selected fights.",
+            Rows: rows);
+    }
+
+    private static FightAnalysisTopFiveCategoryDto BuildTopFiveWinLossCategory(IReadOnlyList<PlayerFightSample> samples, int minimumAppearanceFightCount)
+    {
+        var rows = samples
+            .GroupBy(sample => sample.Player.Account!, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                var fights = entries
+                    .GroupBy(entry => entry.Fight.FightId, StringComparer.OrdinalIgnoreCase)
+                    .Select(fightGroup => fightGroup.First().Fight)
+                    .ToArray();
+                int wins = fights.Count(fight => GetSquadWinResult(fight) == true);
+                int losses = fights.Count(fight => GetSquadWinResult(fight) == false);
+                int draws = fights.Length - wins - losses;
+                int decided = wins + losses;
+                double value = decided == 0 ? 0.0 : Math.Round(wins * 100.0 / decided, 1);
+                var classesPlayed = entries
+                    .Select(entry => BuildClassLabel(entry.Player))
+                    .Where(classLabel => !string.IsNullOrWhiteSpace(classLabel))
+                    .Select(classLabel => classLabel!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(classLabel => classLabel, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    Account = group.Key,
+                    DisplayName = PickMostCommonNonEmpty(entries.Select(entry => NormalizeAnalysisCharacterName(entry.Player.Character))) ?? group.Key,
+                    Value = value,
+                    Wins = wins,
+                    Losses = losses,
+                    Draws = draws,
+                    Decided = decided,
+                    FightCount = fights.Length,
+                    CharacterSampleCount = entries.Length,
+                    ClassesPlayed = classesPlayed,
+                    Characters = BuildTopFiveSumCharacters(entries, _ => 1.0, "count")
+                };
+            })
+            .Where(row => row.Decided > 0 && row.FightCount >= minimumAppearanceFightCount)
+            .OrderByDescending(row => row.Value)
+            .ThenByDescending(row => row.Wins)
+            .ThenByDescending(row => row.FightCount)
+            .ThenBy(row => row.Account, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select((row, index) => new FightAnalysisTopFiveRowDto(
+                Rank: index + 1,
+                Account: row.Account,
+                DisplayName: row.DisplayName,
+                Value: row.Value,
+                ValueDetail: $"{row.Wins}-{row.Losses}-{row.Draws} W-L-D",
+                FightCount: row.FightCount,
+                CharacterSampleCount: row.CharacterSampleCount,
+                ClassesPlayed: row.ClassesPlayed,
+                Characters: row.Characters))
+            .ToArray();
+
+        return new FightAnalysisTopFiveCategoryDto(
+            Key: "win-loss-record",
+            Label: "Victory Lap",
+            Unit: "percent",
+            Detail: "Squad win rate in selected fights where the account appeared. Draws and unknown outcomes are shown but not counted in the percentage.",
+            Rows: rows);
+    }
+
+    private static FightAnalysisTopFiveCategoryDto BuildTopFiveBurstActorCategory(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        IReadOnlyDictionary<string, int> accountFightCounts,
+        int minimumAppearanceFightCount,
+        string key,
+        string label,
+        string detail,
+        Func<FightTopBurstIndexDto, IReadOnlyList<FightTopBurstActorIndexDto>> actorSelector)
+    {
+        var samples = fights
+            .SelectMany(fight => (fight.FightIndex?.TopBursts ?? Array.Empty<FightTopBurstIndexDto>())
+                .SelectMany(burst => actorSelector(burst)
+                    .Where(actor => !string.IsNullOrWhiteSpace(actor.Account))
+                    .Select(actor => new TopFiveActorSample(
+                        Fight: fight,
+                        Account: actor.Account!,
+                        CharacterName: NormalizeAnalysisCharacterName(actor.Character) ?? "(unknown character)",
+                        ClassLabel: BuildClassLabel(actor.Profession, actor.EliteSpec) ?? "Unknown class",
+                        Icon: actor.Icon,
+                        Value: 1.0))))
+            .ToArray();
+
+        var rows = samples
+            .GroupBy(sample => sample.Account, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                var classesPlayed = entries
+                    .Select(entry => entry.ClassLabel)
+                    .Where(classLabel => !string.IsNullOrWhiteSpace(classLabel))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(classLabel => classLabel, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new
+                {
+                    Account = group.Key,
+                    DisplayName = PickMostCommonNonEmpty(entries.Select(entry => entry.CharacterName)) ?? group.Key,
+                    Value = entries.Sum(entry => entry.Value),
+                    PlayerAppearanceFightCount = accountFightCounts.TryGetValue(group.Key, out int fightCount) ? fightCount : 0,
+                    FightCount = entries.Select(entry => entry.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    CharacterSampleCount = entries.Length,
+                    ClassesPlayed = classesPlayed,
+                    Characters = BuildTopFiveActorCharacters(entries)
+                };
+            })
+            .Where(row => row.Value > 0.0 && row.PlayerAppearanceFightCount >= minimumAppearanceFightCount)
+            .OrderByDescending(row => row.Value)
+            .ThenByDescending(row => row.FightCount)
+            .ThenBy(row => row.Account, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select((row, index) => new FightAnalysisTopFiveRowDto(
+                Rank: index + 1,
+                Account: row.Account,
+                DisplayName: row.DisplayName,
+                Value: row.Value,
+                ValueDetail: null,
+                FightCount: row.FightCount,
+                CharacterSampleCount: row.CharacterSampleCount,
+                ClassesPlayed: row.ClassesPlayed,
+                Characters: row.Characters))
+            .ToArray();
+
+        return new FightAnalysisTopFiveCategoryDto(
+            Key: key,
+            Label: label,
+            Unit: "count",
+            Detail: detail,
+            Rows: rows);
+    }
+
+    private static IReadOnlyList<FightAnalysisTopFiveCharacterDto> BuildTopFiveSumCharacters(
+        IReadOnlyList<PlayerFightSample> entries,
+        Func<PlayerFightSample, double> selector,
+        string unit)
+    {
+        return entries
+            .GroupBy(entry => new
+            {
+                CharacterName = NormalizeAnalysisCharacterName(entry.Player.Character) ?? "(unknown character)",
+                ClassLabel = BuildClassLabel(entry.Player) ?? "Unknown class"
+            })
+            .Select(group =>
+            {
+                var samples = group.ToArray();
+                return new FightAnalysisTopFiveCharacterDto(
+                    CharacterName: group.Key.CharacterName,
+                    ClassLabel: group.Key.ClassLabel,
+                    Icon: PickMostCommonNonEmpty(samples.Select(sample => sample.Player.Icon)),
+                    FightCount: samples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    Value: RoundTopFiveValue(samples.Sum(selector), unit));
+            })
+            .Where(character => character.Value > 0.0)
+            .OrderByDescending(character => character.Value)
+            .ThenByDescending(character => character.FightCount)
+            .ThenBy(character => character.CharacterName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisTopFiveCharacterDto> BuildTopFiveWeightedAverageCharacters(
+        IReadOnlyList<PlayerFightSample> entries,
+        Func<PlayerFightSample, double> selector,
+        Func<PlayerFightSample, double> weightSelector,
+        string unit)
+    {
+        return entries
+            .GroupBy(entry => new
+            {
+                CharacterName = NormalizeAnalysisCharacterName(entry.Player.Character) ?? "(unknown character)",
+                ClassLabel = BuildClassLabel(entry.Player) ?? "Unknown class"
+            })
+            .Select(group =>
+            {
+                var samples = group.ToArray();
+                double weight = samples.Sum(weightSelector);
+                double value = weight <= 0.0 ? 0.0 : RoundTopFiveValue(samples.Sum(sample => selector(sample) * weightSelector(sample)) / weight, unit);
+                return new FightAnalysisTopFiveCharacterDto(
+                    CharacterName: group.Key.CharacterName,
+                    ClassLabel: group.Key.ClassLabel,
+                    Icon: PickMostCommonNonEmpty(samples.Select(sample => sample.Player.Icon)),
+                    FightCount: samples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    Value: value);
+            })
+            .Where(character => character.Value > 0.0)
+            .OrderByDescending(character => character.Value)
+            .ThenByDescending(character => character.FightCount)
+            .ThenBy(character => character.CharacterName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisTopFiveCharacterDto> BuildTopFiveActorCharacters(IReadOnlyList<TopFiveActorSample> entries)
+    {
+        return entries
+            .GroupBy(entry => new
+            {
+                entry.CharacterName,
+                entry.ClassLabel
+            })
+            .Select(group =>
+            {
+                var samples = group.ToArray();
+                return new FightAnalysisTopFiveCharacterDto(
+                    CharacterName: group.Key.CharacterName,
+                    ClassLabel: group.Key.ClassLabel,
+                    Icon: PickMostCommonNonEmpty(samples.Select(sample => sample.Icon)),
+                    FightCount: samples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    Value: Math.Round(samples.Sum(sample => sample.Value), 0));
+            })
+            .Where(character => character.Value > 0.0)
+            .OrderByDescending(character => character.Value)
+            .ThenByDescending(character => character.FightCount)
+            .ThenBy(character => character.CharacterName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static double GetProvidedBoonGeneration(FightPlayerIndexDto player, string boonName)
+    {
+        return (player.ProvidedBoons ?? Array.Empty<FightPlayerProvidedBoonIndexDto>())
+            .Where(boon => string.Equals(boon.Name, boonName, StringComparison.OrdinalIgnoreCase))
+            .Sum(boon => boon.Generation);
+    }
+
+    private static bool? GetSquadWinResult(FightArtifactSummaryDto fight)
+    {
+        FightOutcomeDto? outcome = fight.FightIndex?.Outcome;
+        string? outcomeCode = outcome?.OutcomeCode;
+        if (string.Equals(outcomeCode, "squad", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(outcomeCode, "enemy", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string? winnerSideId = outcome?.WinnerSideId;
+        if (string.Equals(winnerSideId, "squad", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(winnerSideId, "enemy", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return null;
+    }
+
+    private static int BuildTopFiveMinimumAppearanceFightCount(int filteredFightCount)
+    {
+        return filteredFightCount <= 0
+            ? 1
+            : Math.Max(1, (int)Math.Ceiling(filteredFightCount * 0.10));
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildTopFiveAccountFightCounts(IReadOnlyList<PlayerFightSample> samples)
+    {
+        return samples
+            .GroupBy(sample => sample.Player.Account!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static double RoundTopFiveValue(double value, string unit)
+    {
+        return string.Equals(unit, "percent", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(unit, "boon", StringComparison.OrdinalIgnoreCase)
+            ? Math.Round(value, 1)
+            : Math.Round(value, 0);
     }
 
     private static IReadOnlyList<FightAnalysisPlayerRowDto> BuildTopPlayers(
@@ -4576,6 +5217,14 @@ internal sealed record FightAnalysisTrackedBoon(
 internal sealed record PlayerFightSample(
     FightArtifactSummaryDto Fight,
     FightPlayerIndexDto Player);
+
+internal sealed record TopFiveActorSample(
+    FightArtifactSummaryDto Fight,
+    string Account,
+    string CharacterName,
+    string ClassLabel,
+    string? Icon,
+    double Value);
 
 internal sealed record MergedPlayerFightSample(
     FightArtifactSummaryDto Fight,

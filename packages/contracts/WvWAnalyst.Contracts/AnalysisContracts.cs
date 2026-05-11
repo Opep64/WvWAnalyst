@@ -10,6 +10,7 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisPlayerSummaryRowDto> TopPlayers,
     IReadOnlyList<FightAnalysisClassRowDto> TopClasses,
     IReadOnlyList<FightAnalysisEnemyClassRowDto> TopEnemyClasses,
+    IReadOnlyList<FightAnalysisTopFiveCategoryDto> TopFive,
     IReadOnlyList<FightAnalysisLaneRowDto> TopLanes,
     IReadOnlyList<FightAnalysisBoonTrendDto> BoonTrends,
     IReadOnlyList<FightAnalysisBoonRowDto> TopBoons,
@@ -236,6 +237,31 @@ public sealed record FightAnalysisBurstSideTrendDto(
     int? Strips,
     int? Downs,
     int? Kills);
+
+public sealed record FightAnalysisTopFiveCategoryDto(
+    string Key,
+    string Label,
+    string Unit,
+    string Detail,
+    IReadOnlyList<FightAnalysisTopFiveRowDto> Rows);
+
+public sealed record FightAnalysisTopFiveRowDto(
+    int Rank,
+    string Account,
+    string DisplayName,
+    double Value,
+    string? ValueDetail,
+    int FightCount,
+    int CharacterSampleCount,
+    IReadOnlyList<string> ClassesPlayed,
+    IReadOnlyList<FightAnalysisTopFiveCharacterDto> Characters);
+
+public sealed record FightAnalysisTopFiveCharacterDto(
+    string CharacterName,
+    string ClassLabel,
+    string? Icon,
+    int FightCount,
+    double Value);
 
 public sealed record FightAnalysisPlayerSummaryRowDto(
     string Account,
