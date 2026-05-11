@@ -7,12 +7,14 @@ const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
+let currentAuthState = { enabled: false, authenticated: true, username: null };
 let currentAnalysisPlayerDetailsByAccount = new Map();
 let currentAnalysisPlayerDetailPromisesByAccount = new Map();
 let currentAnalysisAllPlayerDetails = null;
 let currentAnalysisAllPlayerDetailsPromise = null;
 let currentPatchMetadata = null;
 let currentCompHelperConfig = null;
+let currentActivityLogEntries = [];
 let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
@@ -24,6 +26,7 @@ let logFileUploadBusy = false;
 let manageResetBusy = false;
 let manageCommanderDeleteBusy = false;
 let manageDateRangeDeleteBusy = false;
+let activityLogBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -281,6 +284,270 @@ async function readApiPayload(response) {
     return {
         message: text || `Request failed with status ${response.status}.`
     };
+}
+
+async function throwApiError(response, fallbackMessage) {
+    const payload = await readApiPayload(response);
+    const error = new Error(payload?.message ?? fallbackMessage ?? `Request failed with status ${response.status}.`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+}
+
+async function loadAuthState() {
+    const response = await fetch("/api/auth/me", { cache: "no-store" });
+    if (!response.ok) {
+        await throwApiError(response, `Authentication state request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+function renderAuthState(state) {
+    currentAuthState = {
+        enabled: Boolean(state?.enabled),
+        authenticated: !state?.enabled || Boolean(state?.authenticated),
+        username: state?.username ?? null
+    };
+
+    const appMain = document.querySelector("#app-main");
+    const loginPanel = document.querySelector("#auth-login-panel");
+    const authStatus = document.querySelector("#auth-status");
+    const authUsername = document.querySelector("#auth-username");
+    const changePasswordPanel = document.querySelector("#auth-change-password-panel");
+    const modePill = document.querySelector("#mode-pill");
+    const loginMessage = document.querySelector("#auth-login-message");
+    const loginUsername = document.querySelector("#auth-login-username");
+
+    const loginRequired = currentAuthState.enabled && !currentAuthState.authenticated;
+    if (appMain) {
+        appMain.hidden = loginRequired;
+    }
+
+    if (loginPanel) {
+        loginPanel.hidden = !loginRequired;
+    }
+
+    if (authStatus) {
+        authStatus.hidden = !currentAuthState.enabled || loginRequired;
+    }
+
+    if (authUsername) {
+        authUsername.textContent = currentAuthState.username ?? "";
+    }
+
+    if ((!currentAuthState.enabled || loginRequired) && changePasswordPanel) {
+        changePasswordPanel.hidden = true;
+        clearChangePasswordForm();
+    }
+
+    if (modePill && loginRequired) {
+        modePill.textContent = "Authentication required";
+    }
+
+    if (loginRequired) {
+        if (loginMessage) {
+            loginMessage.textContent = "";
+        }
+        loginUsername?.focus();
+    }
+}
+
+async function handleAuthLogin(event) {
+    event.preventDefault();
+    const usernameInput = document.querySelector("#auth-login-username");
+    const passwordInput = document.querySelector("#auth-login-password");
+    const message = document.querySelector("#auth-login-message");
+    const button = document.querySelector("#auth-login-button");
+
+    if (message) {
+        message.textContent = "";
+    }
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Signing in...";
+    }
+
+    try {
+        const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                username: usernameInput?.value ?? "",
+                password: passwordInput?.value ?? ""
+            })
+        });
+        if (!response.ok) {
+            if (message) {
+                message.textContent = "Username or password was not accepted.";
+            }
+            return;
+        }
+
+        const state = await response.json();
+        if (passwordInput) {
+            passwordInput.value = "";
+        }
+        renderAuthState(state);
+        await main();
+    } catch (error) {
+        if (message) {
+            message.textContent = error instanceof Error ? error.message : String(error);
+        }
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Sign in";
+        }
+    }
+}
+
+async function handleAuthLogout() {
+    const button = document.querySelector("#auth-logout-button");
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Signing out...";
+    }
+
+    try {
+        await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+        stopBatchJobPolling();
+        currentDashboardSnapshot = null;
+        currentAnalysisSnapshot = null;
+        renderAuthState({ enabled: true, authenticated: false, username: null });
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Logout";
+        }
+    }
+}
+
+function clearChangePasswordForm() {
+    const currentPasswordInput = document.querySelector("#auth-current-password");
+    const newPasswordInput = document.querySelector("#auth-new-password");
+    const confirmPasswordInput = document.querySelector("#auth-confirm-password");
+    const message = document.querySelector("#auth-change-password-message");
+
+    if (currentPasswordInput) {
+        currentPasswordInput.value = "";
+    }
+    if (newPasswordInput) {
+        newPasswordInput.value = "";
+    }
+    if (confirmPasswordInput) {
+        confirmPasswordInput.value = "";
+    }
+    if (message) {
+        message.textContent = "";
+    }
+}
+
+function setChangePasswordPanelOpen(open) {
+    const panel = document.querySelector("#auth-change-password-panel");
+    if (!panel) {
+        return;
+    }
+
+    const shouldOpen = Boolean(open && currentAuthState.enabled && currentAuthState.authenticated);
+    panel.hidden = !shouldOpen;
+    if (!shouldOpen) {
+        clearChangePasswordForm();
+        return;
+    }
+
+    document.querySelector("#auth-current-password")?.focus();
+}
+
+function toggleChangePasswordPanel() {
+    const panel = document.querySelector("#auth-change-password-panel");
+    setChangePasswordPanelOpen(panel?.hidden !== false);
+}
+
+async function handleChangePasswordSubmit(event) {
+    event.preventDefault();
+
+    const currentPasswordInput = document.querySelector("#auth-current-password");
+    const newPasswordInput = document.querySelector("#auth-new-password");
+    const confirmPasswordInput = document.querySelector("#auth-confirm-password");
+    const message = document.querySelector("#auth-change-password-message");
+    const button = document.querySelector("#auth-change-password-button");
+
+    const currentPassword = currentPasswordInput?.value ?? "";
+    const newPassword = newPasswordInput?.value ?? "";
+    const confirmPassword = confirmPasswordInput?.value ?? "";
+
+    if (message) {
+        message.textContent = "";
+    }
+
+    if (!currentPassword) {
+        if (message) {
+            message.textContent = "Current password is required.";
+        }
+        currentPasswordInput?.focus();
+        return;
+    }
+
+    if (!newPassword) {
+        if (message) {
+            message.textContent = "New password is required.";
+        }
+        newPasswordInput?.focus();
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        if (message) {
+            message.textContent = "New passwords do not match.";
+        }
+        confirmPasswordInput?.focus();
+        return;
+    }
+
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Saving...";
+    }
+
+    try {
+        const response = await fetch("/api/auth/change-password", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                currentPassword,
+                newPassword,
+                confirmPassword
+            })
+        });
+
+        if (!response.ok) {
+            const payload = await readApiPayload(response);
+            if (message) {
+                message.textContent = payload?.message ?? "Password was not changed.";
+            }
+            return;
+        }
+
+        clearChangePasswordForm();
+        if (message) {
+            message.textContent = "Password updated.";
+        }
+        void refreshActivityLog({ silent: true });
+    } catch (error) {
+        if (message) {
+            message.textContent = error instanceof Error ? error.message : String(error);
+        }
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Save password";
+        }
+    }
 }
 
 function buildTagListHtml(items, fallback = "None recorded.") {
@@ -1668,7 +1935,18 @@ function setActiveAppTab(tabKey, options = {}) {
 async function loadDashboard() {
     const response = await fetch("/api/dashboard");
     if (!response.ok) {
-        throw new Error(`Dashboard request failed with status ${response.status}`);
+        await throwApiError(response, `Dashboard request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadActivityLog(limit = 100) {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    const response = await fetch(`/api/audit/events?${params}`, { cache: "no-store" });
+    if (!response.ok) {
+        await throwApiError(response, `Activity log request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -1702,7 +1980,7 @@ async function savePatchMetadata(metadata) {
 async function loadCompHelperConfig() {
     const response = await fetch("/api/comp-helper-config");
     if (!response.ok) {
-        throw new Error(`Comp Helper config request failed with status ${response.status}`);
+        await throwApiError(response, `Comp Helper config request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -2826,6 +3104,149 @@ function renderWorkspace(snapshot) {
         : `${escapeHtml(snapshot.workspace.notes)}${manageSummary}`;
 
     syncManageControls();
+}
+
+function formatActivityLogAction(action) {
+    const labels = {
+        "change-password": "Change password",
+        "delete-commander-fights": "Delete commander fights",
+        "delete-date-range-fights": "Delete date-range fights",
+        "login": "Login",
+        "logout": "Logout",
+        "parse-directory": "Parse directory",
+        "parse-directory-job": "Batch parse",
+        "reset-workspace": "Reset workspace",
+        "upload-logs": "Upload logs"
+    };
+    return labels[action] ?? String(action ?? "Unknown action");
+}
+
+function formatActivityLogStatus(status) {
+    const value = String(status ?? "unknown");
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function formatActivityLogDetailsKey(key) {
+    return String(key ?? "")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/^./, character => character.toUpperCase());
+}
+
+function formatActivityLogDetailsValue(value) {
+    if (value == null || value === "") {
+        return "";
+    }
+
+    if (Array.isArray(value)) {
+        const visible = value.slice(0, 5).map(formatActivityLogDetailsValue).filter(Boolean);
+        const remaining = value.length - visible.length;
+        return `${visible.join(", ")}${remaining > 0 ? ` + ${remaining} more` : ""}`;
+    }
+
+    if (typeof value === "object") {
+        return JSON.stringify(value);
+    }
+
+    if (typeof value === "boolean") {
+        return value ? "yes" : "no";
+    }
+
+    return String(value);
+}
+
+function formatActivityLogDetails(details) {
+    if (details == null || details === "") {
+        return "";
+    }
+
+    if (typeof details !== "object" || Array.isArray(details)) {
+        return formatActivityLogDetailsValue(details);
+    }
+
+    return Object.entries(details)
+        .map(([key, value]) => {
+            const formattedValue = formatActivityLogDetailsValue(value);
+            return formattedValue ? `${formatActivityLogDetailsKey(key)}: ${formattedValue}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+}
+
+function setActivityLogStatus(message, success = true) {
+    const status = document.querySelector("#activity-log-status");
+    if (!status) {
+        return;
+    }
+
+    status.classList.toggle("import-status-error", !success);
+    status.textContent = message;
+}
+
+function renderActivityLog(payload) {
+    currentActivityLogEntries = payload?.events ?? currentActivityLogEntries ?? [];
+    const body = document.querySelector("#activity-log-body");
+    if (!body) {
+        return;
+    }
+
+    if (currentActivityLogEntries.length === 0) {
+        body.innerHTML = `<tr><td colspan="5">No activity has been recorded yet.</td></tr>`;
+        return;
+    }
+
+    body.innerHTML = currentActivityLogEntries.map(entry => {
+        const status = String(entry.status ?? "unknown").toLowerCase();
+        const details = formatActivityLogDetails(entry.details);
+        return `
+            <tr>
+                <td>${escapeHtml(formatDate(entry.timestampUtc))}</td>
+                <td>${escapeHtml(entry.user ?? "(unknown)")}</td>
+                <td>${escapeHtml(formatActivityLogAction(entry.action))}</td>
+                <td><span class="activity-log-status activity-log-status-${escapeHtml(status)}">${escapeHtml(formatActivityLogStatus(status))}</span></td>
+                <td>${details ? `<pre class="activity-log-details">${escapeHtml(details)}</pre>` : `<span class="table-note">No details</span>`}</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function refreshActivityLog({ silent = false } = {}) {
+    if (activityLogBusy) {
+        return;
+    }
+
+    const button = document.querySelector("#activity-log-refresh-button");
+    activityLogBusy = true;
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Refreshing...";
+    }
+    if (!silent) {
+        setActivityLogStatus("Loading activity...");
+    }
+
+    try {
+        const payload = await loadActivityLog(100);
+        renderActivityLog(payload);
+        const count = payload?.events?.length ?? 0;
+        setActivityLogStatus(count === 1 ? "1 recent activity entry loaded." : `${formatNumber(count)} recent activity entries loaded.`);
+    } catch (error) {
+        if (error?.status === 401) {
+            renderAuthState({ enabled: true, authenticated: false, username: null });
+            return;
+        }
+
+        setActivityLogStatus(error instanceof Error ? error.message : String(error), false);
+    } finally {
+        activityLogBusy = false;
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Refresh";
+        }
+    }
 }
 
 function getAnalysisFiltersFromUi() {
@@ -7014,6 +7435,23 @@ function getAnalysisTopFivePrimaryCharacter(row) {
         || (left.characterName ?? "").localeCompare(right.characterName ?? ""))[0];
 }
 
+function getAnalysisTopFivePrimaryDisplayName(row, primaryCharacter) {
+    return primaryCharacter?.characterName
+        || row.displayName
+        || row.account
+        || "Unknown player";
+}
+
+function shouldShowAnalysisTopFiveCharacterContribution(category) {
+    return !["classes-played", "in-position", "win-loss-record"].includes(category?.key);
+}
+
+function buildAnalysisTopFiveCharacterContribution(category, character) {
+    return shouldShowAnalysisTopFiveCharacterContribution(category)
+        ? `<span class="analysis-top-five-character-pill-value">${escapeHtml(formatAnalysisTopFiveValue(category, character.value))}</span>`
+        : "";
+}
+
 function buildAnalysisTopFiveCharacterTooltip(category, row) {
     const characters = row.characters ?? [];
     if (characters.length === 0) {
@@ -7045,6 +7483,7 @@ function buildAnalysisTopFiveCharacterPills(category, row) {
             ${character.icon ? `<img class="analysis-top-five-character-pill-icon" src="${escapeHtml(character.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">` : ""}
             <span>${escapeHtml(character.characterName)}</span>
             <span class="table-inline-note">${escapeHtml(character.classLabel)}</span>
+            ${buildAnalysisTopFiveCharacterContribution(category, character)}
         </span>
     `).join("");
 }
@@ -7081,7 +7520,7 @@ function buildAnalysisTopFiveRow(category, row) {
                 <div class="analysis-top-five-player-cell">
                     ${primaryIcon}
                     <div class="table-stack">
-                        <strong>${escapeHtml(row.displayName ?? row.account ?? "Unknown player")}</strong>
+                        <strong>${escapeHtml(getAnalysisTopFivePrimaryDisplayName(row, primaryCharacter))}</strong>
                         <span class="table-inline-note">${escapeHtml(row.account ?? "")}</span>
                         ${primaryClass}
                     </div>
@@ -7311,6 +7750,7 @@ function buildAnalysisTopFiveExportCharacterPills(category, row, iconDataByUrl) 
             ${buildAnalysisTopFiveExportIcon(character.icon, "analysis-top-five-character-pill-icon", iconDataByUrl)}
             <span>${escapeHtml(character.characterName)}</span>
             <span class="table-inline-note">${escapeHtml(character.classLabel)}</span>
+            ${buildAnalysisTopFiveCharacterContribution(category, character)}
         </span>
     `).join("");
 }
@@ -7345,7 +7785,7 @@ function buildAnalysisTopFiveExportRow(category, row, iconDataByUrl) {
                 <div class="analysis-top-five-player-cell">
                     ${primaryIcon}
                     <div class="table-stack">
-                        <strong>${escapeHtml(row.displayName ?? row.account ?? "Unknown player")}</strong>
+                        <strong>${escapeHtml(getAnalysisTopFivePrimaryDisplayName(row, primaryCharacter))}</strong>
                         <span class="table-inline-note">${escapeHtml(row.account ?? "")}</span>
                         ${primaryClass}
                     </div>
@@ -7645,6 +8085,11 @@ function getAnalysisTopFiveExportStyles() {
             border-radius: 999px;
             background: rgba(15, 23, 42, 0.82);
             white-space: nowrap;
+        }
+
+        .analysis-top-five-character-pill-value {
+            color: var(--accent);
+            font-weight: 800;
         }
     `;
 }
@@ -10310,6 +10755,7 @@ async function uploadLogFiles(fileList) {
     } finally {
         document.querySelector("#log-file-upload-input").value = "";
         setLogFileUploadBusy(false);
+        void refreshActivityLog({ silent: true });
     }
 }
 
@@ -10661,6 +11107,7 @@ async function handleBatchSubmit(event) {
         lastBatchResult = status;
         renderBatchStatus(status, response.ok || response.status === 409);
         renderBatchResults(status);
+        void refreshActivityLog({ silent: true });
 
         if (response.status === 409 && String(status?.state ?? "").toLowerCase() === "blocked") {
             if (currentDashboardSnapshot?.manageActivity) {
@@ -10860,6 +11307,7 @@ async function main() {
         renderCompHelperConfigEditor();
         renderManageCommanderFights(snapshot);
         renderManageDateRangeFights(snapshot);
+        void refreshActivityLog({ silent: true });
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
@@ -10884,11 +11332,36 @@ async function main() {
             await ensureAnalysisLoaded();
         }
     } catch (error) {
+        if (error?.status === 401) {
+            renderAuthState({ enabled: true, authenticated: false, username: null });
+            return;
+        }
+
         document.body.innerHTML = `
             <main class="page-shell">
                 <section class="panel panel-wide">
                     <h1>WvWAnalyst</h1>
                     <p>Failed to load the prototype dashboard.</p>
+                    <pre>${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
+                </section>
+            </main>
+        `;
+    }
+}
+
+async function initializeApp() {
+    try {
+        const state = await loadAuthState();
+        renderAuthState(state);
+        if (!currentAuthState.enabled || currentAuthState.authenticated) {
+            await main();
+        }
+    } catch (error) {
+        document.body.innerHTML = `
+            <main class="page-shell">
+                <section class="panel panel-wide">
+                    <h1>WvWAnalyst</h1>
+                    <p>Failed to initialize authentication.</p>
                     <pre>${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
                 </section>
             </main>
@@ -10919,6 +11392,9 @@ document.querySelector("#manage-date-range-end-date").addEventListener("change",
 });
 document.querySelector("#manage-date-range-delete-button").addEventListener("click", () => {
     void handleManageDateRangeDelete();
+});
+document.querySelector("#activity-log-refresh-button").addEventListener("click", () => {
+    void refreshActivityLog();
 });
 document.querySelector("#log-file-upload-button").addEventListener("click", () => {
     if (!isConfiguredLogDirectoryAvailable() || logFileUploadBusy || manageResetBusy || manageCommanderDeleteBusy || manageDateRangeDeleteBusy) {
@@ -11288,6 +11764,19 @@ document.querySelector("#analysis-lane-detail").addEventListener("click", event 
 
     setActiveAnalysisLaneDetailTab(button.dataset.analysisLaneDetailTab);
 });
+document.querySelector("#auth-login-form").addEventListener("submit", event => {
+    void handleAuthLogin(event);
+});
+document.querySelector("#auth-change-password-toggle").addEventListener("click", toggleChangePasswordPanel);
+document.querySelector("#auth-change-password-form").addEventListener("submit", event => {
+    void handleChangePasswordSubmit(event);
+});
+document.querySelector("#auth-change-password-cancel").addEventListener("click", () => {
+    setChangePasswordPanelOpen(false);
+});
+document.querySelector("#auth-logout-button").addEventListener("click", () => {
+    void handleAuthLogout();
+});
 document.querySelector("#analysis-apply-button").addEventListener("click", refreshAnalysis);
 document.querySelector("#analysis-clear-filters-button").addEventListener("click", () => {
     resetAnalysisFiltersToDefaults();
@@ -11317,7 +11806,7 @@ hydrateBatchForm();
 hydrateAnalysisTrendControls();
 applyCompHelperProfile("balanced");
 setActiveAppTab(resolveInitialAppTab(), { persist: false, loadAnalysis: false });
-main();
+void initializeApp();
 
 function stringEqualsIgnoreCase(left, right) {
     return String(left ?? "").localeCompare(String(right ?? ""), undefined, { sensitivity: "accent" }) === 0;

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WvWAnalyst README</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0d1218;
+            --panel: #151e29;
+            --panel-soft: #101720;
+            --ink: #e9f0f7;
+            --muted: #9fb0c3;
+            --line: rgba(177, 194, 214, 0.18);
+            --accent: #53b7ff;
+            --warning: #ffcf73;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: linear-gradient(180deg, #0c1117 0%, var(--bg) 100%);
+            color: var(--ink);
+            font-family: "Segoe UI", Arial, sans-serif;
+            line-height: 1.58;
+        }
+        main {
+            width: min(100% - 32px, 1120px);
+            margin: 0 auto;
+            padding: 28px 0 52px;
+        }
+        header, section {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(21, 30, 41, 0.82);
+            padding: 24px;
+            margin: 14px 0;
+        }
+        h1, h2, h3 { line-height: 1.18; margin: 0 0 12px; }
+        h1 { font-size: clamp(2rem, 4vw, 3.4rem); letter-spacing: 0; }
+        h2 { font-size: 1.45rem; }
+        h3 { font-size: 1.05rem; color: var(--accent); }
+        p { margin: 0 0 12px; }
+        a { color: var(--accent); }
+        ul, ol { padding-left: 1.4rem; }
+        li { margin: 5px 0; }
+        code, pre { font-family: Consolas, "Cascadia Mono", monospace; }
+        code {
+            color: #d8ecff;
+            background: rgba(83, 183, 255, 0.10);
+            border: 1px solid rgba(83, 183, 255, 0.14);
+            border-radius: 5px;
+            padding: 1px 5px;
+        }
+        pre {
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #0a0f16;
+            padding: 14px;
+            color: #dcecff;
+            line-height: 1.42;
+        }
+        pre code { display: block; background: transparent; border: 0; padding: 0; color: inherit; }
+        .lead { color: #c7d8ea; font-size: 1.04rem; max-width: 880px; }
+        .toc {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 8px;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .toc a {
+            display: block;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-soft);
+            padding: 8px 10px;
+            text-decoration: none;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+        }
+        .card {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-soft);
+            padding: 14px;
+        }
+        .note {
+            border-left: 3px solid var(--warning);
+            background: rgba(255, 207, 115, 0.08);
+            padding: 10px 12px;
+            color: #ffe2a3;
+        }
+        .muted { color: var(--muted); }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>WvWAnalyst</h1>
+        <p class="lead">A local-first Guild Wars 2 WvW analysis app for batch-processing ArcDPS logs through a WvWAnalyst-enabled Elite Insights build.</p>
+        <p>The app does not require <code>D:\GW2\EICode</code>. Any root works when the repos keep the expected sibling layout.</p>
+    </header>
+
+    <section>
+        <h2>Contents</h2>
+        <ul class="toc">
+            <li><a href="#layout">Root Layout</a></li>
+            <li><a href="#files">Editable Files</a></li>
+            <li><a href="#dependencies">Dependencies</a></li>
+            <li><a href="#build-ei">Build Elite Insights</a></li>
+            <li><a href="#build-app">Build WvWAnalyst</a></li>
+            <li><a href="#run">Start And Stop</a></li>
+            <li><a href="#config">Configuration</a></li>
+            <li><a href="#auth">Authentication</a></li>
+            <li><a href="#users">Manage Users</a></li>
+            <li><a href="#activity">Activity Log</a></li>
+            <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ul>
+    </section>
+
+    <section id="layout">
+        <h2>Root Layout</h2>
+        <pre><code>&lt;root&gt;\
+  GW2-Elite-Insights-Parser\
+  WvWAnalyst\</code></pre>
+        <p>Set your root once in PowerShell:</p>
+        <pre><code>$Root = 'D:\GW2\EICode'   # Change this to your root if different.
+$WvWAnalystRoot = Join-Path $Root 'WvWAnalyst'
+$EiRoot = Join-Path $Root 'GW2-Elite-Insights-Parser'</code></pre>
+    </section>
+
+    <section id="files">
+        <h2>Files You May Need To Edit</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Main config</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api\appsettings.json</code></pre>
+                <p>Edit for storage paths, EI paths, log directories, and authentication.</p>
+            </div>
+            <div class="card">
+                <h3>NuGet config</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\NuGet.Config</code></pre>
+                <p>Usually leave alone. Edit only for different package sources.</p>
+            </div>
+            <div class="card">
+                <h3>Patch metadata</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\storage\patch-metadata.json</code></pre>
+                <p>Usually edit through the Manage tab.</p>
+            </div>
+            <div class="card">
+                <h3>Comp Helper config</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\storage\comp-helper-config.json</code></pre>
+                <p>Usually edit through the Analysis Comp Helper UI.</p>
+            </div>
+            <div class="card">
+                <h3>Auth users</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\storage\auth-users.json</code></pre>
+                <p>Do not hand-edit normally. Use the user CLI.</p>
+            </div>
+            <div class="card">
+                <h3>Audit logs</h3>
+                <pre><code>&lt;root&gt;\WvWAnalyst\storage\audit\audit-yyyy-MM.jsonl</code></pre>
+                <p>View from the Manage tab Activity Log.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="dependencies">
+        <h2>Required Dependencies</h2>
+        <ul>
+            <li>Windows with PowerShell 5.1 or newer.</li>
+            <li>Git.</li>
+            <li>A modern browser.</li>
+            <li>.NET SDK 10.0 for WvWAnalyst.</li>
+            <li>.NET SDK 8.0, or compatible .NET 8 targeting support, for Elite Insights.</li>
+            <li>The WvWAnalyst-enabled EI fork with <code>WvWAnalystBuilder.cs</code> and <code>SaveOutAnalystJSON</code>.</li>
+        </ul>
+        <pre><code>cd $Root
+git clone https://github.com/Opep64/GW2-Elite-Insights-Parser.git
+git clone https://github.com/Opep64/WvWAnalyst.git</code></pre>
+    </section>
+
+    <section id="build-ei">
+        <h2>Build Elite Insights</h2>
+        <p>Default EI CLI path:</p>
+        <pre><code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe</code></pre>
+        <pre><code>dotnet build (Join-Path $EiRoot 'GW2EIParserCLI\GW2EIParserCLI.csproj') -c Debug</code></pre>
+        <p>If EI is elsewhere, update <code>Workspace:ParserCliPath</code> in <code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api\appsettings.json</code>.</p>
+    </section>
+
+    <section id="build-app">
+        <h2>Build WvWAnalyst</h2>
+        <pre><code>$env:DOTNET_CLI_HOME = Join-Path $Root '.dotnet'
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+$env:DOTNET_NOLOGO = '1'
+$env:APPDATA = Join-Path $Root '.dotnet\appdata'
+$env:NUGET_PACKAGES = Join-Path $Root '.dotnet\packages'
+$env:MSBuildEnableWorkloadResolver = 'false'
+
+dotnet build (Join-Path $WvWAnalystRoot 'apps\api\WvWAnalyst.Api\WvWAnalyst.Api.csproj') `
+  --configfile (Join-Path $WvWAnalystRoot 'NuGet.Config') `
+  -p:RestoreIgnoreFailedSources=true</code></pre>
+    </section>
+
+    <section id="run">
+        <h2>Start, Check, And Stop</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Start</h3>
+                <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\start-local.ps1')</code></pre>
+            </div>
+            <div class="card">
+                <h3>Status</h3>
+                <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\status-local.ps1')</code></pre>
+            </div>
+            <div class="card">
+                <h3>Stop</h3>
+                <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\stop-local.ps1')</code></pre>
+            </div>
+        </div>
+        <p>Useful start options:</p>
+        <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\start-local.ps1') -Url http://127.0.0.1:5078
+&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\start-local.ps1') -NoBuild</code></pre>
+        <p>Foreground run:</p>
+        <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\run-local.ps1')</code></pre>
+    </section>
+
+    <section id="config">
+        <h2>Configuration</h2>
+        <p>Main config file:</p>
+        <pre><code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api\appsettings.json</code></pre>
+        <p>Relative paths in <code>appsettings.json</code> are resolved from <code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api</code>. Therefore <code>..\..\..\storage</code> resolves to <code>&lt;root&gt;\WvWAnalyst\storage</code>.</p>
+        <pre><code>"Workspace": {
+  "ParserPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser",
+  "ParserCliPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser\\GW2EI.bin\\Debug\\CLI\\GuildWars2EliteInsights-CLI.exe",
+  "PendingDirectoryPath": "..\\..\\..\\storage\\incoming",
+  "ArchiveLogDirectoryPath": "..\\..\\..\\storage\\logs"
+}</code></pre>
+    </section>
+
+    <section>
+        <h2>Import Workflow</h2>
+        <ol>
+            <li>Start WvWAnalyst.</li>
+            <li>Open the URL printed by the start script, usually <code>http://127.0.0.1:5078</code>.</li>
+            <li>Use the <code>Manage</code> tab.</li>
+            <li>Drop or select <code>.evtc</code>, <code>.zevtc</code>, or <code>.zip</code> files.</li>
+            <li>Run <code>Process only new files</code> or <code>Process all and rebuild catalog</code>.</li>
+        </ol>
+        <p>WvWAnalyst creates a temporary EI config using <code>DetailledWvW=true</code>, <code>ParseCombatReplay=true</code>, <code>SaveOutHTML=true</code>, <code>SaveOutJSON=false</code>, and <code>SaveOutAnalystJSON=true</code>.</p>
+    </section>
+
+    <section id="auth">
+        <h2>Authentication</h2>
+        <p>Authentication is controlled in <code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api\appsettings.json</code>:</p>
+        <pre><code>"Authentication": {
+  "Enabled": true,
+  "UsersPath": "..\\..\\..\\storage\\auth-users.json",
+  "CookieName": "WvWAnalyst.Auth"
+}</code></pre>
+        <p>Set <code>Enabled</code> to <code>true</code> to require login, or <code>false</code> to disable login. Restart WvWAnalyst after editing the file.</p>
+        <pre><code>$env:Authentication__Enabled = 'true'
+&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\start-local.ps1')</code></pre>
+    </section>
+
+    <section id="users">
+        <h2>Manage Users</h2>
+        <pre><code>$ApiDll = Join-Path $WvWAnalystRoot 'apps\api\WvWAnalyst.Api\bin\Debug\net10.0\WvWAnalyst.Api.dll'
+
+dotnet $ApiDll users list
+dotnet $ApiDll users add creig
+dotnet $ApiDll users reset-password creig
+dotnet $ApiDll users remove creig</code></pre>
+        <p>Password hashes are stored in <code>&lt;root&gt;\WvWAnalyst\storage\auth-users.json</code>.</p>
+    </section>
+
+    <section id="activity">
+        <h2>Activity Log</h2>
+        <p>Audit files are stored at:</p>
+        <pre><code>&lt;root&gt;\WvWAnalyst\storage\audit\audit-yyyy-MM.jsonl</code></pre>
+        <p>The <code>Manage</code> tab includes an <code>Activity Log</code> section with a refresh button.</p>
+    </section>
+
+    <section>
+        <h2>Storage Notes</h2>
+        <p>Durable storage includes <code>storage\fights</code>, <code>storage\logs</code>, <code>storage\patch-metadata.json</code>, <code>storage\comp-helper-config.json</code>, <code>storage\auth-users.json</code>, and <code>storage\audit</code>.</p>
+        <p>Transient storage includes <code>storage\cache</code> and <code>storage\incoming</code>.</p>
+        <p class="note">Stop WvWAnalyst before copying storage. <code>storage\auth-users.json</code> and <code>storage\audit</code> can contain sensitive local information. Do not publish them.</p>
+    </section>
+
+    <section id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <pre><code>&amp; powershell -ExecutionPolicy Bypass -File (Join-Path $WvWAnalystRoot 'tools\scripts\status-local.ps1')
+
+Get-Content (Join-Path $WvWAnalystRoot 'storage\cache\wvw-analyst.log') -Tail 80
+Get-Content (Join-Path $WvWAnalystRoot 'storage\cache\wvw-analyst.error.log') -Tail 80</code></pre>
+        <p>If WvWAnalyst cannot find EI, rebuild EI and verify <code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe</code>.</p>
+        <p>If auth is enabled and you cannot log in, run <code>dotnet $ApiDll users reset-password creig</code>.</p>
+    </section>
+
+    <p class="muted">This page mirrors the root README.md and is safe to open directly in a browser.</p>
+</main>
+</body>
+</html>

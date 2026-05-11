@@ -8,6 +8,8 @@ storage/fights/*
 storage/logs/*
 storage/patch-metadata.json
 storage/comp-helper-config.json
+storage/auth-users.json
+storage/audit/*
 
 !storage/cache/.gitkeep
 !storage/db/.gitkeep

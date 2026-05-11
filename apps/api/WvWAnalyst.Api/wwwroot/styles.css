@@ -35,6 +35,10 @@ body {
         linear-gradient(180deg, #0c1117 0%, #0f151d 100%);
 }
 
+[hidden] {
+    display: none !important;
+}
+
 .page-shell {
     width: min(100% - 20px, 1920px);
     margin: 0 auto;
@@ -100,6 +104,52 @@ h1 {
     margin-top: 18px;
     position: relative;
     z-index: 1;
+}
+
+.auth-status {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.auth-status strong {
+    color: var(--ink);
+}
+
+.auth-status .action-link-button {
+    padding: 7px 12px;
+}
+
+.auth-login-panel,
+.auth-change-password-panel {
+    margin-top: 18px;
+}
+
+.auth-login-form,
+.auth-change-password-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.auth-login-actions,
+.auth-change-password-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.auth-login-actions .workspace-note,
+.auth-change-password-actions .workspace-note {
+    margin: 0;
 }
 
 .app-tabs {
@@ -1896,6 +1946,10 @@ h1 {
     max-height: 360px;
 }
 
+.table-shell-activity-log {
+    max-height: 420px;
+}
+
 .table-shell-fight-browser {
     max-height: 520px;
 }
@@ -2090,6 +2144,11 @@ h1 {
     white-space: nowrap;
 }
 
+.analysis-top-five-character-pill-value {
+    color: var(--accent);
+    font-weight: 800;
+}
+
 .analysis-top-five-character-pill-icon {
     width: 18px;
     height: 18px;
@@ -2135,6 +2194,61 @@ h1 {
 
 .data-table tbody tr.is-clickable {
     cursor: pointer;
+}
+
+.activity-log-table {
+    min-width: 880px;
+}
+
+.activity-log-table th:nth-child(1),
+.activity-log-table td:nth-child(1) {
+    width: 190px;
+}
+
+.activity-log-table th:nth-child(2),
+.activity-log-table td:nth-child(2) {
+    width: 170px;
+}
+
+.activity-log-table th:nth-child(3),
+.activity-log-table td:nth-child(3) {
+    width: 190px;
+}
+
+.activity-log-status {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: rgba(159, 176, 195, 0.10);
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.activity-log-status-success {
+    border-color: rgba(118, 215, 165, 0.30);
+    background: rgba(118, 215, 165, 0.12);
+    color: var(--success);
+}
+
+.activity-log-status-failure,
+.activity-log-status-blocked {
+    border-color: rgba(255, 143, 143, 0.32);
+    background: rgba(255, 143, 143, 0.10);
+    color: var(--danger);
+}
+
+.activity-log-details {
+    margin: 0;
+    max-width: 720px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: 0.82rem;
 }
 
 .data-table tbody tr.is-problem {

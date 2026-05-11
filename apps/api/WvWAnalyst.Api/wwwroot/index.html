@@ -4,11 +4,16 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260507daterange1">
+    <link rel="stylesheet" href="/styles.css?v=20260511auth">
 </head>
 <body>
     <div class="page-shell">
         <header class="hero">
+            <div class="auth-status" id="auth-status" hidden>
+                <span>Signed in as <strong id="auth-username"></strong></span>
+                <button class="action-link action-link-button" id="auth-change-password-toggle" type="button">Change password</button>
+                <button class="action-link action-link-button" id="auth-logout-button" type="button">Logout</button>
+            </div>
             <div class="eyebrow">Local-first Prototype</div>
             <h1>WvWAnalyst</h1>
             <p class="hero-copy">
@@ -25,7 +30,57 @@
             </div>
         </header>
 
-        <main class="grid">
+        <section class="panel panel-wide auth-login-panel" id="auth-login-panel" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Sign In</h2>
+                    <p>Enter a WvWAnalyst username and password to open the dashboard.</p>
+                </div>
+            </div>
+            <form class="auth-login-form" id="auth-login-form">
+                <label class="browser-field">
+                    <span>Username</span>
+                    <input id="auth-login-username" type="text" autocomplete="username">
+                </label>
+                <label class="browser-field">
+                    <span>Password</span>
+                    <input id="auth-login-password" type="password" autocomplete="current-password">
+                </label>
+                <div class="auth-login-actions">
+                    <button class="primary-button" id="auth-login-button" type="submit">Sign in</button>
+                    <p class="workspace-note" id="auth-login-message"></p>
+                </div>
+            </form>
+        </section>
+
+        <section class="panel panel-wide auth-change-password-panel" id="auth-change-password-panel" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Change Password</h2>
+                </div>
+            </div>
+            <form class="auth-change-password-form" id="auth-change-password-form">
+                <label class="browser-field">
+                    <span>Current password</span>
+                    <input id="auth-current-password" type="password" autocomplete="current-password">
+                </label>
+                <label class="browser-field">
+                    <span>New password</span>
+                    <input id="auth-new-password" type="password" autocomplete="new-password">
+                </label>
+                <label class="browser-field">
+                    <span>Confirm new password</span>
+                    <input id="auth-confirm-password" type="password" autocomplete="new-password">
+                </label>
+                <div class="auth-change-password-actions">
+                    <button class="primary-button" id="auth-change-password-button" type="submit">Save password</button>
+                    <button class="action-link action-link-button" id="auth-change-password-cancel" type="button">Cancel</button>
+                    <p class="workspace-note" id="auth-change-password-message"></p>
+                </div>
+            </form>
+        </section>
+
+        <main class="grid" id="app-main" hidden>
             <section class="panel panel-wide" data-app-panel="manage">
                 <div class="section-heading">
                     <div>
@@ -162,6 +217,33 @@
                     </div>
                 </div>
                 <div class="import-status" id="manage-date-range-status">No date-range fights have been deleted in this browser session yet.</div>
+            </section>
+
+            <section class="panel panel-wide" data-app-panel="manage">
+                <div class="section-heading">
+                    <div>
+                        <h2>Activity Log</h2>
+                        <p>Recent uploads, parses, deletes, sign-ins, and account changes recorded by WvWAnalyst.</p>
+                    </div>
+                    <button class="action-link action-link-button" id="activity-log-refresh-button" type="button">Refresh</button>
+                </div>
+                <div class="table-shell table-shell-scroll table-shell-activity-log">
+                    <table class="data-table activity-log-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activity-log-body">
+                            <tr><td colspan="5">Activity has not been loaded yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="import-status" id="activity-log-status">Activity log has not been loaded in this browser session yet.</div>
             </section>
 
             <section class="panel panel-wide" data-app-panel="manage">
@@ -1125,6 +1207,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260511top5export" defer></script>
+    <script src="/app.js?v=20260511auth" defer></script>
 </body>
 </html>
