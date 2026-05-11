@@ -297,6 +297,7 @@ public sealed class FightAnalysisService
             Scope: BuildScope(allFights, filteredFights),
             Overview: BuildOverview(filteredFights, expectedScoreLookup),
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
+            NightlyTeamScores: BuildNightlyTeamScores(filteredFights),
             BurstTrends: BuildBurstTrends(filteredFights),
             TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
@@ -1278,6 +1279,38 @@ public sealed class FightAnalysisService
                     PressureScore: pillars.TryGetValue("pressure-burst", out int pressure) ? pressure : null,
                     DownstateScore: pillars.TryGetValue("downstate-control", out int downstate) ? downstate : null,
                     SupportScore: pillars.TryGetValue("support-mitigation", out int support) ? support : null);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FightAnalysisTeamScoreTrendPointDto> BuildNightlyTeamScores(
+        IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        return fights
+            .Select(fight => new
+            {
+                Fight = fight,
+                Date = GetFightLocalDate(fight),
+                Execution = fight.FightIndex?.Execution
+            })
+            .Where(sample => sample.Date.HasValue
+                && sample.Execution?.ScoreAvailable == true
+                && sample.Execution.OverallScore.HasValue)
+            .GroupBy(sample => sample.Date!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var samples = group.ToArray();
+                var averageScore = Math.Round(CleanupAdjustedAverage(
+                    samples,
+                    sample => (double)sample.Execution!.OverallScore!.Value,
+                    sample => sample.Fight), 1);
+
+                return new FightAnalysisTeamScoreTrendPointDto(
+                    DateKey: group.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    DateLabel: group.Key.ToString("MMM d", CultureInfo.InvariantCulture),
+                    FightCount: samples.Length,
+                    AverageOverallScore: averageScore);
             })
             .ToArray();
     }

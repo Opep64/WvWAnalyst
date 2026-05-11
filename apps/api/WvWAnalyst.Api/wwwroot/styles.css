@@ -2912,6 +2912,15 @@ h1 {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--boon-color, var(--accent)) 18%, transparent);
 }
 
+.analysis-team-score-toggle {
+    --boon-color: #facc15;
+}
+
+.analysis-team-score-dash {
+    width: 18px;
+    border-top: 2px dashed #facc15;
+}
+
 .analysis-boon-trend-chart-wrap {
     position: relative;
     min-height: 292px;
@@ -2948,6 +2957,17 @@ h1 {
     stroke-width: 2.2;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+.analysis-team-score-overlay-line {
+    fill: none;
+    stroke: #facc15;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 7 6;
+    opacity: 0.92;
+    pointer-events: none;
 }
 
 .analysis-boon-trend-point {

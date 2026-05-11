@@ -4,6 +4,7 @@ const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
 const FIGHT_SHAPE_DIAGNOSTICS_KEY = "wvw-analyst.show-fight-shape-diagnostics";
 const ANALYSIS_TREND_MODE_KEY = "wvw-analyst.analysis-trend-mode";
 const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
+const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
@@ -45,6 +46,7 @@ let selectedAnalysisPlayerImpactTrendOwner = null;
 let selectedAnalysisClassImpactTrendIds = null;
 let selectedAnalysisClassImpactTrendOwner = null;
 let analysisImpactTrendLegendExpanded = { player: false, class: false };
+let showAnalysisTeamScoreOverlay = localStorage.getItem(ANALYSIS_TEAM_SCORE_OVERLAY_KEY) === "true";
 let lockedCompHelperCandidateIds = [];
 let compHelperProfileKey = "balanced";
 let compHelperCandidateTierKey = "best";
@@ -6451,6 +6453,82 @@ function buildCharacterLaneCard(lane, totalFights) {
     `;
 }
 
+function buildAnalysisTeamScoreOverlayControl() {
+    return `
+        <label class="analysis-boon-trend-option analysis-team-score-toggle ${showAnalysisTeamScoreOverlay ? "is-active" : ""}">
+            <input type="checkbox" data-analysis-team-score-overlay ${showAnalysisTeamScoreOverlay ? "checked" : ""}>
+            <span class="analysis-team-score-dash"></span>
+            <span>Team score</span>
+        </label>
+    `;
+}
+
+function syncAnalysisTeamScoreOverlayControls() {
+    document.querySelectorAll("[data-analysis-team-score-overlay]").forEach(input => {
+        input.checked = showAnalysisTeamScoreOverlay;
+        input.closest(".analysis-team-score-toggle")?.classList.toggle("is-active", showAnalysisTeamScoreOverlay);
+    });
+}
+
+function getAnalysisTeamScoreOverlayPoints(nights) {
+    if (!showAnalysisTeamScoreOverlay) {
+        return [];
+    }
+
+    const teamScoresByDate = new Map(
+        (currentAnalysisSnapshot?.nightlyTeamScores ?? [])
+            .map(point => [point.dateKey, point]));
+
+    return (nights ?? [])
+        .map((night, index) => {
+            const point = teamScoresByDate.get(night.dateKey);
+            const score = Number(point?.averageOverallScore);
+            if (!point || Number.isNaN(score)) {
+                return null;
+            }
+
+            return {
+                index,
+                dateKey: night.dateKey,
+                dateLabel: point.dateLabel ?? night.dateLabel ?? night.dateKey,
+                fightCount: Number(point.fightCount) || 0,
+                score
+            };
+        })
+        .filter(Boolean);
+}
+
+function buildAnalysisTeamScoreOverlayPath(points, chart) {
+    let started = false;
+    let previousIndex = null;
+    return (points ?? [])
+        .map(point => {
+            const x = chart.xForIndex(point.index);
+            const y = chart.yForValue(point.score);
+            const command = started && previousIndex === point.index - 1 ? "L" : "M";
+            started = true;
+            previousIndex = point.index;
+            return `${command} ${x} ${y}`;
+        })
+        .filter(Boolean)
+        .join(" ");
+}
+
+function buildAnalysisTeamScoreOverlayMarkup(points, chart) {
+    const path = buildAnalysisTeamScoreOverlayPath(points, chart);
+    if (!path) {
+        return "";
+    }
+
+    const sampleCount = points.reduce((sum, point) => sum + Math.max(0, Number(point.fightCount) || 0), 0);
+    const label = `Average team score by night${sampleCount > 0 ? ` across ${sampleCount} fights` : ""}`;
+    return `
+        <path class="analysis-team-score-overlay-line" d="${escapeHtml(path)}">
+            <title>${escapeHtml(label)}</title>
+        </path>
+    `;
+}
+
 function getAnalysisImpactTrendIds(trends) {
     return (trends ?? []).map(trend => String(trend.key ?? ""));
 }
@@ -6569,10 +6647,13 @@ function buildAnalysisImpactTrendLegend(trends, selectedIds, context) {
     }).join("");
 }
 
-function getAnalysisImpactTrendAxis(trends) {
-    const values = (trends ?? [])
+function getAnalysisImpactTrendAxis(trends, teamScorePoints = []) {
+    const trendValues = (trends ?? [])
         .flatMap(trend => trend.points ?? [])
-        .map(point => Number(point.impactScore))
+        .map(point => Number(point.impactScore));
+    const teamScoreValues = (teamScorePoints ?? [])
+        .map(point => Number(point.score));
+    const values = [...trendValues, ...teamScoreValues]
         .filter(value => !Number.isNaN(value));
 
     if (values.length === 0) {
@@ -6639,7 +6720,8 @@ function buildAnalysisImpactTrendChart(trends, selectedIds, context) {
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const nightIndex = new Map(nights.map((night, index) => [night.dateKey, index]));
-    const axis = getAnalysisImpactTrendAxis(selectedTrends);
+    const teamScorePoints = getAnalysisTeamScoreOverlayPoints(nights);
+    const axis = getAnalysisImpactTrendAxis(selectedTrends, teamScorePoints);
     const axisRange = Math.max(1, axis.max - axis.min);
     const chart = {
         xForIndex: index => Math.round((plot.left + (nights.length <= 1 ? plotWidth / 2 : index * plotWidth / (nights.length - 1))) * 100) / 100,
@@ -6698,12 +6780,14 @@ function buildAnalysisImpactTrendChart(trends, selectedIds, context) {
             ${points}
         `;
     }).join("");
+    const teamScoreMarkup = buildAnalysisTeamScoreOverlayMarkup(teamScorePoints, chart);
 
     return `
         <svg class="analysis-boon-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="false">
             ${gridMarkup}
             ${axisMarkup}
             ${seriesMarkup}
+            ${teamScoreMarkup}
         </svg>
     `;
 }
@@ -6720,6 +6804,7 @@ function buildAnalysisImpactTrendCard(context, title, trends, selectedIds) {
                     <p id="${prefix}-summary">${escapeHtml(buildAnalysisImpactTrendSummary(trends, selectedIds))}</p>
                 </div>
                 <div class="analysis-boon-trend-actions">
+                    ${buildAnalysisTeamScoreOverlayControl()}
                     <button class="action-link action-link-button" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-action="all">Add all</button>
                     <button class="action-link action-link-button" type="button" data-analysis-impact-trend-context="${escapeHtml(context)}" data-analysis-impact-trend-action="none">Clear all</button>
                 </div>
@@ -6857,6 +6942,29 @@ function handleAnalysisImpactTrendSelectionChange(event) {
 
     setAnalysisImpactTrendSelection(context, selectedIds);
     renderAnalysisImpactTrendContext(context);
+}
+
+function handleAnalysisTeamScoreOverlayChange(event) {
+    const input = event.target.closest("[data-analysis-team-score-overlay]");
+    if (!input) {
+        return;
+    }
+
+    showAnalysisTeamScoreOverlay = Boolean(input.checked);
+    localStorage.setItem(ANALYSIS_TEAM_SCORE_OVERLAY_KEY, String(showAnalysisTeamScoreOverlay));
+
+    if (currentAnalysisSnapshot) {
+        renderAnalysisBoonTrends(currentAnalysisSnapshot);
+        if (document.querySelector("#analysis-player-impact-trend-chart")) {
+            renderAnalysisImpactTrendContext("player");
+        }
+
+        if (document.querySelector("#analysis-class-impact-trend-chart")) {
+            renderAnalysisImpactTrendContext("class");
+        }
+    }
+
+    syncAnalysisTeamScoreOverlayControls();
 }
 
 function handleAnalysisImpactTrendActionClick(event) {
@@ -8666,6 +8774,7 @@ function buildAnalysisBoonTrendChart(trends) {
     const plotWidth = width - plot.left - plot.right;
     const plotHeight = height - plot.top - plot.bottom;
     const nightIndex = new Map(nights.map((night, index) => [night.dateKey, index]));
+    const teamScorePoints = getAnalysisTeamScoreOverlayPoints(nights);
     const chart = {
         xForIndex: index => Math.round((plot.left + (nights.length <= 1 ? plotWidth / 2 : index * plotWidth / (nights.length - 1))) * 100) / 100,
         yForValue: value => Math.round((plot.top + (100 - Math.max(0, Math.min(100, Number(value) || 0))) * plotHeight / 100) * 100) / 100
@@ -8719,12 +8828,14 @@ function buildAnalysisBoonTrendChart(trends) {
             ${points}
         `;
     }).join("");
+    const teamScoreMarkup = buildAnalysisTeamScoreOverlayMarkup(teamScorePoints, chart);
 
     return `
         <svg class="analysis-boon-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="false">
             ${gridMarkup}
             ${axisMarkup}
             ${seriesMarkup}
+            ${teamScoreMarkup}
         </svg>
     `;
 }
@@ -8740,6 +8851,7 @@ function renderAnalysisBoonTrends(snapshot) {
 
     setInnerHtml("#analysis-boon-trend-legend", buildAnalysisBoonTrendLegend(trends));
     setInnerHtml("#analysis-boon-trend-chart", buildAnalysisBoonTrendChart(trends));
+    syncAnalysisTeamScoreOverlayControls();
     hideAnalysisBoonTrendTooltip();
 }
 
@@ -11685,6 +11797,7 @@ document.querySelector("#analysis-boons-body").addEventListener("click", event =
         renderAnalysisBoons(currentAnalysisSnapshot);
     }
 });
+document.addEventListener("change", handleAnalysisTeamScoreOverlayChange);
 document.querySelector("#analysis-boon-trend-legend").addEventListener("change", event => {
     const input = event.target.closest("[data-analysis-boon-trend-id]");
     if (!input || !currentAnalysisSnapshot) {
