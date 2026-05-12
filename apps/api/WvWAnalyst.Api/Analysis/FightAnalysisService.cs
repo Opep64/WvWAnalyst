@@ -1301,10 +1301,7 @@ public sealed class FightAnalysisService
             .Select(group =>
             {
                 var samples = group.ToArray();
-                var averageScore = Math.Round(CleanupAdjustedAverage(
-                    samples,
-                    sample => (double)sample.Execution!.OverallScore!.Value,
-                    sample => sample.Fight), 1);
+                var averageScore = CalculateTeamScoreAverage(samples.Select(sample => sample.Fight).ToArray()) ?? 0.0;
 
                 return new FightAnalysisTeamScoreTrendPointDto(
                     DateKey: group.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -1313,6 +1310,25 @@ public sealed class FightAnalysisService
                     AverageOverallScore: averageScore);
             })
             .ToArray();
+    }
+
+    private static double? CalculateTeamScoreAverage(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var scoreSamples = fights
+            .Select(fight => new
+            {
+                Fight = fight,
+                Execution = fight.FightIndex?.Execution
+            })
+            .Where(sample => sample.Execution?.ScoreAvailable == true && sample.Execution.OverallScore.HasValue)
+            .ToArray();
+
+        return scoreSamples.Length == 0
+            ? null
+            : Math.Round(CleanupAdjustedAverage(
+                scoreSamples,
+                sample => (double)sample.Execution!.OverallScore!.Value,
+                sample => sample.Fight), 1);
     }
 
     private static IReadOnlyList<FightAnalysisBurstTrendPointDto> BuildBurstTrends(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -2998,6 +3014,40 @@ public sealed class FightAnalysisService
             .ToDictionary(
                 group => group.Key,
                 group => (IReadOnlyList<MergedPlayerFightProvidedBoonSample>)group.Select(entry => entry.Sample).ToArray());
+        var providerSamplesByFightId = providerSamples
+            .GroupBy(sample => sample.Fight.FightId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<MergedPlayerFightProvidedBoonSample>)group.ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+        var buckets = nightGroups.Length == 1
+            ? nightGroups[0].Fights
+                .OrderBy(GetFightSortValue)
+                .Select(fight =>
+                {
+                    providerSamplesByFightId.TryGetValue(fight.FightId, out var fightProviderSamples);
+                    fightProviderSamples ??= Array.Empty<MergedPlayerFightProvidedBoonSample>();
+                    return new BoonTrendBucket(
+                        Key: BuildBoonTrendFightKey(fight),
+                        Label: BuildBoonTrendFightLabel(fight),
+                        BucketType: "fight",
+                        Fights: new[] { fight },
+                        ProviderSamples: fightProviderSamples);
+                })
+                .ToArray()
+            : nightGroups
+                .Select(night =>
+                {
+                    providerSamplesByDate.TryGetValue(night.Date, out var nightProviderSamples);
+                    nightProviderSamples ??= Array.Empty<MergedPlayerFightProvidedBoonSample>();
+                    return new BoonTrendBucket(
+                        Key: night.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        Label: night.Date.ToString("MMM d", CultureInfo.InvariantCulture),
+                        BucketType: "night",
+                        Fights: night.Fights,
+                        ProviderSamples: nightProviderSamples);
+                })
+                .ToArray();
 
         return BoonTrendDefinitions
             .Select(definition => new FightAnalysisBoonTrendDto(
@@ -3005,26 +3055,35 @@ public sealed class FightAnalysisService
                 Name: definition.Name,
                 Icon: FindBoonTrendIcon(definition, fights, providerSamples),
                 StackBased: definition.StackBased,
-                Points: nightGroups
-                    .Select(night =>
-                    {
-                        providerSamplesByDate.TryGetValue(night.Date, out var nightProviderSamples);
-                        nightProviderSamples ??= Array.Empty<MergedPlayerFightProvidedBoonSample>();
-                        return BuildBoonTrendPoint(definition, night.Date, night.Fights, nightProviderSamples);
-                    })
+                Points: buckets
+                    .Select(bucket => BuildBoonTrendPoint(definition, bucket))
                     .Where(point => point is not null)
                     .Cast<FightAnalysisBoonTrendPointDto>()
                     .ToArray()))
             .ToArray();
     }
 
+    private static string BuildBoonTrendFightKey(FightArtifactSummaryDto fight)
+    {
+        var timestamp = GetFightDateTimeOffset(fight);
+        var timestampKey = timestamp?.UtcDateTime.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture) ?? "unknown-time";
+        return $"{timestampKey}-{fight.FightId}";
+    }
+
+    private static string BuildBoonTrendFightLabel(FightArtifactSummaryDto fight)
+    {
+        var timestamp = GetFightDateTimeOffset(fight);
+        return timestamp?.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture)
+            ?? fight.FightIndex?.FightName
+            ?? fight.SourceFileName
+            ?? fight.FightId;
+    }
+
     private static FightAnalysisBoonTrendPointDto? BuildBoonTrendPoint(
         FightAnalysisTrackedBoon definition,
-        DateOnly date,
-        IReadOnlyList<FightArtifactSummaryDto> fights,
-        IReadOnlyList<MergedPlayerFightProvidedBoonSample> providerSamples)
+        BoonTrendBucket bucket)
     {
-        var fightsWithBoonData = fights
+        var fightsWithBoonData = bucket.Fights
             .Where(fight => (fight.FightIndex?.ThreatBoons?.Count ?? 0) > 0)
             .ToArray();
         if (fightsWithBoonData.Length == 0)
@@ -3042,12 +3101,14 @@ public sealed class FightAnalysisService
             : null;
 
         return new FightAnalysisBoonTrendPointDto(
-            DateKey: date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            DateLabel: date.ToString("MMM d", CultureInfo.InvariantCulture),
+            DateKey: bucket.Key,
+            DateLabel: bucket.Label,
+            BucketType: bucket.BucketType,
             FightCount: fightsWithBoonData.Length,
             AverageCoverage: averageCoverage,
             AverageStacks: averageStacks,
-            TopProviders: BuildBoonTrendProviders(definition, providerSamples));
+            TeamScore: CalculateTeamScoreAverage(bucket.Fights),
+            TopProviders: BuildBoonTrendProviders(definition, bucket.ProviderSamples));
     }
 
     private static IReadOnlyList<FightAnalysisBoonTrendProviderDto> BuildBoonTrendProviders(
@@ -5328,6 +5389,13 @@ internal sealed record MergedPlayerFightProvidedBoonSample(
     string Account,
     string ClassLabel,
     IReadOnlyList<MergedProvidedBoonSample> ProvidedBoons);
+
+internal sealed record BoonTrendBucket(
+    string Key,
+    string Label,
+    string BucketType,
+    IReadOnlyList<FightArtifactSummaryDto> Fights,
+    IReadOnlyList<MergedPlayerFightProvidedBoonSample> ProviderSamples);
 
 internal sealed record MergedPlayerLaneSample(
     string Key,

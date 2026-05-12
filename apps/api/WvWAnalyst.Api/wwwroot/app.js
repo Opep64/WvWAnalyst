@@ -6470,7 +6470,7 @@ function syncAnalysisTeamScoreOverlayControls() {
     });
 }
 
-function getAnalysisTeamScoreOverlayPoints(nights) {
+function getAnalysisTeamScoreOverlayPoints(buckets) {
     if (!showAnalysisTeamScoreOverlay) {
         return [];
     }
@@ -6479,19 +6479,25 @@ function getAnalysisTeamScoreOverlayPoints(nights) {
         (currentAnalysisSnapshot?.nightlyTeamScores ?? [])
             .map(point => [point.dateKey, point]));
 
-    return (nights ?? [])
-        .map((night, index) => {
-            const point = teamScoresByDate.get(night.dateKey);
-            const score = Number(point?.averageOverallScore);
-            if (!point || Number.isNaN(score)) {
+    return (buckets ?? [])
+        .map((bucket, index) => {
+            let score = Number(bucket?.teamScore);
+            let fightCount = Number(bucket?.fightCount) || 0;
+            if (Number.isNaN(score)) {
+                const teamScorePoint = teamScoresByDate.get(bucket?.dateKey);
+                score = Number(teamScorePoint?.averageOverallScore);
+                fightCount = Number(teamScorePoint?.fightCount) || fightCount;
+            }
+
+            if (Number.isNaN(score)) {
                 return null;
             }
 
             return {
                 index,
-                dateKey: night.dateKey,
-                dateLabel: point.dateLabel ?? night.dateLabel ?? night.dateKey,
-                fightCount: Number(point.fightCount) || 0,
+                dateKey: bucket.dateKey,
+                dateLabel: bucket.dateLabel ?? bucket.dateKey,
+                fightCount,
                 score
             };
         })
@@ -8588,19 +8594,17 @@ function ensureAnalysisBoonTrendSelection(trends) {
 }
 
 function buildAnalysisBoonTrendSummary(trends) {
-    const nightCount = new Set(
-        (trends ?? [])
-            .flatMap(trend => trend.points ?? [])
-            .map(point => point.dateKey)
-            .filter(Boolean)).size;
+    const buckets = getAnalysisBoonTrendNights(trends);
+    const bucketCount = buckets.length;
+    const bucketType = buckets.some(bucket => bucket.bucketType === "fight") ? "fight" : "night";
     const selectedCount = Array.from(selectedAnalysisBoonTrendIds ?? []).length;
     const boonCount = trends?.length ?? 0;
 
-    if (boonCount === 0 || nightCount === 0) {
+    if (boonCount === 0 || bucketCount === 0) {
         return "No boon trend data matched the current filters.";
     }
 
-    return `${selectedCount} of ${boonCount} boons selected | ${nightCount} ${nightCount === 1 ? "night" : "nights"}`;
+    return `${selectedCount} of ${boonCount} boons selected | ${bucketCount} ${bucketCount === 1 ? bucketType : `${bucketType}s`}`;
 }
 
 function buildAnalysisBoonTrendLegend(trends) {
@@ -8626,13 +8630,19 @@ function getAnalysisBoonTrendNights(trends) {
                 return;
             }
 
-            nightMap.set(point.dateKey, point.dateLabel ?? point.dateKey);
+            nightMap.set(point.dateKey, {
+                dateKey: point.dateKey,
+                dateLabel: point.dateLabel ?? point.dateKey,
+                bucketType: point.bucketType === "fight" ? "fight" : "night",
+                fightCount: Number(point.fightCount) || 0,
+                teamScore: point.teamScore
+            });
         });
     });
 
     return Array.from(nightMap.entries())
         .sort((left, right) => left[0].localeCompare(right[0]))
-        .map(([dateKey, dateLabel]) => ({ dateKey, dateLabel }));
+        .map(([, bucket]) => bucket);
 }
 
 function getAnalysisBoonTrendAxisIndexes(length) {
@@ -8675,9 +8685,9 @@ function buildAnalysisBoonTrendPath(trend, nightIndex, chart) {
         .join(" ");
 }
 
-function buildAnalysisBoonTrendProvidersHtml(boon, providers) {
+function buildAnalysisBoonTrendProvidersHtml(boon, providers, bucketType = "night") {
     if (!providers?.length) {
-        return `<div class="table-inline-note">No provider data for this night.</div>`;
+        return `<div class="table-inline-note">No provider data for this ${escapeHtml(bucketType === "fight" ? "fight" : "night")}.</div>`;
     }
 
     return providers.slice(0, 3).map((provider, index) => {
@@ -8704,7 +8714,7 @@ function buildAnalysisBoonTrendTooltipHtml(boon, point) {
         <div class="table-inline-note">${escapeHtml(`${point.dateLabel ?? point.dateKey} | ${point.fightCount} ${point.fightCount === 1 ? "fight" : "fights"}`)}</div>
         ${stackLine}
         <div class="analysis-boon-trend-provider-list">
-            ${buildAnalysisBoonTrendProvidersHtml(boon, point.topProviders ?? [])}
+            ${buildAnalysisBoonTrendProvidersHtml(boon, point.topProviders ?? [], point.bucketType)}
         </div>
     `;
 }

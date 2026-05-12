@@ -574,9 +574,11 @@ public sealed record FightAnalysisBoonTrendDto(
 public sealed record FightAnalysisBoonTrendPointDto(
     string DateKey,
     string DateLabel,
+    string BucketType,
     int FightCount,
     double AverageCoverage,
     double? AverageStacks,
+    double? TeamScore,
     IReadOnlyList<FightAnalysisBoonTrendProviderDto> TopProviders);
 
 public sealed record FightAnalysisBoonTrendProviderDto(
