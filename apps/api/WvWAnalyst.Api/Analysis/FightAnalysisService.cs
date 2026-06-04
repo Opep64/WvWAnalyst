@@ -1148,6 +1148,23 @@ public sealed class FightAnalysisService
                 EnemyToSquad: BuildReflectSideSummary(reflectSamples.Select(summary => summary.EnemyToSquad)));
         }
 
+        var shieldOfCourageSamples = mitigationSamples
+            .Select(sample => sample.Mitigation?.ShieldOfCourage)
+            .Where(summary => summary is { Available: true })
+            .Cast<FightShieldOfCourageSummaryIndexDto>()
+            .ToArray();
+        FightAnalysisShieldOfCourageSummaryDto? shieldOfCourage = null;
+        if (shieldOfCourageSamples.Length > 0)
+        {
+            shieldOfCourage = new FightAnalysisShieldOfCourageSummaryDto(
+                AvailableFightCount: shieldOfCourageSamples.Length,
+                FightsWithBlockedAttacks: shieldOfCourageSamples.Count(summary => summary.BlockedAttackCount > 0),
+                BlockedAttackCount: shieldOfCourageSamples.Sum(summary => Math.Max(0, summary.BlockedAttackCount)),
+                EstimatedBlockedDamage: Math.Round(shieldOfCourageSamples.Sum(summary => Math.Max(0, summary.EstimatedBlockedDamage)), 0),
+                FallbackEstimateCount: shieldOfCourageSamples.Sum(summary => Math.Max(0, summary.FallbackEstimateCount)),
+                MaxCoveredPlayers: shieldOfCourageSamples.Max(summary => Math.Max(0, summary.MaxCoveredPlayers)));
+        }
+
         var negatedHitSummaries = mitigationSamples
             .SelectMany(sample => sample.Mitigation?.NegatedHitSummaries ?? Array.Empty<FightNegatedHitSummaryIndexDto>())
             .GroupBy(summary => summary.Key ?? string.Empty, StringComparer.OrdinalIgnoreCase)
@@ -1192,6 +1209,7 @@ public sealed class FightAnalysisService
             LowestLowestHealthPercent: lowestLowestHealthPercent,
             BarrierOvercap: barrierOvercap,
             Reflects: reflects,
+            ShieldOfCourage: shieldOfCourage,
             NegatedHitSummaries: negatedHitSummaries);
     }
 

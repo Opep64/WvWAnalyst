@@ -526,6 +526,7 @@ public sealed class EliteInsightsFightIndexer
                 TotalIncomingHealing: legacyDefenseSaves.TotalIncomingHealing,
                 BarrierOvercap: null,
                 Reflects: null,
+                ShieldOfCourage: null,
                 NegatedHitSummaries: Array.Empty<FightNegatedHitSummaryIndexDto>());
         }
 
@@ -553,6 +554,7 @@ public sealed class EliteInsightsFightIndexer
             TotalIncomingHealing: summary.TotalIncomingHealing,
             BarrierOvercap: BuildBarrierOvercapFromAnalystPayload(summary.BarrierOvercap),
             Reflects: BuildReflectsFromAnalystPayload(summary.Reflects),
+            ShieldOfCourage: BuildShieldOfCourageFromAnalystPayload(summary.ShieldOfCourage),
             NegatedHitSummaries: summary.NegatedHitSummaries?
                 .Select(negation => new FightNegatedHitSummaryIndexDto(
                     Key: NullIfWhiteSpace(negation.Key) ?? string.Empty,
@@ -568,6 +570,22 @@ public sealed class EliteInsightsFightIndexer
                         ?? Array.Empty<FightEffectCountSummaryIndexDto>()))
                 .ToArray()
                 ?? Array.Empty<FightNegatedHitSummaryIndexDto>());
+    }
+
+    private static FightShieldOfCourageSummaryIndexDto? BuildShieldOfCourageFromAnalystPayload(WvWAnalystShieldOfCourageSummaryDto? summary)
+    {
+        if (summary is null || !summary.Available)
+        {
+            return null;
+        }
+
+        return new FightShieldOfCourageSummaryIndexDto(
+            Available: summary.Available,
+            BlockedAttackCount: summary.BlockedAttackCount,
+            EstimatedBlockedDamage: summary.EstimatedBlockedDamage,
+            FallbackEstimateCount: summary.FallbackEstimateCount,
+            MaxCoveredPlayers: summary.MaxCoveredPlayers,
+            MaxCoveredPlayersTimeLabel: NullIfWhiteSpace(summary.MaxCoveredPlayersTimeLabel) ?? string.Empty);
     }
 
     private static FightBarrierOvercapSummaryIndexDto? BuildBarrierOvercapFromAnalystPayload(WvWAnalystBarrierOvercapSummaryDto? summary)

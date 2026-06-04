@@ -3361,10 +3361,12 @@ function formatMitigationEffectCounts(effectCounts, limit = 4) {
 
 function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
     const negatedSummaries = Array.isArray(summary.negatedHitSummaries) ? summary.negatedHitSummaries : [];
+    const visibleNegatedSummaries = negatedSummaries.filter(entry => entry?.key !== "shieldOfCourage");
     const negatedHitCount = negatedSummaries.reduce((total, entry) => total + Number(entry.negatedHitCount ?? 0), 0);
     const fallbackCount = negatedSummaries.reduce((total, entry) => total + Number(entry.fallbackEstimateCount ?? 0), 0);
     const negatedHitDamage = negatedSummaries.reduce((total, entry) => total + Number(entry.estimatedPreventedDamage ?? 0), 0);
     const savedCaseNegatedDamage = Number(summary.totalEstimatedNegatedDamage ?? 0);
+    const shieldOfCourage = summary.shieldOfCourage ?? null;
     const hasNegatedHitSummary = negatedSummaries.length > 0;
     const displayedNegatedDamage = hasNegatedHitSummary ? negatedHitDamage : savedCaseNegatedDamage;
     const totalPrevention = Number(summary.totalBarrierAbsorbed ?? 0)
@@ -3420,7 +3422,13 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
                     ? "All negated hits used tracked skill-based estimates."
                     : "Estimated negated damage inside saved-player windows."
         },
-        ...negatedSummaries.map(entry => ({
+        ...(shieldOfCourage ? [{
+            label: "Shield of Courage",
+            value: formatNumber(shieldOfCourage.estimatedBlockedDamage, 0),
+            meta: `${formatNumber(shieldOfCourage.blockedAttackCount)} blocks | ${formatNumber(shieldOfCourage.maxCoveredPlayers)} max covered`,
+            notes: `${formatAnalysisAvailability(shieldOfCourage.availableFightCount, filteredFightCount)} ${formatNumber(shieldOfCourage.fightsWithBlockedAttacks)} fights had Shield blocks; ${formatNumber(shieldOfCourage.fallbackEstimateCount)} fallback estimates.`
+        }] : []),
+        ...visibleNegatedSummaries.map(entry => ({
             label: entry.label,
             value: formatNumber(entry.estimatedPreventedDamage, 0),
             meta: `${formatNumber(entry.negatedHitCount)} hits`,

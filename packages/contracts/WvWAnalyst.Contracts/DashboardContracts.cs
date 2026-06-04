@@ -440,7 +440,16 @@ public sealed record FightMitigationSummaryIndexDto(
     double TotalIncomingHealing,
     FightBarrierOvercapSummaryIndexDto? BarrierOvercap,
     FightReflectSummaryIndexDto? Reflects,
+    FightShieldOfCourageSummaryIndexDto? ShieldOfCourage,
     IReadOnlyList<FightNegatedHitSummaryIndexDto> NegatedHitSummaries);
+
+public sealed record FightShieldOfCourageSummaryIndexDto(
+    bool Available,
+    int BlockedAttackCount,
+    double EstimatedBlockedDamage,
+    int FallbackEstimateCount,
+    int MaxCoveredPlayers,
+    string MaxCoveredPlayersTimeLabel);
 
 public sealed record FightBarrierOvercapSummaryIndexDto(
     bool Available,

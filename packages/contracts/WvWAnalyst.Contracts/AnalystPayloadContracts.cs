@@ -585,7 +585,24 @@ public sealed class WvWAnalystMitigationSummaryDto
 
     public WvWAnalystReflectSummaryDto? Reflects { get; set; }
 
+    public WvWAnalystShieldOfCourageSummaryDto? ShieldOfCourage { get; set; }
+
     public IReadOnlyList<WvWAnalystNegatedHitSummaryDto> NegatedHitSummaries { get; set; } = Array.Empty<WvWAnalystNegatedHitSummaryDto>();
+}
+
+public sealed class WvWAnalystShieldOfCourageSummaryDto
+{
+    public bool Available { get; set; }
+
+    public int BlockedAttackCount { get; set; }
+
+    public double EstimatedBlockedDamage { get; set; }
+
+    public int FallbackEstimateCount { get; set; }
+
+    public int MaxCoveredPlayers { get; set; }
+
+    public string MaxCoveredPlayersTimeLabel { get; set; } = string.Empty;
 }
 
 public sealed class WvWAnalystBarrierOvercapSummaryDto

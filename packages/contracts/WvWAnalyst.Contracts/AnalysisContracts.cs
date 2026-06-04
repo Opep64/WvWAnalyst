@@ -140,7 +140,16 @@ public sealed record FightAnalysisMitigationSummaryDto(
     double? LowestLowestHealthPercent,
     FightAnalysisBarrierOvercapSummaryDto? BarrierOvercap,
     FightAnalysisReflectSummaryDto? Reflects,
+    FightAnalysisShieldOfCourageSummaryDto? ShieldOfCourage,
     IReadOnlyList<FightAnalysisNegatedHitSummaryDto> NegatedHitSummaries);
+
+public sealed record FightAnalysisShieldOfCourageSummaryDto(
+    int AvailableFightCount,
+    int FightsWithBlockedAttacks,
+    int BlockedAttackCount,
+    double EstimatedBlockedDamage,
+    int FallbackEstimateCount,
+    int MaxCoveredPlayers);
 
 public sealed record FightAnalysisBarrierOvercapSummaryDto(
     int AvailableFightCount,
