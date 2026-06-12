@@ -3426,7 +3426,7 @@ function buildAnalysisMitigationOverviewCard(summary, filteredFightCount) {
             label: "Shield of Courage",
             value: formatNumber(shieldOfCourage.estimatedBlockedDamage, 0),
             meta: `${formatNumber(shieldOfCourage.blockedAttackCount)} blocks | ${formatNumber(shieldOfCourage.maxCoveredPlayers)} max covered`,
-            notes: `${formatAnalysisAvailability(shieldOfCourage.availableFightCount, filteredFightCount)} ${formatNumber(shieldOfCourage.fightsWithBlockedAttacks)} fights had Shield blocks; ${formatNumber(shieldOfCourage.fallbackEstimateCount)} fallback estimates.`
+            notes: `${buildAnalysisAvailabilityLine(shieldOfCourage.availableFightCount, filteredFightCount)} ${formatNumber(shieldOfCourage.fightsWithBlockedAttacks)} fights had Shield blocks; ${formatNumber(shieldOfCourage.fallbackEstimateCount)} fallback estimates.`
         }] : []),
         ...visibleNegatedSummaries.map(entry => ({
             label: entry.label,
