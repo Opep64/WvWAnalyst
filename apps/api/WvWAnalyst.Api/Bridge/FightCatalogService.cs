@@ -90,6 +90,87 @@ public sealed class FightCatalogService
         }
     }
 
+    public FightArtifactManifest? TryLoadManifestForUpdate(string fightId)
+    {
+        try
+        {
+            string fightDirectoryPath = GetFightDirectoryPath(fightId);
+            string manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
+            return TryLoadManifestFromPath(fightDirectoryPath, manifestPath, hydrateDerivedData: false);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    public IReadOnlyDictionary<string, FightArtifactManifest> FindReplacementFightsBySourceHash(
+        IReadOnlySet<string> sourceFileSha256Values)
+    {
+        if (sourceFileSha256Values.Count == 0)
+        {
+            return new Dictionary<string, FightArtifactManifest>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        _paths.EnsureStorageDirectories();
+        var selected = new Dictionary<string, (string FightId, DateTime ImportedAtUtc)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (DirectoryInfo directory in new DirectoryInfo(_paths.FightsPath).EnumerateDirectories())
+        {
+            string manifestPath = Path.Combine(directory.FullName, "manifest.json");
+            try
+            {
+                using FileStream stream = File.OpenRead(manifestPath);
+                using JsonDocument document = JsonDocument.Parse(stream);
+                JsonElement root = document.RootElement;
+                if (!root.TryGetProperty("parsed", out JsonElement parsedElement) ||
+                    parsedElement.ValueKind != JsonValueKind.True ||
+                    !root.TryGetProperty("sourceFileSha256", out JsonElement hashElement))
+                {
+                    continue;
+                }
+
+                string? sourceHash = hashElement.GetString();
+                if (string.IsNullOrWhiteSpace(sourceHash) || !sourceFileSha256Values.Contains(sourceHash))
+                {
+                    continue;
+                }
+
+                string fightId = root.TryGetProperty("fightId", out JsonElement fightIdElement)
+                    ? fightIdElement.GetString() ?? directory.Name
+                    : directory.Name;
+                DateTime importedAtUtc =
+                    root.TryGetProperty("importedAtUtc", out JsonElement importedAtElement) &&
+                    importedAtElement.TryGetDateTime(out DateTime parsedImportedAt)
+                        ? parsedImportedAt
+                        : DateTime.MinValue;
+
+                if (!selected.TryGetValue(sourceHash, out var current) ||
+                    importedAtUtc > current.ImportedAtUtc)
+                {
+                    selected[sourceHash] = (fightId, importedAtUtc);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or JsonException)
+            {
+                continue;
+            }
+        }
+
+        var result = new Dictionary<string, FightArtifactManifest>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string sourceHash, var selection) in selected)
+        {
+            FightArtifactManifest? manifest = TryLoadManifestForUpdate(selection.FightId);
+            if (manifest is not null)
+            {
+                result[sourceHash] = manifest;
+            }
+        }
+        return result;
+    }
+
     public bool TryGetFightSummary(string fightId, out FightArtifactSummaryDto summary)
     {
         summary = default!;

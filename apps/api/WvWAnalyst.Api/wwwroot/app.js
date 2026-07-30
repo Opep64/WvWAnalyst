@@ -8,6 +8,7 @@ const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
+let currentHistoricalEffectivenessSnapshot = null;
 let currentAuthState = { enabled: false, authenticated: true, username: null };
 let currentAnalysisPlayerDetailsByAccount = new Map();
 let currentAnalysisPlayerDetailPromisesByAccount = new Map();
@@ -21,6 +22,7 @@ let activeBatchJobId = null;
 let batchStatusPollHandle = null;
 let manageActivityRefreshHandle = null;
 let analysisLoadPromise = null;
+let historicalEffectivenessLoadPromise = null;
 let showFightBrowserTopBursts = false;
 let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY) === "true";
 let logFileUploadBusy = false;
@@ -30,6 +32,8 @@ let manageDateRangeDeleteBusy = false;
 let activityLogBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
+let effectivenessPerspective = "squad";
+let effectivenessOutcomeFamily = "down-pressure";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "performance", direction: "desc" };
 let analysisClassSortState = { key: "performance", direction: "desc" };
@@ -2106,6 +2110,16 @@ async function loadAnalysis(filters = {}) {
     const response = await fetch(`/api/analysis${query ? `?${query}` : ""}`);
     if (!response.ok) {
         throw new Error(`Analysis request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadHistoricalEffectiveness(filters = {}) {
+    const query = buildAnalysisQueryString(filters);
+    const response = await fetch(`/api/analysis/effectiveness${query ? `?${query}` : ""}`);
+    if (!response.ok) {
+        throw new Error(`Effectiveness request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -9072,7 +9086,253 @@ function setActiveAnalysisTab(tabKey, options = {}) {
         renderAnalysisCompHelper(currentAnalysisSnapshot);
     } else if (tabKey === "players" && currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
+    } else if (tabKey === "effectiveness") {
+        void ensureHistoricalEffectivenessLoaded().catch(() => {});
     }
+}
+
+function formatEffectivenessValue(value, unit) {
+    if (value == null) {
+        return "n/a";
+    }
+
+    const fractionDigits = Math.abs(Number(value)) < 10 ? 2 : 1;
+    const formatted = formatNumber(value, fractionDigits);
+    return unit === "%" ? `${formatted}%` : formatted;
+}
+
+function formatSignedPercent(value) {
+    if (value == null) {
+        return "n/a";
+    }
+    const numeric = Number(value);
+    return `${numeric > 0 ? "+" : ""}${formatPercent(numeric, 1)}`;
+}
+
+function buildEffectivenessConfidenceBadge(confidenceLabel) {
+    const normalized = String(confidenceLabel ?? "limited").toLowerCase();
+    const level = normalized.includes("high")
+        ? "high"
+        : normalized.includes("medium")
+            ? "medium"
+            : "limited";
+    return `<span class="effectiveness-confidence effectiveness-confidence-${level}">${escapeHtml(confidenceLabel ?? "Limited")}</span>`;
+}
+
+function buildEffectivenessScopeCards(snapshot) {
+    const scope = snapshot.scope ?? {};
+    const coverage = Number(scope.filteredFightCount ?? 0) > 0
+        ? Number(scope.cacheFightCount ?? 0) / Number(scope.filteredFightCount) * 100
+        : 0;
+    return `
+        <div class="stats-grid effectiveness-scope-grid">
+            <article class="analysis-card">
+                <strong>Fights in scope</strong>
+                <div class="analysis-card-value">${formatNumber(scope.filteredFightCount)}</div>
+                <div class="table-inline-note">All fights matching the current Analysis filters.</div>
+            </article>
+            <article class="analysis-card">
+                <strong>Fights with outcome data</strong>
+                <div class="analysis-card-value">${formatNumber(scope.cacheFightCount)}</div>
+                <div class="table-inline-note">${formatPercent(coverage)} of the filtered fights can be evaluated.</div>
+            </article>
+            <article class="analysis-card">
+                <strong>Windows evaluated</strong>
+                <div class="analysis-card-value">${formatNumber(scope.observationCount)}</div>
+                <div class="table-inline-note">Outcome and comparison windows from both sides.</div>
+            </article>
+        </div>
+        ${scope.missingCacheFightCount > 0
+            ? `<div class="effectiveness-coverage-note"><strong>Pilot coverage:</strong> ${formatNumber(scope.missingCacheFightCount)} filtered fights do not yet have outcome data. Rankings describe the ${formatNumber(scope.cacheFightCount)} cached fights only.</div>`
+            : ""}
+    `;
+}
+
+function buildEffectivenessMetricRow(metric, rank) {
+    return `
+        <tr>
+            <td><span class="effectiveness-rank">${rank}</span></td>
+            <td>
+                <strong>${escapeHtml(metric.label)}</strong>
+                <span class="table-inline-note">${escapeHtml(metric.group)} &middot; ${escapeHtml(metric.directionLabel)}</span>
+            </td>
+            <td>${formatEffectivenessValue(metric.outcomeAverage, metric.unit)}</td>
+            <td>${formatEffectivenessValue(metric.baselineAverage, metric.unit)}</td>
+            <td>${formatSignedPercent(metric.percentLift)}</td>
+            <td>
+                <strong>${formatNumber(metric.associationScore, 1)}</strong>
+                <span class="effectiveness-score-track"><i style="width:${Math.max(0, Math.min(100, Number(metric.associationScore ?? 0)))}%"></i></span>
+            </td>
+            <td>
+                <strong>${formatNumber(metric.evidenceScore, 1)}</strong>
+                ${buildEffectivenessConfidenceBadge(metric.confidenceLabel)}
+            </td>
+        </tr>
+    `;
+}
+
+function buildEffectivenessEffectRow(effect) {
+    const rank = effect.rank == null ? "&mdash;" : escapeHtml(effect.rank);
+    const typeLabel = String(effect.effectType ?? "").toLowerCase() === "cc" ? "CC" : "Condition";
+    return `
+        <tr class="${effect.rank == null ? "effectiveness-unranked" : ""}">
+            <td><span class="effectiveness-rank">${rank}</span></td>
+            <td>
+                <strong>${escapeHtml(effect.name)}</strong>
+                <span class="table-inline-note">${escapeHtml(typeLabel)} &middot; ${escapeHtml(effect.directionLabel)}</span>
+            </td>
+            <td>${formatEffectivenessValue(effect.outcomeAverage, effect.unit)}</td>
+            <td>${formatEffectivenessValue(effect.baselineAverage, effect.unit)}</td>
+            <td>${formatSignedPercent(effect.percentLift)}</td>
+            <td><strong>${formatNumber(effect.associationScore, 1)}</strong></td>
+            <td>
+                <strong>${formatNumber(effect.evidenceScore, 1)}</strong>
+                ${buildEffectivenessConfidenceBadge(effect.confidenceLabel)}
+            </td>
+            <td><span class="table-inline-note">${escapeHtml(effect.rankingResult)}</span></td>
+        </tr>
+    `;
+}
+
+function renderHistoricalEffectiveness(snapshot) {
+    currentHistoricalEffectivenessSnapshot = snapshot;
+    document.querySelectorAll("[data-effectiveness-perspective]").forEach(button => {
+        button.classList.toggle("is-active", button.dataset.effectivenessPerspective === effectivenessPerspective);
+    });
+    document.querySelectorAll("[data-effectiveness-family]").forEach(button => {
+        button.classList.toggle("is-active", button.dataset.effectivenessFamily === effectivenessOutcomeFamily);
+    });
+
+    const report = (snapshot.reports ?? []).find(item =>
+        item.perspectiveSideId === effectivenessPerspective &&
+        item.outcomeFamily === effectivenessOutcomeFamily);
+    if (!report) {
+        setInnerHtml("#analysis-effectiveness-content", `
+            ${buildEffectivenessScopeCards(snapshot)}
+            <div class="effectiveness-empty">No historical outcome comparison is available for this selection.</div>
+        `);
+        return;
+    }
+
+    const rankedMetrics = (report.metrics ?? [])
+        .filter(metric => metric.available && metric.associationScore != null)
+        .sort((left, right) => Number(right.associationScore) - Number(left.associationScore))
+        .slice(0, 10);
+    const namedEffects = (report.namedEffects ?? [])
+        .slice()
+        .sort((left, right) =>
+            (left.rank == null ? Number.MAX_SAFE_INTEGER : left.rank) -
+            (right.rank == null ? Number.MAX_SAFE_INTEGER : right.rank) ||
+            Number(right.associationScore ?? 0) - Number(left.associationScore ?? 0));
+    const unavailableMetrics = (report.metrics ?? []).filter(metric => !metric.available);
+
+    setInnerHtml("#analysis-effectiveness-content", `
+        ${buildEffectivenessScopeCards(snapshot)}
+        <div class="effectiveness-report-heading">
+            <div>
+                <h3>${escapeHtml(report.outcomeLabel)} compared with ${escapeHtml(report.baselineLabel)}</h3>
+                <p class="workspace-note">${formatNumber(report.pairedFightCount)} fights contained both kinds of windows. Each fight contributes equal weight.</p>
+            </div>
+            ${buildEffectivenessConfidenceBadge(report.confidenceLabel)}
+        </div>
+        <section class="effectiveness-section">
+            <div class="effectiveness-section-heading">
+                <div>
+                    <h3>Strongest overall signals</h3>
+                    <p class="workspace-note">Ranked by association strength. Evidence reflects fight support, coverage, balance, and precision.</p>
+                </div>
+            </div>
+            <div class="table-shell table-shell-scroll effectiveness-table-shell">
+                <table class="data-table data-table-compact effectiveness-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Signal</th>
+                            <th>Outcome avg</th>
+                            <th>Comparison avg</th>
+                            <th>Lift</th>
+                            <th>Association</th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rankedMetrics.length
+                            ? rankedMetrics.map((metric, index) => buildEffectivenessMetricRow(metric, index + 1)).join("")
+                            : `<tr><td colspan="7">No measured signals have enough data for this comparison.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section class="effectiveness-section">
+            <div class="effectiveness-section-heading">
+                <div>
+                    <h3>Conditions and crowd control</h3>
+                    <p class="workspace-note">Eligible rows are ranked by association; excluded rows remain visible so the evidence threshold is transparent.</p>
+                </div>
+            </div>
+            ${namedEffects.length
+                ? `<div class="table-shell table-shell-scroll effectiveness-table-shell">
+                    <table class="data-table data-table-compact effectiveness-table effectiveness-effects-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Effect</th>
+                                <th>Outcome avg</th>
+                                <th>Comparison avg</th>
+                                <th>Lift</th>
+                                <th>Association</th>
+                                <th>Evidence</th>
+                                <th>Ranking result</th>
+                            </tr>
+                        </thead>
+                        <tbody>${namedEffects.map(buildEffectivenessEffectRow).join("")}</tbody>
+                    </table>
+                </div>`
+                : `<div class="effectiveness-empty">Named conditions and CCs are not included in recovery comparisons because the current cache records them only for pressure and conversion windows.</div>`}
+        </section>
+        <details class="effectiveness-details">
+            <summary>Data limits and method</summary>
+            <div class="effectiveness-details-body">
+                <p>${escapeHtml(snapshot.methodology?.interpretation ?? "")}</p>
+                <p>${escapeHtml(snapshot.methodology?.confidenceIntervals ?? "")}</p>
+                ${unavailableMetrics.length
+                    ? `<p><strong>Unavailable here:</strong> ${unavailableMetrics.map(metric => escapeHtml(metric.label)).join(", ")}.</p>`
+                    : ""}
+                ${(snapshot.scope?.availabilityNotes ?? []).length
+                    ? `<ul>${snapshot.scope.availabilityNotes.map(note => `<li>${escapeHtml(note)}</li>`).join("")}</ul>`
+                    : ""}
+            </div>
+        </details>
+    `);
+}
+
+function renderHistoricalEffectivenessLoading(message = "Loading historical associations...") {
+    setInnerHtml("#analysis-effectiveness-content", `<div class="effectiveness-empty">${escapeHtml(message)}</div>`);
+}
+
+async function ensureHistoricalEffectivenessLoaded(force = false) {
+    if (!force && currentHistoricalEffectivenessSnapshot) {
+        renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
+        return currentHistoricalEffectivenessSnapshot;
+    }
+    if (historicalEffectivenessLoadPromise) {
+        return historicalEffectivenessLoadPromise;
+    }
+
+    renderHistoricalEffectivenessLoading();
+    historicalEffectivenessLoadPromise = loadHistoricalEffectiveness(getAnalysisFiltersFromUi())
+        .then(snapshot => {
+            renderHistoricalEffectiveness(snapshot);
+            return snapshot;
+        })
+        .catch(error => {
+            renderHistoricalEffectivenessLoading(error instanceof Error ? error.message : String(error));
+            throw error;
+        })
+        .finally(() => {
+            historicalEffectivenessLoadPromise = null;
+        });
+    return historicalEffectivenessLoadPromise;
 }
 
 function renderAnalysisLoading(message = "Loading analysis...") {
@@ -9089,6 +9349,8 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-mitigation-card", "");
     document.querySelector("#analysis-differences-summary").textContent = message;
     setInnerHtml("#analysis-differences-top-signals", "");
+    currentHistoricalEffectivenessSnapshot = null;
+    renderHistoricalEffectivenessLoading("Open Effectiveness after the analysis finishes loading.");
     ["score", "lane", "attribute", "boon", "class", "enemy"].forEach(key => {
         setInnerHtml(`#analysis-differences-${key}-body`, `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
     });
@@ -9124,6 +9386,7 @@ function renderAnalysisError(message) {
 
 function renderAnalysis(snapshot) {
     currentAnalysisSnapshot = snapshot;
+    currentHistoricalEffectivenessSnapshot = null;
     resetAnalysisPlayerDetailState();
 
     document.querySelector("#analysis-summary").textContent =
@@ -11931,6 +12194,24 @@ document.querySelectorAll("[data-analysis-enemy-sort]").forEach(button => {
 });
 document.querySelectorAll("[data-analysis-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab, { resetScroll: true }));
+});
+document.querySelector("#analysis-panel-effectiveness").addEventListener("click", event => {
+    const perspectiveButton = event.target.closest("[data-effectiveness-perspective]");
+    if (perspectiveButton) {
+        effectivenessPerspective = perspectiveButton.dataset.effectivenessPerspective;
+        if (currentHistoricalEffectivenessSnapshot) {
+            renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
+        }
+        return;
+    }
+
+    const familyButton = event.target.closest("[data-effectiveness-family]");
+    if (familyButton) {
+        effectivenessOutcomeFamily = familyButton.dataset.effectivenessFamily;
+        if (currentHistoricalEffectivenessSnapshot) {
+            renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
+        }
+    }
 });
 
 hydrateBatchForm();

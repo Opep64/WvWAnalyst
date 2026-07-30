@@ -750,6 +750,7 @@
                     <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
                         <button class="analysis-tab is-active" id="analysis-tab-overview" type="button" data-analysis-tab="overview" role="tab" aria-selected="true">Overview</button>
                         <button class="analysis-tab" id="analysis-tab-differences" type="button" data-analysis-tab="differences" role="tab" aria-selected="false">Differences</button>
+                        <button class="analysis-tab" id="analysis-tab-effectiveness" type="button" data-analysis-tab="effectiveness" role="tab" aria-selected="false">Effectiveness</button>
                         <button class="analysis-tab" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="false">Players</button>
                         <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
                         <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
@@ -922,6 +923,35 @@
                                 </table>
                             </div>
                         </section>
+                    </div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-effectiveness" data-analysis-panel="effectiveness" role="tabpanel" aria-labelledby="analysis-tab-effectiveness" hidden>
+                    <div class="effectiveness-heading">
+                        <div>
+                            <h3>What changes around fight outcomes?</h3>
+                            <p class="workspace-note">Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Stronger association means a signal changed more consistently and with better evidence; it does not prove causation.</p>
+                        </div>
+                        <span class="effectiveness-method-badge">Historical associations</span>
+                    </div>
+                    <div class="effectiveness-toolbar">
+                        <div class="effectiveness-control-group">
+                            <span>Perspective</span>
+                            <div class="effectiveness-switcher" role="group" aria-label="Effectiveness perspective">
+                                <button class="effectiveness-switch is-active" type="button" data-effectiveness-perspective="squad">Our Squad</button>
+                                <button class="effectiveness-switch" type="button" data-effectiveness-perspective="enemy">Enemy Team</button>
+                            </div>
+                        </div>
+                        <div class="effectiveness-control-group">
+                            <span>Question</span>
+                            <div class="effectiveness-switcher" role="group" aria-label="Effectiveness outcome">
+                                <button class="effectiveness-switch is-active" type="button" data-effectiveness-family="down-pressure">Creating downs</button>
+                                <button class="effectiveness-switch" type="button" data-effectiveness-family="down-conversion">Converting downs</button>
+                                <button class="effectiveness-switch" type="button" data-effectiveness-family="down-recovery">Recovering downs</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="analysis-effectiveness-content">
+                        <p class="workspace-note analysis-panel-note">Open Effectiveness to load historical outcome associations for the current filters.</p>
                     </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-players" data-analysis-panel="players" role="tabpanel" aria-labelledby="analysis-tab-players" hidden>

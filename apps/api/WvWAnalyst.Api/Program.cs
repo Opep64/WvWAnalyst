@@ -73,6 +73,7 @@ builder.Services.AddSingleton<PatchMetadataService>();
 builder.Services.AddSingleton<CompHelperConfigService>();
 builder.Services.AddSingleton<FightAttributeService>();
 builder.Services.AddSingleton<FightOutcomeObservationCacheService>();
+builder.Services.AddSingleton<OutcomeObservationCachePackImportService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<HistoricalEffectivenessService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
@@ -510,6 +511,31 @@ app.MapPost("/api/imports/log-directory/files", async (
         result.SkippedCount,
         FailedCount = result.Items.Count(item => string.Equals(item.Action, "failed", StringComparison.OrdinalIgnoreCase)),
         result.DirectoryPath
+    });
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+}).DisableAntiforgery();
+app.MapPost("/api/manage/outcome-cache-pack/import", async (
+    OutcomeObservationCachePackImportRequestDto request,
+    HttpContext httpContext,
+    OutcomeObservationCachePackImportService service,
+    AuditLogService audit,
+    CancellationToken cancellationToken) =>
+{
+    OutcomeObservationCachePackImportResultDto result =
+        await service.ImportAsync(request, cancellationToken);
+    audit.Write(httpContext, "import-outcome-cache-pack", result.Success ? "success" : "failure", new
+    {
+        result.DryRun,
+        request.DirectoryPath,
+        request.OverwriteExisting,
+        result.DiscoveredCount,
+        result.MatchedCount,
+        result.AttachedCount,
+        result.AlreadyCurrentCount,
+        result.UnmatchedCount,
+        result.InvalidCount,
+        result.ConflictCount,
+        result.DuplicateCount
     });
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 }).DisableAntiforgery();
