@@ -74,6 +74,7 @@ builder.Services.AddSingleton<CompHelperConfigService>();
 builder.Services.AddSingleton<FightAttributeService>();
 builder.Services.AddSingleton<FightOutcomeObservationCacheService>();
 builder.Services.AddSingleton<FightAnalysisService>();
+builder.Services.AddSingleton<HistoricalEffectivenessService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 builder.Services.AddSingleton<AuthUserStore>();
 builder.Services.AddSingleton<PasswordHashService>();
@@ -295,6 +296,31 @@ app.MapGet("/api/analysis", (
     string? patchEraIds,
     string? fightAttributes,
     FightAnalysisService service) =>
+    Results.Ok(service.BuildSnapshot(
+        commander,
+        startDate,
+        endDate,
+        outcome,
+        squadIncludeClasses,
+        squadExcludeClasses,
+        enemyIncludeClasses,
+        enemyExcludeClasses,
+        patchScope,
+        patchEraIds,
+        fightAttributes)));
+app.MapGet("/api/analysis/effectiveness", (
+    string? commander,
+    string? startDate,
+    string? endDate,
+    string? outcome,
+    string? squadIncludeClasses,
+    string? squadExcludeClasses,
+    string? enemyIncludeClasses,
+    string? enemyExcludeClasses,
+    string? patchScope,
+    string? patchEraIds,
+    string? fightAttributes,
+    HistoricalEffectivenessService service) =>
     Results.Ok(service.BuildSnapshot(
         commander,
         startDate,
