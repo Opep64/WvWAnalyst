@@ -9,6 +9,7 @@ const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browse
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
 let currentHistoricalEffectivenessSnapshot = null;
+let currentHistoricalEffectivenessWinLossSnapshot = null;
 let currentAuthState = { enabled: false, authenticated: true, username: null };
 let currentAnalysisPlayerDetailsByAccount = new Map();
 let currentAnalysisPlayerDetailPromisesByAccount = new Map();
@@ -23,6 +24,7 @@ let batchStatusPollHandle = null;
 let manageActivityRefreshHandle = null;
 let analysisLoadPromise = null;
 let historicalEffectivenessLoadPromise = null;
+let historicalEffectivenessWinLossLoadPromise = null;
 let showFightBrowserTopBursts = false;
 let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY) === "true";
 let logFileUploadBusy = false;
@@ -32,6 +34,7 @@ let manageDateRangeDeleteBusy = false;
 let activityLogBusy = false;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
+let effectivenessMode = "associations";
 let effectivenessPerspective = "squad";
 let effectivenessOutcomeFamily = "down-pressure";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
@@ -2120,6 +2123,16 @@ async function loadHistoricalEffectiveness(filters = {}) {
     const response = await fetch(`/api/analysis/effectiveness${query ? `?${query}` : ""}`);
     if (!response.ok) {
         throw new Error(`Effectiveness request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadHistoricalEffectivenessWinLoss(filters = {}) {
+    const query = buildAnalysisQueryString({ ...filters, outcome: "all" });
+    const response = await fetch(`/api/analysis/effectiveness/win-loss${query ? `?${query}` : ""}`);
+    if (!response.ok) {
+        throw new Error(`Win/loss effectiveness request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -9087,7 +9100,7 @@ function setActiveAnalysisTab(tabKey, options = {}) {
     } else if (tabKey === "players" && currentAnalysisSnapshot) {
         renderAnalysisPlayers(currentAnalysisSnapshot);
     } else if (tabKey === "effectiveness") {
-        void ensureHistoricalEffectivenessLoaded().catch(() => {});
+        void ensureActiveEffectivenessLoaded().catch(() => {});
     }
 }
 
@@ -9117,6 +9130,28 @@ function buildEffectivenessConfidenceBadge(confidenceLabel) {
             ? "medium"
             : "limited";
     return `<span class="effectiveness-confidence effectiveness-confidence-${level}">${escapeHtml(confidenceLabel ?? "Limited")}</span>`;
+}
+
+function updateEffectivenessModeChrome() {
+    const winLossMode = effectivenessMode === "win-loss";
+    document.querySelector("#analysis-effectiveness-title").textContent = winLossMode
+        ? "What separates wins from losses?"
+        : "What changes around fight outcomes?";
+    document.querySelector("#analysis-effectiveness-description").textContent = winLossMode
+        ? "Compare the same fight-weighted outcome signal in wins and losses. The Outcome filter is intentionally ignored so both cohorts remain available; all other Analysis filters still apply."
+        : "Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Stronger association means a signal changed more consistently and with better evidence; it does not prove causation.";
+    document.querySelector("#analysis-effectiveness-method-badge").textContent = winLossMode
+        ? "Win/loss separation"
+        : "Historical associations";
+    document.querySelectorAll("[data-effectiveness-mode]").forEach(button => {
+        button.classList.toggle("is-active", button.dataset.effectivenessMode === effectivenessMode);
+    });
+    document.querySelectorAll("[data-effectiveness-perspective]").forEach(button => {
+        button.classList.toggle("is-active", button.dataset.effectivenessPerspective === effectivenessPerspective);
+    });
+    document.querySelectorAll("[data-effectiveness-family]").forEach(button => {
+        button.classList.toggle("is-active", button.dataset.effectivenessFamily === effectivenessOutcomeFamily);
+    });
 }
 
 function buildEffectivenessScopeCards(snapshot) {
@@ -9196,12 +9231,7 @@ function buildEffectivenessEffectRow(effect) {
 
 function renderHistoricalEffectiveness(snapshot) {
     currentHistoricalEffectivenessSnapshot = snapshot;
-    document.querySelectorAll("[data-effectiveness-perspective]").forEach(button => {
-        button.classList.toggle("is-active", button.dataset.effectivenessPerspective === effectivenessPerspective);
-    });
-    document.querySelectorAll("[data-effectiveness-family]").forEach(button => {
-        button.classList.toggle("is-active", button.dataset.effectivenessFamily === effectivenessOutcomeFamily);
-    });
+    updateEffectivenessModeChrome();
 
     const report = (snapshot.reports ?? []).find(item =>
         item.perspectiveSideId === effectivenessPerspective &&
@@ -9306,6 +9336,224 @@ function renderHistoricalEffectiveness(snapshot) {
     `);
 }
 
+function formatSignedEffectivenessValue(value, unit) {
+    if (value == null) {
+        return "n/a";
+    }
+    const numeric = Number(value);
+    const formatted = formatEffectivenessValue(Math.abs(numeric), unit);
+    return `${numeric > 0 ? "+" : numeric < 0 ? "-" : ""}${formatted}`;
+}
+
+function buildWinLossSignalCell(item, cohort) {
+    const lift = cohort === "win" ? item.winPercentLift : item.lossPercentLift;
+    const association = cohort === "win" ? item.winAssociationScore : item.lossAssociationScore;
+    const difference = cohort === "win" ? item.winDifference : item.lossDifference;
+    return `
+        <strong>${formatSignedPercent(lift)}</strong>
+        <span class="table-inline-note">Association ${formatNumber(association, 1)}</span>
+        <span class="table-inline-note">${formatSignedEffectivenessValue(difference, item.unit)} vs baseline</span>
+    `;
+}
+
+function buildWinLossMetricRow(metric) {
+    const rank = metric.rank == null ? "&mdash;" : escapeHtml(metric.rank);
+    return `
+        <tr class="${metric.rank == null ? "effectiveness-unranked" : ""}">
+            <td><span class="effectiveness-rank">${rank}</span></td>
+            <td>
+                <strong>${escapeHtml(metric.label)}</strong>
+                <span class="table-inline-note">${escapeHtml(metric.group)} &middot; ${escapeHtml(metric.directionLabel)}</span>
+            </td>
+            <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(metric, "win")}</td>
+            <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(metric, "loss")}</td>
+            <td>
+                <strong>${formatSignedEffectivenessValue(metric.resultEdge, metric.unit)}</strong>
+                <span class="table-inline-note">${escapeHtml(metric.directionLabel)}</span>
+            </td>
+            <td>
+                <strong>${formatNumber(metric.separationScore, 1)}</strong>
+                <span class="effectiveness-score-track"><i style="width:${Math.max(0, Math.min(100, Number(metric.separationScore ?? 0)))}%"></i></span>
+            </td>
+            <td>
+                <strong>${formatNumber(metric.evidenceScore, 1)}</strong>
+                ${buildEffectivenessConfidenceBadge(metric.confidenceLabel)}
+            </td>
+        </tr>
+    `;
+}
+
+function buildWinLossEffectRow(effect) {
+    const rank = effect.rank == null ? "&mdash;" : escapeHtml(effect.rank);
+    const typeLabel = String(effect.effectType ?? "").toLowerCase() === "cc" ? "CC" : "Condition";
+    return `
+        <tr class="${effect.rank == null ? "effectiveness-unranked" : ""}">
+            <td><span class="effectiveness-rank">${rank}</span></td>
+            <td>
+                <strong>${escapeHtml(effect.name)}</strong>
+                <span class="table-inline-note">${escapeHtml(typeLabel)} &middot; ${escapeHtml(effect.directionLabel)}</span>
+            </td>
+            <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(effect, "win")}</td>
+            <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(effect, "loss")}</td>
+            <td>
+                <strong>${formatSignedEffectivenessValue(effect.resultEdge, effect.unit)}</strong>
+                <span class="table-inline-note">${escapeHtml(effect.directionLabel)}</span>
+            </td>
+            <td>
+                <strong>${formatNumber(effect.separationScore, 1)}</strong>
+                <span class="effectiveness-score-track"><i style="width:${Math.max(0, Math.min(100, Number(effect.separationScore ?? 0)))}%"></i></span>
+            </td>
+            <td>
+                <strong>${formatNumber(effect.evidenceScore, 1)}</strong>
+                ${buildEffectivenessConfidenceBadge(effect.confidenceLabel)}
+            </td>
+        </tr>
+    `;
+}
+
+function buildWinLossScopeCards(snapshot) {
+    const wins = snapshot.wins ?? {};
+    const losses = snapshot.losses ?? {};
+    const totalFights = Number(wins.filteredFightCount ?? 0) + Number(losses.filteredFightCount ?? 0);
+    const cachedFights = Number(wins.cacheFightCount ?? 0) + Number(losses.cacheFightCount ?? 0);
+    const coverage = totalFights > 0 ? cachedFights / totalFights * 100 : 0;
+    return `
+        <div class="stats-grid effectiveness-scope-grid">
+            <article class="analysis-card effectiveness-result-card effectiveness-result-card-win">
+                <strong>Wins compared</strong>
+                <div class="analysis-card-value">${formatNumber(wins.filteredFightCount)}</div>
+                <div class="table-inline-note">${formatNumber(wins.observationCount)} outcome and comparison windows.</div>
+            </article>
+            <article class="analysis-card effectiveness-result-card effectiveness-result-card-loss">
+                <strong>Losses compared</strong>
+                <div class="analysis-card-value">${formatNumber(losses.filteredFightCount)}</div>
+                <div class="table-inline-note">${formatNumber(losses.observationCount)} outcome and comparison windows.</div>
+            </article>
+            <article class="analysis-card">
+                <strong>Outcome-data coverage</strong>
+                <div class="analysis-card-value">${formatPercent(coverage)}</div>
+                <div class="table-inline-note">${formatNumber(cachedFights)} of ${formatNumber(totalFights)} win/loss fights.</div>
+            </article>
+        </div>
+        <div class="effectiveness-filter-note"><strong>Filter behavior:</strong> Commander, dates, patch, classes, and fight attributes apply to both cohorts. The Outcome filter is ignored only in this mode.</div>
+    `;
+}
+
+function renderHistoricalEffectivenessWinLoss(snapshot) {
+    currentHistoricalEffectivenessWinLossSnapshot = snapshot;
+    updateEffectivenessModeChrome();
+
+    const report = (snapshot.reports ?? []).find(item =>
+        item.perspectiveSideId === effectivenessPerspective &&
+        item.outcomeFamily === effectivenessOutcomeFamily);
+    if (!report) {
+        setInnerHtml("#analysis-effectiveness-content", `
+            ${buildWinLossScopeCards(snapshot)}
+            <div class="effectiveness-empty">No win/loss comparison is available for this selection.</div>
+        `);
+        return;
+    }
+
+    const metrics = (report.metrics ?? [])
+        .filter(metric => metric.available)
+        .slice()
+        .sort((left, right) =>
+            (left.rank == null ? Number.MAX_SAFE_INTEGER : left.rank) -
+            (right.rank == null ? Number.MAX_SAFE_INTEGER : right.rank) ||
+            Number(right.separationScore ?? 0) - Number(left.separationScore ?? 0));
+    const namedEffects = (report.namedEffects ?? [])
+        .filter(effect => effect.available)
+        .slice()
+        .sort((left, right) =>
+            (left.rank == null ? Number.MAX_SAFE_INTEGER : left.rank) -
+            (right.rank == null ? Number.MAX_SAFE_INTEGER : right.rank) ||
+            Number(right.separationScore ?? 0) - Number(left.separationScore ?? 0));
+    const unavailableMetrics = (report.metrics ?? []).filter(metric => !metric.available);
+    const perspectiveDescription = effectivenessPerspective === "squad"
+        ? "Positive result edge means the squad signal was stronger in wins."
+        : "Positive result edge means the enemy signal was stronger in squad losses.";
+
+    setInnerHtml("#analysis-effectiveness-content", `
+        ${buildWinLossScopeCards(snapshot)}
+        <div class="effectiveness-report-heading">
+            <div>
+                <h3>${escapeHtml(report.outcomeLabel)} signal in wins versus losses</h3>
+                <p class="workspace-note">${formatNumber(report.winPairedFightCount)} paired win fights and ${formatNumber(report.lossPairedFightCount)} paired loss fights. ${escapeHtml(perspectiveDescription)}</p>
+            </div>
+            ${buildEffectivenessConfidenceBadge(report.confidenceLabel)}
+        </div>
+        <section class="effectiveness-section">
+            <div class="effectiveness-section-heading">
+                <div>
+                    <h3>Strongest win/loss differences</h3>
+                    <p class="workspace-note">Win and loss lift compare the outcome window with its own baseline. Separation ranks how differently the signal behaves between results.</p>
+                </div>
+            </div>
+            <div class="table-shell table-shell-scroll effectiveness-table-shell">
+                <table class="data-table data-table-compact effectiveness-table effectiveness-win-loss-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Signal</th>
+                            <th>Wins</th>
+                            <th>Losses</th>
+                            <th>Result edge</th>
+                            <th>Separation</th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${metrics.length
+                            ? metrics.map(buildWinLossMetricRow).join("")
+                            : `<tr><td colspan="7">No measured signals have comparable win and loss evidence.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section class="effectiveness-section">
+            <div class="effectiveness-section-heading">
+                <div>
+                    <h3>Conditions and crowd control</h3>
+                    <p class="workspace-note">Specific effects are ranked by their win/loss separation after accounting for the weaker cohort's evidence.</p>
+                </div>
+            </div>
+            ${namedEffects.length
+                ? `<div class="table-shell table-shell-scroll effectiveness-table-shell">
+                    <table class="data-table data-table-compact effectiveness-table effectiveness-win-loss-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Effect</th>
+                                <th>Wins</th>
+                                <th>Losses</th>
+                                <th>Result edge</th>
+                                <th>Separation</th>
+                                <th>Evidence</th>
+                            </tr>
+                        </thead>
+                        <tbody>${namedEffects.map(buildWinLossEffectRow).join("")}</tbody>
+                    </table>
+                </div>`
+                : `<div class="effectiveness-empty">Named conditions and CCs are not included in recovery comparisons because the cache records them only for pressure and conversion windows.</div>`}
+        </section>
+        <details class="effectiveness-details">
+            <summary>How to read this comparison</summary>
+            <div class="effectiveness-details-body">
+                <p>${escapeHtml(snapshot.methodology?.comparison ?? "")}</p>
+                <p>${escapeHtml(snapshot.methodology?.weighting ?? "")}</p>
+                <p>${escapeHtml(snapshot.methodology?.confidenceIntervals ?? "")}</p>
+                <p>${escapeHtml(snapshot.methodology?.interpretation ?? "")}</p>
+                ${unavailableMetrics.length
+                    ? `<p><strong>Unavailable here:</strong> ${unavailableMetrics.map(metric => escapeHtml(metric.label)).join(", ")}.</p>`
+                    : ""}
+                ${(snapshot.availabilityNotes ?? []).length
+                    ? `<ul>${snapshot.availabilityNotes.map(note => `<li>${escapeHtml(note)}</li>`).join("")}</ul>`
+                    : ""}
+            </div>
+        </details>
+    `);
+}
+
 function renderHistoricalEffectivenessLoading(message = "Loading historical associations...") {
     setInnerHtml("#analysis-effectiveness-content", `<div class="effectiveness-empty">${escapeHtml(message)}</div>`);
 }
@@ -9335,6 +9583,49 @@ async function ensureHistoricalEffectivenessLoaded(force = false) {
     return historicalEffectivenessLoadPromise;
 }
 
+async function ensureHistoricalEffectivenessWinLossLoaded(force = false) {
+    if (!force && currentHistoricalEffectivenessWinLossSnapshot) {
+        renderHistoricalEffectivenessWinLoss(currentHistoricalEffectivenessWinLossSnapshot);
+        return currentHistoricalEffectivenessWinLossSnapshot;
+    }
+    if (historicalEffectivenessWinLossLoadPromise) {
+        return historicalEffectivenessWinLossLoadPromise;
+    }
+
+    renderHistoricalEffectivenessLoading("Comparing wins and losses across the filtered fights...");
+    historicalEffectivenessWinLossLoadPromise = loadHistoricalEffectivenessWinLoss(getAnalysisFiltersFromUi())
+        .then(snapshot => {
+            renderHistoricalEffectivenessWinLoss(snapshot);
+            return snapshot;
+        })
+        .catch(error => {
+            renderHistoricalEffectivenessLoading(error instanceof Error ? error.message : String(error));
+            throw error;
+        })
+        .finally(() => {
+            historicalEffectivenessWinLossLoadPromise = null;
+        });
+    return historicalEffectivenessWinLossLoadPromise;
+}
+
+function ensureActiveEffectivenessLoaded(force = false) {
+    return effectivenessMode === "win-loss"
+        ? ensureHistoricalEffectivenessWinLossLoaded(force)
+        : ensureHistoricalEffectivenessLoaded(force);
+}
+
+function renderActiveEffectivenessSnapshot() {
+    if (effectivenessMode === "win-loss") {
+        if (currentHistoricalEffectivenessWinLossSnapshot) {
+            renderHistoricalEffectivenessWinLoss(currentHistoricalEffectivenessWinLossSnapshot);
+        }
+        return;
+    }
+    if (currentHistoricalEffectivenessSnapshot) {
+        renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
+    }
+}
+
 function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-summary").textContent = message;
     setInnerHtml("#analysis-overview-cards", "");
@@ -9350,6 +9641,8 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-differences-summary").textContent = message;
     setInnerHtml("#analysis-differences-top-signals", "");
     currentHistoricalEffectivenessSnapshot = null;
+    currentHistoricalEffectivenessWinLossSnapshot = null;
+    updateEffectivenessModeChrome();
     renderHistoricalEffectivenessLoading("Open Effectiveness after the analysis finishes loading.");
     ["score", "lane", "attribute", "boon", "class", "enemy"].forEach(key => {
         setInnerHtml(`#analysis-differences-${key}-body`, `<tr><td colspan="5">${escapeHtml(message)}</td></tr>`);
@@ -9387,6 +9680,7 @@ function renderAnalysisError(message) {
 function renderAnalysis(snapshot) {
     currentAnalysisSnapshot = snapshot;
     currentHistoricalEffectivenessSnapshot = null;
+    currentHistoricalEffectivenessWinLossSnapshot = null;
     resetAnalysisPlayerDetailState();
 
     document.querySelector("#analysis-summary").textContent =
@@ -12196,21 +12490,33 @@ document.querySelectorAll("[data-analysis-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab, { resetScroll: true }));
 });
 document.querySelector("#analysis-panel-effectiveness").addEventListener("click", event => {
+    const modeButton = event.target.closest("[data-effectiveness-mode]");
+    if (modeButton) {
+        effectivenessMode = modeButton.dataset.effectivenessMode === "win-loss"
+            ? "win-loss"
+            : "associations";
+        updateEffectivenessModeChrome();
+        if (effectivenessMode === "win-loss" && currentHistoricalEffectivenessWinLossSnapshot) {
+            renderHistoricalEffectivenessWinLoss(currentHistoricalEffectivenessWinLossSnapshot);
+        } else if (effectivenessMode === "associations" && currentHistoricalEffectivenessSnapshot) {
+            renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
+        } else {
+            void ensureActiveEffectivenessLoaded().catch(() => {});
+        }
+        return;
+    }
+
     const perspectiveButton = event.target.closest("[data-effectiveness-perspective]");
     if (perspectiveButton) {
         effectivenessPerspective = perspectiveButton.dataset.effectivenessPerspective;
-        if (currentHistoricalEffectivenessSnapshot) {
-            renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
-        }
+        renderActiveEffectivenessSnapshot();
         return;
     }
 
     const familyButton = event.target.closest("[data-effectiveness-family]");
     if (familyButton) {
         effectivenessOutcomeFamily = familyButton.dataset.effectivenessFamily;
-        if (currentHistoricalEffectivenessSnapshot) {
-            renderHistoricalEffectiveness(currentHistoricalEffectivenessSnapshot);
-        }
+        renderActiveEffectivenessSnapshot();
     }
 });
 

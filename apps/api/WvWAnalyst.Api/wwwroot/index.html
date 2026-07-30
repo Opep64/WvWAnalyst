@@ -928,10 +928,17 @@
                 <div class="analysis-panel" id="analysis-panel-effectiveness" data-analysis-panel="effectiveness" role="tabpanel" aria-labelledby="analysis-tab-effectiveness" hidden>
                     <div class="effectiveness-heading">
                         <div>
-                            <h3>What changes around fight outcomes?</h3>
-                            <p class="workspace-note">Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Stronger association means a signal changed more consistently and with better evidence; it does not prove causation.</p>
+                            <h3 id="analysis-effectiveness-title">What changes around fight outcomes?</h3>
+                            <p class="workspace-note" id="analysis-effectiveness-description">Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Stronger association means a signal changed more consistently and with better evidence; it does not prove causation.</p>
                         </div>
-                        <span class="effectiveness-method-badge">Historical associations</span>
+                        <span class="effectiveness-method-badge" id="analysis-effectiveness-method-badge">Historical associations</span>
+                    </div>
+                    <div class="effectiveness-mode-bar">
+                        <span>Mode</span>
+                        <div class="effectiveness-switcher" role="group" aria-label="Effectiveness mode">
+                            <button class="effectiveness-switch is-active" type="button" data-effectiveness-mode="associations">Outcome Associations</button>
+                            <button class="effectiveness-switch" type="button" data-effectiveness-mode="win-loss">Win/Loss Comparison</button>
+                        </div>
                     </div>
                     <div class="effectiveness-toolbar">
                         <div class="effectiveness-control-group">
