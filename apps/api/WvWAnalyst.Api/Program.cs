@@ -72,6 +72,7 @@ builder.Services.AddSingleton<CommanderFightManagementService>();
 builder.Services.AddSingleton<PatchMetadataService>();
 builder.Services.AddSingleton<CompHelperConfigService>();
 builder.Services.AddSingleton<FightAttributeService>();
+builder.Services.AddSingleton<FightOutcomeObservationCacheService>();
 builder.Services.AddSingleton<FightAnalysisService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 builder.Services.AddSingleton<AuthUserStore>();
@@ -668,6 +669,23 @@ app.MapGet("/api/fights/{fightId}/artifacts/html", (string fightId, HttpContext 
 });
 app.MapGet("/api/fights/{fightId}/artifacts/analysis-json", (string fightId, FightCatalogService catalog) =>
     catalog.TryGetArtifact(fightId, FightArtifactKind.AnalysisJson, out var artifactPath, out var contentType)
+        ? Results.File(artifactPath, contentType, fileDownloadName: Path.GetFileName(artifactPath))
+        : Results.NotFound());
+app.MapGet("/api/fights/{fightId}/outcome-observations", (
+    string fightId,
+    FightCatalogService catalog,
+    FightOutcomeObservationCacheService cacheService) =>
+{
+    if (!catalog.TryGetArtifact(fightId, FightArtifactKind.OutcomeObservations, out var artifactPath, out _))
+    {
+        return Results.NotFound();
+    }
+
+    var cache = cacheService.TryRead(artifactPath);
+    return cache is null ? Results.NotFound() : Results.Ok(cache);
+});
+app.MapGet("/api/fights/{fightId}/artifacts/outcome-observations", (string fightId, FightCatalogService catalog) =>
+    catalog.TryGetArtifact(fightId, FightArtifactKind.OutcomeObservations, out var artifactPath, out var contentType)
         ? Results.File(artifactPath, contentType, fileDownloadName: Path.GetFileName(artifactPath))
         : Results.NotFound());
 app.MapGet("/api/fights/{fightId}/artifacts/json", (string fightId, FightCatalogService catalog) =>

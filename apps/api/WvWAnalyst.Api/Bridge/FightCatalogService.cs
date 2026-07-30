@@ -291,6 +291,7 @@ public sealed class FightCatalogService
         var relativePath = kind switch
         {
             FightArtifactKind.AnalysisJson => manifest.AnalysisJsonArtifactRelativePath,
+            FightArtifactKind.OutcomeObservations => manifest.OutcomeObservationCacheRelativePath,
             FightArtifactKind.Html => manifest.HtmlArtifactRelativePath,
             FightArtifactKind.Json => manifest.JsonArtifactRelativePath,
             FightArtifactKind.ParserConsoleLog => manifest.ParserConsoleLogRelativePath,
@@ -313,6 +314,7 @@ public sealed class FightCatalogService
         contentType = kind switch
         {
             FightArtifactKind.AnalysisJson => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
+            FightArtifactKind.OutcomeObservations => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
             FightArtifactKind.Html => "text/html; charset=utf-8",
             FightArtifactKind.Json => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
             FightArtifactKind.ParserConsoleLog => "text/plain; charset=utf-8",
@@ -423,6 +425,7 @@ public sealed class FightCatalogService
     {
         return new FightArtifactLinksDto(
             AnalysisJsonUrl: manifest.AnalysisJsonArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/analysis-json",
+            OutcomeObservationsUrl: manifest.OutcomeObservationCacheRelativePath is null ? null : $"/api/fights/{manifest.FightId}/outcome-observations",
             HtmlReportUrl: manifest.HtmlArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/html",
             JsonReportUrl: manifest.JsonArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/json",
             ParserConsoleLogUrl: !manifest.Parsed && manifest.ParserConsoleLogRelativePath is not null ? $"/api/fights/{manifest.FightId}/artifacts/parser-log" : null,
@@ -842,6 +845,7 @@ public sealed class FightCatalogService
             manifest.ParserConsoleLogRelativePath,
             manifest.RawLogRelativePath,
             manifest.AnalysisJsonArtifactRelativePath,
+            manifest.OutcomeObservationCacheRelativePath,
             manifest.HtmlArtifactRelativePath,
             manifest.JsonArtifactRelativePath
         }
@@ -915,6 +919,7 @@ public sealed class FightCatalogService
 public enum FightArtifactKind
 {
     AnalysisJson,
+    OutcomeObservations,
     Html,
     Json,
     ParserConsoleLog,

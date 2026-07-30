@@ -26,6 +26,8 @@ public sealed class WvWAnalystFightPayloadDto
 
     public WvWAnalystFightShapeDto? FightShape { get; set; }
 
+    public WvWAnalystOutcomeAnalysisDto? OutcomeAnalysis { get; set; }
+
     public IReadOnlyList<WvWAnalystThreatBoonSummaryDto> ThreatBoons { get; set; } = Array.Empty<WvWAnalystThreatBoonSummaryDto>();
 
     public IReadOnlyList<WvWAnalystTopBurstDto> TopBursts { get; set; } = Array.Empty<WvWAnalystTopBurstDto>();
@@ -118,6 +120,179 @@ public sealed class WvWAnalystFightShapeSideStateDto
     public int Unobserved { get; set; }
 }
 
+public sealed class WvWAnalystOutcomeAnalysisDto
+{
+    public string MethodVersion { get; set; } = string.Empty;
+    public int SampleIntervalMs { get; set; }
+    public int PressureWindowMs { get; set; }
+    public int EngagementMergeGapMs { get; set; }
+    public long? CompetitiveEndTimeMs { get; set; }
+    public WvWAnalystOutcomeAnalysisAvailabilityDto Availability { get; set; } = new();
+    public WvWAnalystOutcomeTimelineDto Timeline { get; set; } = new();
+    public IReadOnlyList<WvWAnalystOutcomeEventDto> Events { get; set; } = Array.Empty<WvWAnalystOutcomeEventDto>();
+    public IReadOnlyList<WvWAnalystConditionEventDto> ConditionEvents { get; set; } = Array.Empty<WvWAnalystConditionEventDto>();
+    public IReadOnlyList<WvWAnalystCrowdControlEventDto> CrowdControlEvents { get; set; } = Array.Empty<WvWAnalystCrowdControlEventDto>();
+}
+
+public sealed class WvWAnalystOutcomeAnalysisAvailabilityDto
+{
+    public bool DamageAndBoonRemoval { get; set; }
+    public bool ConditionApplications { get; set; }
+    public bool SquadConditionApplications { get; set; }
+    public bool EnemyConditionApplications { get; set; }
+    public bool CrowdControlEvents { get; set; }
+    public bool SquadCrowdControlEvents { get; set; }
+    public bool EnemyCrowdControlEvents { get; set; }
+    public bool SquadPositioning { get; set; }
+    public bool SquadHealing { get; set; }
+    public bool SquadBarrier { get; set; }
+    public bool EnemyHealing { get; set; }
+    public bool EnemyBarrier { get; set; }
+    public bool ExactEnemyBoonState { get; set; }
+    public bool ExactEnemyConditionState { get; set; }
+    public bool ExactStabilityState { get; set; }
+    public IReadOnlyList<string> Notes { get; set; } = Array.Empty<string>();
+}
+
+public sealed class WvWAnalystOutcomeTimelineDto
+{
+    public int SampleCount { get; set; }
+    public long[] TimesMs { get; set; } = [];
+    public WvWAnalystOutcomeSideTimelineDto Squad { get; set; } = new();
+    public WvWAnalystOutcomeSideTimelineDto Enemy { get; set; } = new();
+    public WvWAnalystOutcomePositioningTimelineDto SquadPositioning { get; set; } = new();
+}
+
+public sealed class WvWAnalystOutcomeSideTimelineDto
+{
+    public long[] Damage { get; set; } = [];
+    public int[] Downs { get; set; } = [];
+    public int[] DownsTotal { get; set; } = [];
+    public int[] Kills { get; set; } = [];
+    public int[] KillsTotal { get; set; } = [];
+    public int[] Strips { get; set; } = [];
+    public int[] Corrupts { get; set; } = [];
+    public int[] StripPeakGapMs { get; set; } = [];
+    public bool[] StripSynced { get; set; } = [];
+    public double[] TopTargetShare { get; set; } = [];
+    public double[] TopThreeTargetShare { get; set; } = [];
+    public int[] TopTargetContributors { get; set; } = [];
+    public bool[] Focused { get; set; } = [];
+    public int[] TargetSaturationCount { get; set; } = [];
+    public long[] Healing { get; set; } = [];
+    public long[] Barrier { get; set; } = [];
+    public int[] Cleanses { get; set; } = [];
+    public WvWAnalystOutcomeSideStateTimelineDto State { get; set; } = new();
+}
+
+public sealed class WvWAnalystOutcomeSideStateTimelineDto
+{
+    public int[] Total { get; set; } = [];
+    public int[] Observed { get; set; } = [];
+    public int[] Active { get; set; } = [];
+    public int[] Downed { get; set; } = [];
+    public int[] DeadOrDisconnected { get; set; } = [];
+    public int[] Removed { get; set; } = [];
+    public int[] Unobserved { get; set; } = [];
+}
+
+public sealed class WvWAnalystOutcomePositioningTimelineDto
+{
+    public bool[] Available { get; set; } = [];
+    public int[] EligiblePlayers { get; set; } = [];
+    public int[] InPositionPlayers { get; set; } = [];
+    public int[] OutOfPositionPlayers { get; set; } = [];
+    public int[] TooFarPlayers { get; set; } = [];
+    public int[] OverextendedPlayers { get; set; } = [];
+    public int[] LateralRiskPlayers { get; set; } = [];
+    public int[] EngagedEnemyCount { get; set; } = [];
+    public int[] EnemiesNearCommander { get; set; } = [];
+    public bool[] Mingled { get; set; } = [];
+    public double[] InPositionRate { get; set; } = [];
+    public double[] TooFarRate { get; set; } = [];
+    public double[] OverextendedRate { get; set; } = [];
+    public double[] LateralRiskRate { get; set; } = [];
+}
+
+public sealed class WvWAnalystOutcomeEventDto
+{
+    public string EventId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string EngagementId { get; set; } = string.Empty;
+    public string ActingSideId { get; set; } = string.Empty;
+    public string AffectedSideId { get; set; } = string.Empty;
+    public int ActorId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public long TimeMs { get; set; }
+    public long DownTimeMs { get; set; }
+    public long WindowStartMs { get; set; }
+    public string Outcome { get; set; } = string.Empty;
+    public long? OutcomeTimeMs { get; set; }
+    public int TotalDamage { get; set; }
+    public int StrikeDamage { get; set; }
+    public int ConditionDamage { get; set; }
+    public int BarrierDamage { get; set; }
+    public int HitCount { get; set; }
+    public int ContributorCount { get; set; }
+    public int CrowdControlImpacts { get; set; }
+    public int HardCrowdControlImpacts { get; set; }
+    public int DownedHealing { get; set; }
+    public int DownedHealingEvents { get; set; }
+    public int ResurrectionCasts { get; set; }
+    public double ResurrectionCastDurationSeconds { get; set; }
+    public int SupportContributors { get; set; }
+    public int ClassRecoveryActions { get; set; }
+    public IReadOnlyList<WvWAnalystOutcomeConditionDamageDto> ConditionDamageByEffect { get; set; } = Array.Empty<WvWAnalystOutcomeConditionDamageDto>();
+}
+
+public sealed class WvWAnalystOutcomeConditionDamageDto
+{
+    public long? BuffId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public double Damage { get; set; }
+}
+
+public sealed class WvWAnalystConditionEventDto
+{
+    public long TimeMs { get; set; }
+    public string ActingSideId { get; set; } = string.Empty;
+    public string AffectedSideId { get; set; } = string.Empty;
+    public int ApplyCount { get; set; }
+    public int ExtensionCount { get; set; }
+    public double VulnerabilityBonusDamage { get; set; }
+    public string TopSourceName { get; set; } = string.Empty;
+    public IReadOnlyList<WvWAnalystConditionEffectDto> Effects { get; set; } = Array.Empty<WvWAnalystConditionEffectDto>();
+}
+
+public sealed class WvWAnalystConditionEffectDto
+{
+    public long BuffId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int ApplyCount { get; set; }
+    public int ExtensionCount { get; set; }
+}
+
+public sealed class WvWAnalystCrowdControlEventDto
+{
+    public long TimeMs { get; set; }
+    public string ActingSideId { get; set; } = string.Empty;
+    public string AffectedSideId { get; set; } = string.Empty;
+    public int EventCount { get; set; }
+    public int EffectiveCount { get; set; }
+    public double DurationSeconds { get; set; }
+    public string TopSourceName { get; set; } = string.Empty;
+    public IReadOnlyList<WvWAnalystCrowdControlEffectDto> Effects { get; set; } = Array.Empty<WvWAnalystCrowdControlEffectDto>();
+}
+
+public sealed class WvWAnalystCrowdControlEffectDto
+{
+    public long SkillId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int EventCount { get; set; }
+    public int EffectiveCount { get; set; }
+    public double DurationSeconds { get; set; }
+}
+
 public sealed class WvWAnalystMetaDto
 {
     public string SchemaVersion { get; set; } = string.Empty;
@@ -157,6 +332,10 @@ public sealed class WvWAnalystFightDto
     public string EndTimeUtc { get; set; } = string.Empty;
 
     public long? DurationMs { get; set; }
+
+    public ulong GameBuild { get; set; }
+
+    public string ArcVersion { get; set; } = string.Empty;
 }
 
 public sealed class WvWAnalystAvailabilityDto

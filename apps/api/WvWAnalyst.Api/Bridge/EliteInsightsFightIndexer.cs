@@ -98,8 +98,10 @@ public sealed class EliteInsightsFightIndexer
                 EnemyTeamIds: Array.Empty<int>(),
                 CommanderDisplayNames: commanderDisplayNames,
                 ActiveExtensions: Array.Empty<string>(),
-                ArcVersion: null,
-                GW2Build: null,
+                ArcVersion: NullIfWhiteSpace(payload.Fight.ArcVersion),
+                GW2Build: payload.Fight.GameBuild > 0 && payload.Fight.GameBuild <= int.MaxValue
+                    ? (int)payload.Fight.GameBuild
+                    : null,
                 RecordedBy: null,
                 RecordedAccountBy: null);
         }

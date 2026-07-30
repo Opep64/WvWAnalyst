@@ -214,6 +214,7 @@ public sealed record FightDetailDto(
 
 public sealed record FightArtifactLinksDto(
     string? AnalysisJsonUrl,
+    string? OutcomeObservationsUrl,
     string? HtmlReportUrl,
     string? JsonReportUrl,
     string? ParserConsoleLogUrl,
