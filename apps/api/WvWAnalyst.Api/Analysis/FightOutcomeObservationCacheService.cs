@@ -131,6 +131,10 @@ public sealed class FightOutcomeObservationCacheService
     private static FightOutcomeObservationCacheDto Build(WvWAnalystFightPayloadDto payload)
     {
         WvWAnalystOutcomeAnalysisDto analysis = payload.OutcomeAnalysis!;
+        analysis.Events = analysis.Events
+            .GroupBy(BuildOutcomeEventIdentity, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
         long competitiveEnd = analysis.CompetitiveEndTimeMs
             ?? (analysis.Timeline.TimesMs.Length > 0 ? analysis.Timeline.TimesMs[^1] : 0);
         var observations = new List<FightOutcomeObservationDto>();
@@ -162,6 +166,13 @@ public sealed class FightOutcomeObservationCacheService
             Summary = BuildSummary(observations),
             Observations = observations,
         };
+    }
+
+    private static string BuildOutcomeEventIdentity(WvWAnalystOutcomeEventDto evt)
+    {
+        return !string.IsNullOrWhiteSpace(evt.EventId)
+            ? $"id:{evt.EventId}"
+            : $"fallback:{evt.EventType}:{evt.ActingSideId}:{evt.AffectedSideId}:{evt.ActorId}:{evt.TimeMs}:{evt.DownTimeMs}";
     }
 
     private static IEnumerable<FightOutcomeObservationDto> BuildDownOutcomeObservations(
