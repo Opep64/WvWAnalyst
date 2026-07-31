@@ -9,6 +9,19 @@ param(
 
 $existingProcess = Get-WvWAnalystTrackedProcess
 if ($null -ne $existingProcess) {
+    $pidPath = Get-WvWAnalystPidPath
+    $metadataPath = Get-WvWAnalystMetadataPath
+    Set-Content -LiteralPath $pidPath -Value $existingProcess.Id
+    $existingMetadata = [pscustomobject]@{
+        pid = $existingProcess.Id
+        processName = $existingProcess.ProcessName
+        processStartTimeUtc = $existingProcess.StartTime.ToUniversalTime().ToString("o")
+        url = $Url
+        logPath = Get-WvWAnalystLogPath
+        errorLogPath = Get-WvWAnalystErrorLogPath
+        startedAtUtc = $existingProcess.StartTime.ToUniversalTime().ToString("o")
+    }
+    $existingMetadata | ConvertTo-Json | Set-Content -LiteralPath $metadataPath
     Write-Output "WvWAnalyst is already running with PID $($existingProcess.Id)."
     return
 }
@@ -59,6 +72,8 @@ Set-Content -LiteralPath $pidPath -Value $process.Id
 
 $metadata = [pscustomobject]@{
     pid = $process.Id
+    processName = $process.ProcessName
+    processStartTimeUtc = $process.StartTime.ToUniversalTime().ToString("o")
     url = $Url
     logPath = $logPath
     errorLogPath = $errorLogPath

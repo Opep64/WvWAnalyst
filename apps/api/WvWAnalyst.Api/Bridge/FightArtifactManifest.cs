@@ -19,6 +19,7 @@ public sealed record FightArtifactManifest(
     bool RawLogRetained,
     string? RawLogRelativePath,
     string? AnalysisJsonArtifactRelativePath,
+    string? PressurePreviewArtifactRelativePath,
     string? OutcomeObservationCacheRelativePath,
     string? HtmlArtifactRelativePath,
     string? JsonArtifactRelativePath,

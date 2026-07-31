@@ -372,6 +372,7 @@ public sealed class FightCatalogService
         var relativePath = kind switch
         {
             FightArtifactKind.AnalysisJson => manifest.AnalysisJsonArtifactRelativePath,
+            FightArtifactKind.PressurePreview => manifest.PressurePreviewArtifactRelativePath,
             FightArtifactKind.OutcomeObservations => manifest.OutcomeObservationCacheRelativePath,
             FightArtifactKind.Html => manifest.HtmlArtifactRelativePath,
             FightArtifactKind.Json => manifest.JsonArtifactRelativePath,
@@ -395,6 +396,7 @@ public sealed class FightCatalogService
         contentType = kind switch
         {
             FightArtifactKind.AnalysisJson => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
+            FightArtifactKind.PressurePreview => "image/svg+xml; charset=utf-8",
             FightArtifactKind.OutcomeObservations => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
             FightArtifactKind.Html => "text/html; charset=utf-8",
             FightArtifactKind.Json => resolvedPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? "application/gzip" : "application/json",
@@ -450,6 +452,7 @@ public sealed class FightCatalogService
                 ImportedAtUtc: null,
                 RawLogRetained: false,
                 AnalysisJsonUrl: null,
+                PressurePreviewUrl: null,
                 HtmlReportUrl: null,
                 JsonReportUrl: null,
                 ParserConsoleLogUrl: null,
@@ -472,6 +475,7 @@ public sealed class FightCatalogService
             ImportedAtUtc: manifest.ImportedAtUtc.ToString("O"),
             RawLogRetained: manifest.RawLogRetained,
             AnalysisJsonUrl: links.AnalysisJsonUrl,
+            PressurePreviewUrl: links.PressurePreviewUrl,
             HtmlReportUrl: links.HtmlReportUrl,
             JsonReportUrl: links.JsonReportUrl,
             ParserConsoleLogUrl: links.ParserConsoleLogUrl,
@@ -506,6 +510,7 @@ public sealed class FightCatalogService
     {
         return new FightArtifactLinksDto(
             AnalysisJsonUrl: manifest.AnalysisJsonArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/analysis-json",
+            PressurePreviewUrl: manifest.PressurePreviewArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/pressure-preview",
             OutcomeObservationsUrl: manifest.OutcomeObservationCacheRelativePath is null ? null : $"/api/fights/{manifest.FightId}/outcome-observations",
             HtmlReportUrl: manifest.HtmlArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/html",
             JsonReportUrl: manifest.JsonArtifactRelativePath is null ? null : $"/api/fights/{manifest.FightId}/artifacts/json",
@@ -1000,6 +1005,7 @@ public sealed class FightCatalogService
 public enum FightArtifactKind
 {
     AnalysisJson,
+    PressurePreview,
     OutcomeObservations,
     Html,
     Json,

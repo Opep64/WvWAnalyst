@@ -74,24 +74,24 @@ function Get-WvWAnalystTrackedProcess {
     else {
         $pidPath = Get-WvWAnalystPidPath
         if (-not (Test-Path -LiteralPath $pidPath)) {
-            return $null
+            return Get-WvWAnalystProcessByCommandLine
         }
 
         $pidValue = Get-Content -LiteralPath $pidPath -ErrorAction SilentlyContinue | Select-Object -First 1
     }
 
     if ([string]::IsNullOrWhiteSpace($pidValue)) {
-        return $null
+        return Get-WvWAnalystProcessByCommandLine
     }
 
     $pidNumber = 0
     if (-not [int]::TryParse($pidValue, [ref]$pidNumber)) {
-        return $null
+        return Get-WvWAnalystProcessByCommandLine
     }
 
     $process = Get-Process -Id $pidNumber -ErrorAction SilentlyContinue
     if ($null -eq $process) {
-        return $null
+        return Get-WvWAnalystProcessByCommandLine
     }
 
     if ($null -eq $metadata) {
@@ -100,7 +100,7 @@ function Get-WvWAnalystTrackedProcess {
 
     if ($metadata.PSObject.Properties.Name -contains "processName") {
         if (-not [string]::Equals($process.ProcessName, [string]$metadata.processName, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $null
+            return Get-WvWAnalystProcessByCommandLine
         }
     }
 
@@ -109,15 +109,40 @@ function Get-WvWAnalystTrackedProcess {
             $expectedStart = [DateTime]::Parse([string]$metadata.processStartTimeUtc).ToUniversalTime()
             $actualStart = $process.StartTime.ToUniversalTime()
             if ([Math]::Abs(($actualStart - $expectedStart).TotalSeconds) -gt 1) {
-                return $null
+                return Get-WvWAnalystProcessByCommandLine
             }
         }
         catch {
-            return $null
+            return Get-WvWAnalystProcessByCommandLine
         }
     }
 
     return $process
+}
+
+function Get-WvWAnalystProcessByCommandLine {
+    $apiAssemblyPath = [System.IO.Path]::GetFullPath((Get-WvWAnalystApiAssemblyPath))
+    $apiExecutablePath = [System.IO.Path]::GetFullPath((Get-WvWAnalystApiExecutablePath))
+
+    try {
+        $candidate = Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object {
+                $commandLine = [string]$_.CommandLine
+                $executablePath = [string]$_.ExecutablePath
+                $commandLine.IndexOf($apiAssemblyPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                    [string]::Equals($executablePath, $apiExecutablePath, [System.StringComparison]::OrdinalIgnoreCase)
+            } |
+            Select-Object -First 1
+    }
+    catch {
+        return $null
+    }
+
+    if ($null -eq $candidate) {
+        return $null
+    }
+
+    return Get-Process -Id ([int]$candidate.ProcessId) -ErrorAction SilentlyContinue
 }
 
 function Get-WvWAnalystProcessMetadata {

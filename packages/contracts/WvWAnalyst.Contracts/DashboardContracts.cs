@@ -58,6 +58,7 @@ public sealed record FightArtifactSummaryDto(
     string? ImportedAtUtc,
     bool RawLogRetained,
     string? AnalysisJsonUrl,
+    string? PressurePreviewUrl,
     string? HtmlReportUrl,
     string? JsonReportUrl,
     string? ParserConsoleLogUrl,
@@ -214,6 +215,7 @@ public sealed record FightDetailDto(
 
 public sealed record FightArtifactLinksDto(
     string? AnalysisJsonUrl,
+    string? PressurePreviewUrl,
     string? OutcomeObservationsUrl,
     string? HtmlReportUrl,
     string? JsonReportUrl,

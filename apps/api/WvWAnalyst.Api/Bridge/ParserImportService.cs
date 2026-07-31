@@ -463,6 +463,10 @@ public sealed class ParserImportService
                 var htmlArtifactRelativePath = string.IsNullOrWhiteSpace(finalHtmlArtifactPath)
                     ? null
                     : _fightCatalog.GetRelativePath(fightDirectoryPath, finalHtmlArtifactPath);
+                var finalPressurePreviewArtifactPath = FindArtifactPathByEnding(finalParserOutputDirectoryPath, ".analysis-strips.svg");
+                var pressurePreviewArtifactRelativePath = string.IsNullOrWhiteSpace(finalPressurePreviewArtifactPath)
+                    ? null
+                    : _fightCatalog.GetRelativePath(fightDirectoryPath, finalPressurePreviewArtifactPath);
 
                 var importedAtUtc = DateTime.UtcNow;
                 var manifest = new FightArtifactManifest(
@@ -484,6 +488,7 @@ public sealed class ParserImportService
                     RawLogRetained: false,
                     RawLogRelativePath: null,
                     AnalysisJsonArtifactRelativePath: null,
+                    PressurePreviewArtifactRelativePath: pressurePreviewArtifactRelativePath,
                     OutcomeObservationCacheRelativePath: outcomeObservationCacheRelativePath,
                     HtmlArtifactRelativePath: htmlArtifactRelativePath,
                     JsonArtifactRelativePath: null,

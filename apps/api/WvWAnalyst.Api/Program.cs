@@ -747,6 +747,10 @@ app.MapGet("/api/fights/{fightId}/artifacts/analysis-json", (string fightId, Fig
     catalog.TryGetArtifact(fightId, FightArtifactKind.AnalysisJson, out var artifactPath, out var contentType)
         ? Results.File(artifactPath, contentType, fileDownloadName: Path.GetFileName(artifactPath))
         : Results.NotFound());
+app.MapGet("/api/fights/{fightId}/artifacts/pressure-preview", (string fightId, FightCatalogService catalog) =>
+    catalog.TryGetArtifact(fightId, FightArtifactKind.PressurePreview, out var artifactPath, out var contentType)
+        ? Results.File(artifactPath, contentType)
+        : Results.NotFound());
 app.MapGet("/api/fights/{fightId}/outcome-observations", (
     string fightId,
     FightCatalogService catalog,

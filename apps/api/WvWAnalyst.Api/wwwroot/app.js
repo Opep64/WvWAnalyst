@@ -10030,9 +10030,12 @@ function buildFightBrowserRow(fight, selectedFightId) {
     const duration = fightIndex?.duration ?? "-";
     const squadCount = fightIndex?.squadPlayerCount ?? "-";
     const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
+    const pressurePreviewAttributes = fight.pressurePreviewUrl
+        ? ` data-pressure-preview-url="${escapeHtml(fight.pressurePreviewUrl)}" data-pressure-preview-label="${escapeHtml(`${fightTime || "Fight"} · ${commander}`)}" tabindex="0"`
+        : "";
 
     return `
-        <tr class="${rowClasses.join(" ")}">
+        <tr class="${rowClasses.join(" ")}"${pressurePreviewAttributes}>
             <td>${escapeHtml(fightTime || "-")}</td>
             <td>${escapeHtml(commander)}</td>
             <td>${escapeHtml(duration)}</td>
@@ -10051,6 +10054,76 @@ function buildFightBrowserRow(fight, selectedFightId) {
             </td>
         </tr>
     `;
+}
+
+function positionFightPressurePreview(event, row) {
+    const preview = document.querySelector("#fight-pressure-preview");
+    if (!preview || preview.hidden) {
+        return;
+    }
+
+    const margin = 16;
+    const pointerX = Number(event?.clientX);
+    const pointerY = Number(event?.clientY);
+    const rowBounds = row?.getBoundingClientRect();
+    let left = Number.isFinite(pointerX) ? pointerX + 18 : (rowBounds?.right ?? margin) + 12;
+    let top = Number.isFinite(pointerY) ? pointerY + 18 : (rowBounds?.top ?? margin);
+    const width = preview.offsetWidth;
+    const height = preview.offsetHeight;
+
+    if (left + width + margin > window.innerWidth) {
+        left = Number.isFinite(pointerX)
+            ? pointerX - width - 18
+            : Math.max(margin, (rowBounds?.left ?? window.innerWidth) - width - 12);
+    }
+    if (top + height + margin > window.innerHeight) {
+        top = Math.max(margin, window.innerHeight - height - margin);
+    }
+
+    preview.style.left = `${Math.max(margin, left)}px`;
+    preview.style.top = `${Math.max(margin, top)}px`;
+}
+
+function showFightPressurePreview(event) {
+    const row = event.target.closest("tr[data-pressure-preview-url]");
+    const preview = document.querySelector("#fight-pressure-preview");
+    const image = document.querySelector("#fight-pressure-preview-image");
+    const label = document.querySelector("#fight-pressure-preview-label");
+    if (!row || !preview || !image || !label) {
+        return;
+    }
+
+    const url = row.dataset.pressurePreviewUrl;
+    if (!url) {
+        return;
+    }
+
+    label.textContent = row.dataset.pressurePreviewLabel ?? "";
+    if (image.dataset.previewUrl !== url) {
+        image.dataset.previewUrl = url;
+        image.src = url;
+    }
+    preview.hidden = false;
+    positionFightPressurePreview(event, row);
+}
+
+function hideFightPressurePreview(event) {
+    const row = event.target.closest("tr[data-pressure-preview-url]");
+    if (row && event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) {
+        return;
+    }
+
+    const preview = document.querySelector("#fight-pressure-preview");
+    if (preview) {
+        preview.hidden = true;
+    }
+}
+
+function moveFightPressurePreview(event) {
+    const row = event.target.closest("tr[data-pressure-preview-url]");
+    if (row) {
+        positionFightPressurePreview(event, row);
+    }
 }
 
 function buildFightShapeBrowserCell(shape) {
@@ -12258,6 +12331,11 @@ document.querySelector("#analysis-class-filters").addEventListener("change", eve
     updateClassFilterGroupSummary(`#${box.id}`);
 });
 document.querySelector("#fight-browser-top-bursts-toggle").addEventListener("click", toggleFightBrowserTopBursts);
+document.querySelector("#fight-browser-body").addEventListener("pointerover", showFightPressurePreview);
+document.querySelector("#fight-browser-body").addEventListener("pointerout", hideFightPressurePreview);
+document.querySelector("#fight-browser-body").addEventListener("pointermove", moveFightPressurePreview);
+document.querySelector("#fight-browser-body").addEventListener("focusin", showFightPressurePreview);
+document.querySelector("#fight-browser-body").addEventListener("focusout", hideFightPressurePreview);
 document.querySelector("#analysis-class-filters").addEventListener("click", event => {
     const button = event.target.closest("[data-class-filter-clear]");
     if (!button) {
