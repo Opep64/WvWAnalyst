@@ -11501,12 +11501,24 @@ function buildFightBrowserRow(fight, selectedFightId) {
     const duration = fightIndex?.duration ?? "-";
     const squadCount = fightIndex?.squadPlayerCount ?? "-";
     const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
-    const pressurePreviewAttributes = fight.pressurePreviewUrl
-        ? ` data-pressure-preview-url="${escapeHtml(fight.pressurePreviewUrl)}" data-pressure-preview-label="${escapeHtml(`${fightTime || "Fight"} · ${commander}`)}" tabindex="0"`
+    const pressurePreviewLabel = `${fightTime || "Fight"} - ${commander}`;
+    const pressurePreviewButton = fight.pressurePreviewUrl
+        ? `
+            <button
+                class="fight-pressure-preview-trigger"
+                type="button"
+                data-pressure-preview-url="${escapeHtml(fight.pressurePreviewUrl)}"
+                data-pressure-preview-label="${escapeHtml(pressurePreviewLabel)}"
+                aria-label="Preview burst damage for ${escapeHtml(pressurePreviewLabel)}"
+                title="Preview burst damage">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                    <path d="M2.5 16.5h15M3.5 13.5l3-4 3 2 3.5-7 3.5 4.5" />
+                </svg>
+            </button>`
         : "";
 
     return `
-        <tr class="${rowClasses.join(" ")}" data-fight-id="${escapeHtml(fight.fightId)}"${pressurePreviewAttributes}>
+        <tr class="${rowClasses.join(" ")}" data-fight-id="${escapeHtml(fight.fightId)}">
             <td>${escapeHtml(fightTime || "-")}</td>
             <td>${escapeHtml(commander)}</td>
             <td>${escapeHtml(duration)}</td>
@@ -11521,13 +11533,14 @@ function buildFightBrowserRow(fight, selectedFightId) {
                     <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}" data-fight-summary-id="${escapeHtml(fight.fightId)}">Summary</a>
                     ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
+                    ${pressurePreviewButton}
                 </div>
             </td>
         </tr>
     `;
 }
 
-function positionFightPressurePreview(event, row) {
+function positionFightPressurePreview(event, trigger) {
     const preview = document.querySelector("#fight-pressure-preview");
     if (!preview || preview.hidden) {
         return;
@@ -11536,16 +11549,16 @@ function positionFightPressurePreview(event, row) {
     const margin = 16;
     const pointerX = Number(event?.clientX);
     const pointerY = Number(event?.clientY);
-    const rowBounds = row?.getBoundingClientRect();
-    let left = Number.isFinite(pointerX) ? pointerX + 18 : (rowBounds?.right ?? margin) + 12;
-    let top = Number.isFinite(pointerY) ? pointerY + 18 : (rowBounds?.top ?? margin);
+    const triggerBounds = trigger?.getBoundingClientRect();
+    let left = Number.isFinite(pointerX) ? pointerX + 18 : (triggerBounds?.right ?? margin) + 12;
+    let top = Number.isFinite(pointerY) ? pointerY + 18 : (triggerBounds?.top ?? margin);
     const width = preview.offsetWidth;
     const height = preview.offsetHeight;
 
     if (left + width + margin > window.innerWidth) {
         left = Number.isFinite(pointerX)
             ? pointerX - width - 18
-            : Math.max(margin, (rowBounds?.left ?? window.innerWidth) - width - 12);
+            : Math.max(margin, (triggerBounds?.left ?? window.innerWidth) - width - 12);
     }
     if (top + height + margin > window.innerHeight) {
         top = Math.max(margin, window.innerHeight - height - margin);
@@ -11556,31 +11569,31 @@ function positionFightPressurePreview(event, row) {
 }
 
 function showFightPressurePreview(event) {
-    const row = event.target.closest("tr[data-pressure-preview-url]");
+    const trigger = event.target.closest("[data-pressure-preview-url]");
     const preview = document.querySelector("#fight-pressure-preview");
     const image = document.querySelector("#fight-pressure-preview-image");
     const label = document.querySelector("#fight-pressure-preview-label");
-    if (!row || !preview || !image || !label) {
+    if (!trigger || !preview || !image || !label) {
         return;
     }
 
-    const url = row.dataset.pressurePreviewUrl;
+    const url = trigger.dataset.pressurePreviewUrl;
     if (!url) {
         return;
     }
 
-    label.textContent = row.dataset.pressurePreviewLabel ?? "";
+    label.textContent = trigger.dataset.pressurePreviewLabel ?? "";
     if (image.dataset.previewUrl !== url) {
         image.dataset.previewUrl = url;
         image.src = url;
     }
     preview.hidden = false;
-    positionFightPressurePreview(event, row);
+    positionFightPressurePreview(event, trigger);
 }
 
 function hideFightPressurePreview(event) {
-    const row = event.target.closest("tr[data-pressure-preview-url]");
-    if (row && event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) {
+    const trigger = event.target.closest("[data-pressure-preview-url]");
+    if (trigger && event.relatedTarget instanceof Node && trigger.contains(event.relatedTarget)) {
         return;
     }
 
@@ -11591,9 +11604,9 @@ function hideFightPressurePreview(event) {
 }
 
 function moveFightPressurePreview(event) {
-    const row = event.target.closest("tr[data-pressure-preview-url]");
-    if (row) {
-        positionFightPressurePreview(event, row);
+    const trigger = event.target.closest("[data-pressure-preview-url]");
+    if (trigger) {
+        positionFightPressurePreview(event, trigger);
     }
 }
 

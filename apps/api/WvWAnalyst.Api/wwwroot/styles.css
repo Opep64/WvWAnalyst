@@ -2025,9 +2025,40 @@ h1 {
     background: #101923;
 }
 
-#fight-browser-body tr[data-pressure-preview-url]:focus {
-    outline: 2px solid rgba(86, 214, 201, 0.72);
-    outline-offset: -2px;
+.fight-pressure-preview-trigger {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 4px;
+    border: 1px solid rgba(86, 214, 201, 0.34);
+    border-radius: 7px;
+    background: rgba(86, 214, 201, 0.08);
+    color: rgb(86, 214, 201);
+    cursor: help;
+}
+
+.fight-pressure-preview-trigger svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.fight-pressure-preview-trigger:hover,
+.fight-pressure-preview-trigger:focus-visible {
+    border-color: rgba(86, 214, 201, 0.78);
+    background: rgba(86, 214, 201, 0.18);
+    outline: none;
+}
+
+.fight-pressure-preview-trigger:focus-visible {
+    box-shadow: 0 0 0 2px rgba(86, 214, 201, 0.28);
 }
 
 .table-shell-top-bursts {
