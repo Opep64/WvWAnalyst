@@ -762,6 +762,8 @@
                         <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
                         <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
                         <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
+                        <button class="analysis-tab" id="analysis-tab-conditions" type="button" data-analysis-tab="conditions" role="tab" aria-selected="false">Conditions</button>
+                        <button class="analysis-tab" id="analysis-tab-crowd-control" type="button" data-analysis-tab="crowd-control" role="tab" aria-selected="false">CC</button>
                         <button class="analysis-tab" id="analysis-tab-comp-helper" type="button" data-analysis-tab="comp-helper" role="tab" aria-selected="false">Comp Helper</button>
                         <button class="analysis-tab" id="analysis-tab-enemies" type="button" data-analysis-tab="enemies" role="tab" aria-selected="false">Enemies</button>
                         <button class="analysis-tab" id="analysis-tab-top-five" type="button" data-analysis-tab="top-five" role="tab" aria-selected="false">Top 5</button>
@@ -1105,6 +1107,78 @@
                                     <div id="analysis-boon-trend-chart"></div>
                                 </div>
                             </section>
+                        </aside>
+                    </div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-conditions" data-analysis-panel="conditions" role="tabpanel" aria-labelledby="analysis-tab-conditions" hidden>
+                    <p class="workspace-note analysis-panel-note">Attributed condition applications across the filtered fights. Rates use summed active source-player minutes, so fight length and side size are normalized together.</p>
+                    <div class="browser-controls analysis-player-toolbar">
+                        <label class="browser-field">
+                            <span>Applying side</span>
+                            <select id="analysis-condition-side">
+                                <option value="squad">Squad → Enemy</option>
+                                <option value="enemy">Enemy → Squad</option>
+                                <option value="compare">Squad vs Enemy</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="stats-grid" id="analysis-condition-cards"></div>
+                    <div class="analysis-effect-layout">
+                        <div class="analysis-effect-list">
+                            <div class="table-shell table-shell-scroll">
+                                <table class="data-table">
+                                    <thead id="analysis-conditions-head">
+                                        <tr>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="name">Condition</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="fights">Fights</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="applications">Applications</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="applicationsRate">Apps / player-min</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="pressureRate">Pressure / player-min</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-condition-sort="damageRate">Damage / player-min</button></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-conditions-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <aside class="analysis-split-detail">
+                            <div id="analysis-condition-detail"></div>
+                        </aside>
+                    </div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-crowd-control" data-analysis-panel="crowd-control" role="tabpanel" aria-labelledby="analysis-tab-crowd-control" hidden>
+                    <p class="workspace-note analysis-panel-note">Attributed arcDPS crowd-control events across the filtered fights. Effective CC means the recipient appeared to have no Stability immediately before the event.</p>
+                    <div class="browser-controls analysis-player-toolbar">
+                        <label class="browser-field">
+                            <span>Applying side</span>
+                            <select id="analysis-crowd-control-side">
+                                <option value="squad">Squad → Enemy</option>
+                                <option value="enemy">Enemy → Squad</option>
+                                <option value="compare">Squad vs Enemy</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="stats-grid" id="analysis-crowd-control-cards"></div>
+                    <div class="analysis-effect-layout">
+                        <div class="analysis-effect-list">
+                            <div class="table-shell table-shell-scroll">
+                                <table class="data-table">
+                                    <thead id="analysis-crowd-control-head">
+                                        <tr>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="name">CC skill</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="fights">Fights</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="events">Events</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="effective">Effective</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="effectiveRate">Effective / player-min</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="durationRate">Duration / player-min</button></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-crowd-control-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <aside class="analysis-split-detail">
+                            <div id="analysis-crowd-control-detail"></div>
                         </aside>
                     </div>
                 </div>

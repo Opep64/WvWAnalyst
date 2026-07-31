@@ -8,7 +8,7 @@ namespace WvWAnalyst.Api.Bridge;
 
 public sealed class FightCatalogService
 {
-    private const int CurrentFightIndexSchemaVersion = 15;
+    private const int CurrentFightIndexSchemaVersion = 16;
 
     private static readonly JsonSerializerOptions ManifestSerializerOptions = new(JsonSerializerDefaults.Web)
     {

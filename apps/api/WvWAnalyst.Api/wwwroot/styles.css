@@ -1780,6 +1780,39 @@ h1 {
     margin-bottom: 0;
 }
 
+.analysis-effect-layout {
+    display: grid;
+    grid-template-columns: minmax(620px, 1.2fr) minmax(390px, 0.8fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.analysis-effect-list {
+    min-width: 0;
+}
+
+.analysis-effect-icon {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 7px;
+    object-fit: cover;
+    background: rgba(159, 176, 195, 0.08);
+    border: 1px solid rgba(159, 176, 195, 0.12);
+}
+
+.analysis-effect-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+
+.analysis-effect-source-name {
+    display: grid;
+    gap: 2px;
+}
+
 .analysis-tab {
     display: inline-flex;
     align-items: center;
@@ -4141,6 +4174,7 @@ h1 {
 
     .analysis-scope-controls,
     .analysis-boons-layout,
+    .analysis-effect-layout,
     .analysis-lanes-layout,
     .analysis-split-panel,
     .analysis-split-panel-classes,

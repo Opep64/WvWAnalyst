@@ -16,6 +16,8 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisLaneRowDto> TopLanes,
     IReadOnlyList<FightAnalysisBoonTrendDto> BoonTrends,
     IReadOnlyList<FightAnalysisBoonRowDto> TopBoons,
+    FightAnalysisConditionSummaryDto Conditions,
+    FightAnalysisCrowdControlSummaryDto CrowdControl,
     FightAnalysisDifferenceReportDto WinLossDifferences);
 
 public sealed record FightAnalysisFilterOptionsDto(
@@ -620,3 +622,109 @@ public sealed record FightAnalysisBoonClassProviderDto(
     double? AverageGenerationPresence,
     double AverageOverstack,
     double ProviderScore);
+
+public sealed record FightAnalysisConditionSummaryDto(
+    int AvailableFightCount,
+    int FilteredFightCount,
+    FightAnalysisConditionSideDto Squad,
+    FightAnalysisConditionSideDto Enemy,
+    IReadOnlyList<string> Caveats);
+
+public sealed record FightAnalysisConditionSideDto(
+    string SideId,
+    string Label,
+    double SourcePlayerMinutes,
+    int ApplyCount,
+    int ExtensionCount,
+    double Pressure,
+    long ConditionDamage,
+    double ApplicationsPerSourcePlayerMinute,
+    IReadOnlyList<FightAnalysisConditionRowDto> Conditions);
+
+public sealed record FightAnalysisConditionRowDto(
+    long BuffId,
+    string Name,
+    string? Icon,
+    bool StackBased,
+    int FightCount,
+    int SourceCount,
+    int ApplyCount,
+    int ExtensionCount,
+    double Pressure,
+    double Presence,
+    double ExtensionPressure,
+    double WastedPressure,
+    long ConditionDamage,
+    int AffectedPlayerCount,
+    double ApplicationsPerSourcePlayerMinute,
+    double PressurePerSourcePlayerMinute,
+    double DamagePerSourcePlayerMinute,
+    IReadOnlyList<FightAnalysisConditionSourceRowDto> Sources);
+
+public sealed record FightAnalysisConditionSourceRowDto(
+    string SourceKey,
+    string DisplayName,
+    string ClassLabel,
+    string? Icon,
+    string? FightLabel,
+    int FightCount,
+    double ActiveMinutes,
+    int ApplyCount,
+    int ExtensionCount,
+    double Pressure,
+    long ConditionDamage,
+    int AffectedPlayerCount,
+    double ApplicationsPerActiveMinute,
+    double PressurePerActiveMinute,
+    double DamagePerActiveMinute);
+
+public sealed record FightAnalysisCrowdControlSummaryDto(
+    int AvailableFightCount,
+    int FilteredFightCount,
+    FightAnalysisCrowdControlSideDto Squad,
+    FightAnalysisCrowdControlSideDto Enemy,
+    IReadOnlyList<string> Caveats);
+
+public sealed record FightAnalysisCrowdControlSideDto(
+    string SideId,
+    string Label,
+    double SourcePlayerMinutes,
+    int EventCount,
+    int EffectiveCount,
+    double DurationSeconds,
+    double EventsPerSourcePlayerMinute,
+    double EffectiveEventsPerSourcePlayerMinute,
+    IReadOnlyList<FightAnalysisCrowdControlRowDto> Effects);
+
+public sealed record FightAnalysisCrowdControlRowDto(
+    long SkillId,
+    string Name,
+    string? Icon,
+    int FightCount,
+    int SourceCount,
+    int EventCount,
+    int EffectiveCount,
+    double EffectiveRatePercent,
+    double DurationSeconds,
+    int AffectedPlayerCount,
+    double EventsPerSourcePlayerMinute,
+    double EffectiveEventsPerSourcePlayerMinute,
+    double DurationPerSourcePlayerMinute,
+    IReadOnlyList<FightAnalysisCrowdControlSourceRowDto> Sources);
+
+public sealed record FightAnalysisCrowdControlSourceRowDto(
+    string SourceKey,
+    string DisplayName,
+    string ClassLabel,
+    string? Icon,
+    string? FightLabel,
+    int FightCount,
+    double ActiveMinutes,
+    int EventCount,
+    int EffectiveCount,
+    double EffectiveRatePercent,
+    double DurationSeconds,
+    int AffectedPlayerCount,
+    double EventsPerActiveMinute,
+    double EffectiveEventsPerActiveMinute,
+    double DurationPerActiveMinute);

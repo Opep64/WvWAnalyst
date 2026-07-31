@@ -245,6 +245,10 @@ public sealed record FightIndexDto(
     IReadOnlyList<FightTopBurstIndexDto> EnemyTopBursts,
     IReadOnlyList<FightPlayerIndexDto> Players,
     IReadOnlyList<FightEnemyPlayerIndexDto> EnemyPlayers,
+    bool ConditionSourceDataAvailable,
+    bool CrowdControlSourceDataAvailable,
+    IReadOnlyList<FightConditionSourceIndexDto> ConditionSources,
+    IReadOnlyList<FightCrowdControlSourceIndexDto> CrowdControlSources,
     FightExecutionIndexDto? Execution,
     string Duration,
     long? DurationMilliseconds,
@@ -594,6 +598,39 @@ public sealed record FightEnemyPlayerIndexDto(
     double CorruptPercent,
     double StripsPerMinute,
     double CorruptsPerMinute);
+
+public sealed record FightConditionSourceIndexDto(
+    string ActingSideId,
+    string AffectedSideId,
+    int ActorId,
+    string? ActorName,
+    string? ActorIcon,
+    long BuffId,
+    string Name,
+    string? Icon,
+    bool StackBased,
+    double Pressure,
+    double Presence,
+    double ExtensionPressure,
+    double WastedPressure,
+    int ApplyCount,
+    int ExtensionCount,
+    long ConditionDamage,
+    int AffectedPlayerCount);
+
+public sealed record FightCrowdControlSourceIndexDto(
+    string ActingSideId,
+    string AffectedSideId,
+    int ActorId,
+    string? ActorName,
+    string? ActorIcon,
+    long SkillId,
+    string Name,
+    string? Icon,
+    int EventCount,
+    int EffectiveCount,
+    double DurationSeconds,
+    int AffectedPlayerCount);
 
 public sealed record FightPlayerRoleMixIndexDto(
     string Label,

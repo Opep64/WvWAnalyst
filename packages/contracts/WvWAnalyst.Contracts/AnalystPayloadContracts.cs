@@ -132,6 +132,8 @@ public sealed class WvWAnalystOutcomeAnalysisDto
     public IReadOnlyList<WvWAnalystOutcomeEventDto> Events { get; set; } = Array.Empty<WvWAnalystOutcomeEventDto>();
     public IReadOnlyList<WvWAnalystConditionEventDto> ConditionEvents { get; set; } = Array.Empty<WvWAnalystConditionEventDto>();
     public IReadOnlyList<WvWAnalystCrowdControlEventDto> CrowdControlEvents { get; set; } = Array.Empty<WvWAnalystCrowdControlEventDto>();
+    public IReadOnlyList<WvWAnalystConditionSourceSummaryDto> ConditionSources { get; set; } = Array.Empty<WvWAnalystConditionSourceSummaryDto>();
+    public IReadOnlyList<WvWAnalystCrowdControlSourceSummaryDto> CrowdControlSources { get; set; } = Array.Empty<WvWAnalystCrowdControlSourceSummaryDto>();
 }
 
 public sealed class WvWAnalystOutcomeAnalysisAvailabilityDto
@@ -291,6 +293,43 @@ public sealed class WvWAnalystCrowdControlEffectDto
     public int EventCount { get; set; }
     public int EffectiveCount { get; set; }
     public double DurationSeconds { get; set; }
+}
+
+public sealed class WvWAnalystConditionSourceSummaryDto
+{
+    public string ActingSideId { get; set; } = string.Empty;
+    public string AffectedSideId { get; set; } = string.Empty;
+    public int ActorId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public string ActorIcon { get; set; } = string.Empty;
+    public long BuffId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
+    public bool StackBased { get; set; }
+    public double Pressure { get; set; }
+    public double Presence { get; set; }
+    public double ExtensionPressure { get; set; }
+    public double WastedPressure { get; set; }
+    public int ApplyCount { get; set; }
+    public int ExtensionCount { get; set; }
+    public long ConditionDamage { get; set; }
+    public int AffectedPlayerCount { get; set; }
+}
+
+public sealed class WvWAnalystCrowdControlSourceSummaryDto
+{
+    public string ActingSideId { get; set; } = string.Empty;
+    public string AffectedSideId { get; set; } = string.Empty;
+    public int ActorId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public string ActorIcon { get; set; } = string.Empty;
+    public long SkillId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
+    public int EventCount { get; set; }
+    public int EffectiveCount { get; set; }
+    public double DurationSeconds { get; set; }
+    public int AffectedPlayerCount { get; set; }
 }
 
 public sealed class WvWAnalystMetaDto

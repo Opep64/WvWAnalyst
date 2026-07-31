@@ -307,6 +307,8 @@ public sealed class FightAnalysisService
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
             TopBoons: BuildTopBoons(filteredFights),
+            Conditions: BuildConditionSummary(filteredFights),
+            CrowdControl: BuildCrowdControlSummary(filteredFights),
             WinLossDifferences: BuildWinLossDifferences(
                 filteredFights,
                 expectedScoreLookup,
@@ -2818,6 +2820,346 @@ public sealed class FightAnalysisService
                         .ToArray());
             })
             .ToArray();
+    }
+
+    private static FightAnalysisConditionSummaryDto BuildConditionSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        int availableFightCount = fights.Count(fight => fight.FightIndex?.ConditionSourceDataAvailable == true);
+        return new FightAnalysisConditionSummaryDto(
+            AvailableFightCount: availableFightCount,
+            FilteredFightCount: fights.Count,
+            Squad: BuildConditionSide(fights, "squad", "Squad applications"),
+            Enemy: BuildConditionSide(fights, "enemy", "Enemy applications"),
+            Caveats:
+            [
+                "Applications include only condition events credited to a player on the applying side; initial log-state applications and unresolved sources are excluded.",
+                "Pets and minions are credited to their owning player when Elite Insights can resolve the final master.",
+                "Duration-condition pressure and intensity-stack pressure use different units, so pressure should be compared within a condition rather than as one universal score.",
+                "Class rates divide attributed output by the total active minutes of every player on that class, including players who recorded no application for the selected condition."
+            ]);
+    }
+
+    private static FightAnalysisConditionSideDto BuildConditionSide(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        string sideId,
+        string label)
+    {
+        FightArtifactSummaryDto[] availableFights = fights
+            .Where(fight => fight.FightIndex?.ConditionSourceDataAvailable == true)
+            .ToArray();
+        double sourcePlayerMinutes = availableFights.Sum(fight => GetSideActiveSeconds(fight.FightIndex!, sideId)) / 60.0;
+        IReadOnlyDictionary<string, double> classPlayerMinutes = BuildSideClassActiveMinutes(availableFights, sideId);
+        ConditionSourceSample[] samples = availableFights
+            .SelectMany(fight => (fight.FightIndex?.ConditionSources ?? Array.Empty<FightConditionSourceIndexDto>())
+                .Where(source => string.Equals(source.ActingSideId, sideId, StringComparison.OrdinalIgnoreCase))
+                .Select(source => BuildConditionSourceSample(fight, source, sideId)))
+            .ToArray();
+
+        FightAnalysisConditionRowDto[] rows = samples
+            .GroupBy(sample => sample.Source.BuffId)
+            .Select(group =>
+            {
+                ConditionSourceSample[] effectSamples = group.ToArray();
+                FightAnalysisConditionSourceRowDto[] sources = BuildConditionSourceRows(effectSamples, classPlayerMinutes);
+                int applyCount = effectSamples.Sum(sample => sample.Source.ApplyCount);
+                int extensionCount = effectSamples.Sum(sample => sample.Source.ExtensionCount);
+                double pressure = effectSamples.Sum(sample => sample.Source.Pressure);
+                double presence = effectSamples.Sum(sample => sample.Source.Presence);
+                double extensionPressure = effectSamples.Sum(sample => sample.Source.ExtensionPressure);
+                double wastedPressure = effectSamples.Sum(sample => sample.Source.WastedPressure);
+                long conditionDamage = effectSamples.Sum(sample => sample.Source.ConditionDamage);
+                FightConditionSourceIndexDto first = effectSamples[0].Source;
+                return new FightAnalysisConditionRowDto(
+                    BuffId: group.Key,
+                    Name: first.Name,
+                    Icon: effectSamples.Select(sample => sample.Source.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
+                    StackBased: first.StackBased,
+                    FightCount: effectSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    SourceCount: sources.Length,
+                    ApplyCount: applyCount,
+                    ExtensionCount: extensionCount,
+                    Pressure: Math.Round(pressure, 1),
+                    Presence: Math.Round(presence, 1),
+                    ExtensionPressure: Math.Round(extensionPressure, 1),
+                    WastedPressure: Math.Round(wastedPressure, 1),
+                    ConditionDamage: conditionDamage,
+                    AffectedPlayerCount: effectSamples.Sum(sample => sample.Source.AffectedPlayerCount),
+                    ApplicationsPerSourcePlayerMinute: PerMinute(applyCount, sourcePlayerMinutes),
+                    PressurePerSourcePlayerMinute: PerMinute(pressure, sourcePlayerMinutes),
+                    DamagePerSourcePlayerMinute: PerMinute(conditionDamage, sourcePlayerMinutes),
+                    Sources: sources
+                        .OrderByDescending(source => source.ApplicationsPerActiveMinute)
+                        .ThenByDescending(source => source.ApplyCount)
+                        .ThenBy(source => source.DisplayName, StringComparer.OrdinalIgnoreCase)
+                        .ToArray());
+            })
+            .OrderByDescending(row => row.ApplicationsPerSourcePlayerMinute)
+            .ThenByDescending(row => row.ApplyCount)
+            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new FightAnalysisConditionSideDto(
+            SideId: sideId,
+            Label: label,
+            SourcePlayerMinutes: Math.Round(sourcePlayerMinutes, 1),
+            ApplyCount: samples.Sum(sample => sample.Source.ApplyCount),
+            ExtensionCount: samples.Sum(sample => sample.Source.ExtensionCount),
+            Pressure: Math.Round(samples.Sum(sample => sample.Source.Pressure), 1),
+            ConditionDamage: samples.Sum(sample => sample.Source.ConditionDamage),
+            ApplicationsPerSourcePlayerMinute: PerMinute(samples.Sum(sample => sample.Source.ApplyCount), sourcePlayerMinutes),
+            Conditions: rows);
+    }
+
+    private static FightAnalysisConditionSourceRowDto[] BuildConditionSourceRows(
+        IReadOnlyList<ConditionSourceSample> samples,
+        IReadOnlyDictionary<string, double> classPlayerMinutes)
+    {
+        return samples
+            .GroupBy(
+                sample => sample.ClassLabel,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                ConditionSourceSample[] sourceSamples = group.ToArray();
+                double activeMinutes = classPlayerMinutes.TryGetValue(group.Key, out double totalClassMinutes)
+                    ? totalClassMinutes
+                    : sourceSamples
+                        .GroupBy(sample => $"{sample.Fight.FightId}:{sample.Source.ActorId}", StringComparer.OrdinalIgnoreCase)
+                        .Sum(actorGroup => actorGroup.Max(sample => sample.ActiveSeconds)) / 60.0;
+                int applyCount = sourceSamples.Sum(sample => sample.Source.ApplyCount);
+                double pressure = sourceSamples.Sum(sample => sample.Source.Pressure);
+                long damage = sourceSamples.Sum(sample => sample.Source.ConditionDamage);
+                return new FightAnalysisConditionSourceRowDto(
+                    SourceKey: $"class:{group.Key.ToUpperInvariant()}",
+                    DisplayName: group.Key,
+                    ClassLabel: group.Key,
+                    Icon: sourceSamples.Select(sample => sample.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
+                    FightLabel: null,
+                    FightCount: sourceSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    ActiveMinutes: Math.Round(activeMinutes, 1),
+                    ApplyCount: applyCount,
+                    ExtensionCount: sourceSamples.Sum(sample => sample.Source.ExtensionCount),
+                    Pressure: Math.Round(pressure, 1),
+                    ConditionDamage: damage,
+                    AffectedPlayerCount: sourceSamples.Sum(sample => sample.Source.AffectedPlayerCount),
+                    ApplicationsPerActiveMinute: PerMinute(applyCount, activeMinutes),
+                    PressurePerActiveMinute: PerMinute(pressure, activeMinutes),
+                    DamagePerActiveMinute: PerMinute(damage, activeMinutes));
+            })
+            .ToArray();
+    }
+
+    private static FightAnalysisCrowdControlSummaryDto BuildCrowdControlSummary(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        int availableFightCount = fights.Count(fight => fight.FightIndex?.CrowdControlSourceDataAvailable == true);
+        return new FightAnalysisCrowdControlSummaryDto(
+            AvailableFightCount: availableFightCount,
+            FilteredFightCount: fights.Count,
+            Squad: BuildCrowdControlSide(fights, "squad", "Squad crowd control"),
+            Enemy: BuildCrowdControlSide(fights, "enemy", "Enemy crowd control"),
+            Caveats:
+            [
+                "Crowd control uses arcDPS crowd-control events and is separate from soft-control conditions shown in the Conditions view.",
+                "Effective CC means the recipient did not appear to have Stability immediately before the event; exact Stability state is not fully reconstructed.",
+                "Pets and minions are credited to their owning player when Elite Insights can resolve the final master.",
+                "Class rates divide attributed output by the total active minutes of every player on that class, including players who recorded no event for the selected CC skill."
+            ]);
+    }
+
+    private static FightAnalysisCrowdControlSideDto BuildCrowdControlSide(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        string sideId,
+        string label)
+    {
+        FightArtifactSummaryDto[] availableFights = fights
+            .Where(fight => fight.FightIndex?.CrowdControlSourceDataAvailable == true)
+            .ToArray();
+        double sourcePlayerMinutes = availableFights.Sum(fight => GetSideActiveSeconds(fight.FightIndex!, sideId)) / 60.0;
+        IReadOnlyDictionary<string, double> classPlayerMinutes = BuildSideClassActiveMinutes(availableFights, sideId);
+        CrowdControlSourceSample[] samples = availableFights
+            .SelectMany(fight => (fight.FightIndex?.CrowdControlSources ?? Array.Empty<FightCrowdControlSourceIndexDto>())
+                .Where(source => string.Equals(source.ActingSideId, sideId, StringComparison.OrdinalIgnoreCase))
+                .Select(source => BuildCrowdControlSourceSample(fight, source, sideId)))
+            .ToArray();
+
+        FightAnalysisCrowdControlRowDto[] rows = samples
+            .GroupBy(sample => sample.Source.SkillId)
+            .Select(group =>
+            {
+                CrowdControlSourceSample[] effectSamples = group.ToArray();
+                FightAnalysisCrowdControlSourceRowDto[] sources = BuildCrowdControlSourceRows(effectSamples, classPlayerMinutes);
+                int eventCount = effectSamples.Sum(sample => sample.Source.EventCount);
+                int effectiveCount = effectSamples.Sum(sample => sample.Source.EffectiveCount);
+                double duration = effectSamples.Sum(sample => sample.Source.DurationSeconds);
+                FightCrowdControlSourceIndexDto first = effectSamples[0].Source;
+                return new FightAnalysisCrowdControlRowDto(
+                    SkillId: group.Key,
+                    Name: first.Name,
+                    Icon: effectSamples.Select(sample => sample.Source.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
+                    FightCount: effectSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    SourceCount: sources.Length,
+                    EventCount: eventCount,
+                    EffectiveCount: effectiveCount,
+                    EffectiveRatePercent: Percentage(effectiveCount, eventCount),
+                    DurationSeconds: Math.Round(duration, 1),
+                    AffectedPlayerCount: effectSamples.Sum(sample => sample.Source.AffectedPlayerCount),
+                    EventsPerSourcePlayerMinute: PerMinute(eventCount, sourcePlayerMinutes),
+                    EffectiveEventsPerSourcePlayerMinute: PerMinute(effectiveCount, sourcePlayerMinutes),
+                    DurationPerSourcePlayerMinute: PerMinute(duration, sourcePlayerMinutes),
+                    Sources: sources
+                        .OrderByDescending(source => source.EffectiveEventsPerActiveMinute)
+                        .ThenByDescending(source => source.EffectiveCount)
+                        .ThenBy(source => source.DisplayName, StringComparer.OrdinalIgnoreCase)
+                        .ToArray());
+            })
+            .OrderByDescending(row => row.EffectiveEventsPerSourcePlayerMinute)
+            .ThenByDescending(row => row.EffectiveCount)
+            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        int totalEvents = samples.Sum(sample => sample.Source.EventCount);
+        int totalEffective = samples.Sum(sample => sample.Source.EffectiveCount);
+        return new FightAnalysisCrowdControlSideDto(
+            SideId: sideId,
+            Label: label,
+            SourcePlayerMinutes: Math.Round(sourcePlayerMinutes, 1),
+            EventCount: totalEvents,
+            EffectiveCount: totalEffective,
+            DurationSeconds: Math.Round(samples.Sum(sample => sample.Source.DurationSeconds), 1),
+            EventsPerSourcePlayerMinute: PerMinute(totalEvents, sourcePlayerMinutes),
+            EffectiveEventsPerSourcePlayerMinute: PerMinute(totalEffective, sourcePlayerMinutes),
+            Effects: rows);
+    }
+
+    private static FightAnalysisCrowdControlSourceRowDto[] BuildCrowdControlSourceRows(
+        IReadOnlyList<CrowdControlSourceSample> samples,
+        IReadOnlyDictionary<string, double> classPlayerMinutes)
+    {
+        return samples
+            .GroupBy(
+                sample => sample.ClassLabel,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                CrowdControlSourceSample[] sourceSamples = group.ToArray();
+                double activeMinutes = classPlayerMinutes.TryGetValue(group.Key, out double totalClassMinutes)
+                    ? totalClassMinutes
+                    : sourceSamples
+                        .GroupBy(sample => $"{sample.Fight.FightId}:{sample.Source.ActorId}", StringComparer.OrdinalIgnoreCase)
+                        .Sum(actorGroup => actorGroup.Max(sample => sample.ActiveSeconds)) / 60.0;
+                int eventCount = sourceSamples.Sum(sample => sample.Source.EventCount);
+                int effectiveCount = sourceSamples.Sum(sample => sample.Source.EffectiveCount);
+                double duration = sourceSamples.Sum(sample => sample.Source.DurationSeconds);
+                return new FightAnalysisCrowdControlSourceRowDto(
+                    SourceKey: $"class:{group.Key.ToUpperInvariant()}",
+                    DisplayName: group.Key,
+                    ClassLabel: group.Key,
+                    Icon: sourceSamples.Select(sample => sample.Icon).FirstOrDefault(icon => !string.IsNullOrWhiteSpace(icon)),
+                    FightLabel: null,
+                    FightCount: sourceSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    ActiveMinutes: Math.Round(activeMinutes, 1),
+                    EventCount: eventCount,
+                    EffectiveCount: effectiveCount,
+                    EffectiveRatePercent: Percentage(effectiveCount, eventCount),
+                    DurationSeconds: Math.Round(duration, 1),
+                    AffectedPlayerCount: sourceSamples.Sum(sample => sample.Source.AffectedPlayerCount),
+                    EventsPerActiveMinute: PerMinute(eventCount, activeMinutes),
+                    EffectiveEventsPerActiveMinute: PerMinute(effectiveCount, activeMinutes),
+                    DurationPerActiveMinute: PerMinute(duration, activeMinutes));
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildSideClassActiveMinutes(
+        IReadOnlyList<FightArtifactSummaryDto> fights,
+        string sideId)
+    {
+        IEnumerable<(string ClassLabel, double ActiveSeconds)> players = string.Equals(sideId, "squad", StringComparison.OrdinalIgnoreCase)
+            ? fights.SelectMany(fight => (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .Select(player => (
+                    ClassLabel: BuildClassLabel(player) ?? "Unknown class",
+                    ActiveSeconds: Math.Max(0.0, player.ActiveSeconds))))
+            : fights.SelectMany(fight => (fight.FightIndex?.EnemyPlayers ?? Array.Empty<FightEnemyPlayerIndexDto>())
+                .Select(player => (
+                    ClassLabel: BuildClassLabel(player.Profession, player.EliteSpec) ?? "Unknown class",
+                    ActiveSeconds: Math.Max(0.0, player.ActiveSeconds))));
+
+        return players
+            .GroupBy(player => player.ClassLabel, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(player => player.ActiveSeconds) / 60.0,
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static ConditionSourceSample BuildConditionSourceSample(
+        FightArtifactSummaryDto fight,
+        FightConditionSourceIndexDto source,
+        string sideId)
+    {
+        EffectSourceIdentity identity = ResolveEffectSourceIdentity(fight, source.ActorId, source.ActorIcon, sideId);
+        return new ConditionSourceSample(
+            Fight: fight,
+            Source: source,
+            ClassLabel: identity.ClassLabel,
+            Icon: identity.Icon,
+            ActiveSeconds: identity.ActiveSeconds);
+    }
+
+    private static CrowdControlSourceSample BuildCrowdControlSourceSample(
+        FightArtifactSummaryDto fight,
+        FightCrowdControlSourceIndexDto source,
+        string sideId)
+    {
+        EffectSourceIdentity identity = ResolveEffectSourceIdentity(fight, source.ActorId, source.ActorIcon, sideId);
+        return new CrowdControlSourceSample(
+            Fight: fight,
+            Source: source,
+            ClassLabel: identity.ClassLabel,
+            Icon: identity.Icon,
+            ActiveSeconds: identity.ActiveSeconds);
+    }
+
+    private static EffectSourceIdentity ResolveEffectSourceIdentity(
+        FightArtifactSummaryDto fight,
+        int actorId,
+        string? fallbackIcon,
+        string sideId)
+    {
+        FightIndexDto fightIndex = fight.FightIndex!;
+        if (string.Equals(sideId, "squad", StringComparison.OrdinalIgnoreCase))
+        {
+            FightPlayerIndexDto? player = (fightIndex.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .FirstOrDefault(candidate => candidate.ActorId == actorId);
+            return new EffectSourceIdentity(
+                ClassLabel: player is null ? "Unknown class" : BuildClassLabel(player) ?? "Unknown class",
+                Icon: player?.Icon ?? fallbackIcon,
+                ActiveSeconds: Math.Max(0.0, player?.ActiveSeconds ?? 0.0));
+        }
+
+        FightEnemyPlayerIndexDto? enemy = (fightIndex.EnemyPlayers ?? Array.Empty<FightEnemyPlayerIndexDto>())
+            .FirstOrDefault(candidate => candidate.ActorId == actorId);
+        return new EffectSourceIdentity(
+            ClassLabel: enemy is null ? "Unknown class" : BuildClassLabel(enemy.Profession, enemy.EliteSpec) ?? "Unknown class",
+            Icon: enemy?.Icon ?? fallbackIcon,
+            ActiveSeconds: Math.Max(0.0, enemy?.ActiveSeconds ?? 0.0));
+    }
+
+    private static double GetSideActiveSeconds(FightIndexDto fight, string sideId)
+    {
+        return string.Equals(sideId, "squad", StringComparison.OrdinalIgnoreCase)
+            ? (fight.Players ?? Array.Empty<FightPlayerIndexDto>()).Sum(player => Math.Max(0.0, player.ActiveSeconds))
+            : (fight.EnemyPlayers ?? Array.Empty<FightEnemyPlayerIndexDto>()).Sum(player => Math.Max(0.0, player.ActiveSeconds));
+    }
+
+    private static double PerMinute(double value, double playerMinutes)
+    {
+        return playerMinutes > 0.0 ? Math.Round(value / playerMinutes, 2) : 0.0;
+    }
+
+    private static double Percentage(double numerator, double denominator)
+    {
+        return denominator > 0.0 ? Math.Round(numerator * 100.0 / denominator, 1) : 0.0;
     }
 
     private static EnemyClassPerformanceAggregate GetEnemyClassAggregate(
@@ -5379,6 +5721,25 @@ internal sealed record TopFiveActorSample(
     string ClassLabel,
     string? Icon,
     double Value);
+
+internal sealed record EffectSourceIdentity(
+    string ClassLabel,
+    string? Icon,
+    double ActiveSeconds);
+
+internal sealed record ConditionSourceSample(
+    FightArtifactSummaryDto Fight,
+    FightConditionSourceIndexDto Source,
+    string ClassLabel,
+    string? Icon,
+    double ActiveSeconds);
+
+internal sealed record CrowdControlSourceSample(
+    FightArtifactSummaryDto Fight,
+    FightCrowdControlSourceIndexDto Source,
+    string ClassLabel,
+    string? Icon,
+    double ActiveSeconds);
 
 internal sealed record MergedPlayerFightSample(
     FightArtifactSummaryDto Fight,

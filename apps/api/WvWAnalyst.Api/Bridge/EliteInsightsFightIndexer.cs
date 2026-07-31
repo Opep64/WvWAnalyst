@@ -55,6 +55,10 @@ public sealed class EliteInsightsFightIndexer
             var execution = BuildExecutionFromAnalystPayload(payload);
             var players = BuildPlayersFromAnalystPayload(payload.Players);
             var enemyPlayers = BuildEnemyPlayersFromAnalystPayload(payload.EnemyPlayers);
+            var conditionSources = BuildConditionSourcesFromAnalystPayload(payload.OutcomeAnalysis?.ConditionSources);
+            var crowdControlSources = BuildCrowdControlSourcesFromAnalystPayload(payload.OutcomeAnalysis?.CrowdControlSources);
+            var conditionSourceDetailAvailable = HasAnalystDetail(payload.Meta.DetailLevel, "condition-sources");
+            var crowdControlSourceDetailAvailable = HasAnalystDetail(payload.Meta.DetailLevel, "crowd-control-sources");
             var squadSide = BuildSideFromAnalystPayload(squad, players);
             var enemySide = BuildSideFromAnalystPayload(enemy);
 
@@ -81,6 +85,16 @@ public sealed class EliteInsightsFightIndexer
                 EnemyTopBursts: BuildTopBurstsFromAnalystPayload(payload.EnemyTopBursts),
                 Players: players,
                 EnemyPlayers: enemyPlayers,
+                ConditionSourceDataAvailable:
+                    conditionSourceDetailAvailable &&
+                    (payload.OutcomeAnalysis?.Availability?.SquadConditionApplications == true ||
+                     payload.OutcomeAnalysis?.Availability?.EnemyConditionApplications == true),
+                CrowdControlSourceDataAvailable:
+                    crowdControlSourceDetailAvailable &&
+                    (payload.OutcomeAnalysis?.Availability?.SquadCrowdControlEvents == true ||
+                     payload.OutcomeAnalysis?.Availability?.EnemyCrowdControlEvents == true),
+                ConditionSources: conditionSources,
+                CrowdControlSources: crowdControlSources,
                 Execution: execution,
                 Duration: BuildDurationLabel(payload.Fight.DurationMs),
                 DurationMilliseconds: payload.Fight.DurationMs,
@@ -232,6 +246,10 @@ public sealed class EliteInsightsFightIndexer
             EnemyTopBursts: Array.Empty<FightTopBurstIndexDto>(),
             Players: Array.Empty<FightPlayerIndexDto>(),
             EnemyPlayers: Array.Empty<FightEnemyPlayerIndexDto>(),
+            ConditionSourceDataAvailable: false,
+            CrowdControlSourceDataAvailable: false,
+            ConditionSources: Array.Empty<FightConditionSourceIndexDto>(),
+            CrowdControlSources: Array.Empty<FightCrowdControlSourceIndexDto>(),
             Execution: null,
             Duration: GetString(root, "duration") ?? "Unknown",
             DurationMilliseconds: GetLong(root, "durationMS"),
@@ -928,6 +946,70 @@ public sealed class EliteInsightsFightIndexer
                 StripsPerMinute: player.StripsPerMinute,
                 CorruptsPerMinute: player.CorruptsPerMinute))
             .ToArray();
+    }
+
+    private static IReadOnlyList<FightConditionSourceIndexDto> BuildConditionSourcesFromAnalystPayload(
+        IReadOnlyList<WvWAnalystConditionSourceSummaryDto>? sources)
+    {
+        return sources?
+            .Where(source =>
+                source.ActorId != 0 &&
+                source.BuffId != 0 &&
+                !string.IsNullOrWhiteSpace(source.ActingSideId) &&
+                !string.IsNullOrWhiteSpace(source.Name))
+            .Select(source => new FightConditionSourceIndexDto(
+                ActingSideId: source.ActingSideId.Trim().ToLowerInvariant(),
+                AffectedSideId: source.AffectedSideId.Trim().ToLowerInvariant(),
+                ActorId: source.ActorId,
+                ActorName: NullIfWhiteSpace(source.ActorName),
+                ActorIcon: NullIfWhiteSpace(source.ActorIcon),
+                BuffId: source.BuffId,
+                Name: source.Name.Trim(),
+                Icon: NullIfWhiteSpace(source.Icon),
+                StackBased: source.StackBased,
+                Pressure: source.Pressure,
+                Presence: source.Presence,
+                ExtensionPressure: source.ExtensionPressure,
+                WastedPressure: source.WastedPressure,
+                ApplyCount: source.ApplyCount,
+                ExtensionCount: source.ExtensionCount,
+                ConditionDamage: source.ConditionDamage,
+                AffectedPlayerCount: source.AffectedPlayerCount))
+            .ToArray()
+            ?? Array.Empty<FightConditionSourceIndexDto>();
+    }
+
+    private static IReadOnlyList<FightCrowdControlSourceIndexDto> BuildCrowdControlSourcesFromAnalystPayload(
+        IReadOnlyList<WvWAnalystCrowdControlSourceSummaryDto>? sources)
+    {
+        return sources?
+            .Where(source =>
+                source.ActorId != 0 &&
+                source.SkillId != 0 &&
+                !string.IsNullOrWhiteSpace(source.ActingSideId) &&
+                !string.IsNullOrWhiteSpace(source.Name))
+            .Select(source => new FightCrowdControlSourceIndexDto(
+                ActingSideId: source.ActingSideId.Trim().ToLowerInvariant(),
+                AffectedSideId: source.AffectedSideId.Trim().ToLowerInvariant(),
+                ActorId: source.ActorId,
+                ActorName: NullIfWhiteSpace(source.ActorName),
+                ActorIcon: NullIfWhiteSpace(source.ActorIcon),
+                SkillId: source.SkillId,
+                Name: source.Name.Trim(),
+                Icon: NullIfWhiteSpace(source.Icon),
+                EventCount: source.EventCount,
+                EffectiveCount: source.EffectiveCount,
+                DurationSeconds: source.DurationSeconds,
+                AffectedPlayerCount: source.AffectedPlayerCount))
+            .ToArray()
+            ?? Array.Empty<FightCrowdControlSourceIndexDto>();
+    }
+
+    private static bool HasAnalystDetail(string? detailLevel, string detail)
+    {
+        return !string.IsNullOrWhiteSpace(detailLevel) &&
+            detailLevel.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains(detail, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string? BuildPlayerClassLabel(FightPlayerIndexDto player)

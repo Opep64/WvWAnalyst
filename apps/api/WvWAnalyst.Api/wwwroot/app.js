@@ -55,6 +55,18 @@ let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
 let selectedAnalysisBoonId = null;
+let analysisConditionSide = "squad";
+let selectedAnalysisConditionId = null;
+let analysisConditionSortState = { key: "applicationsRate", direction: "desc" };
+let analysisConditionClassSortState = { key: "applicationsRate", direction: "desc" };
+let analysisConditionComparisonSortState = { key: "delta", direction: "desc" };
+let analysisConditionComparisonClassSortState = { key: "delta", direction: "desc" };
+let analysisCrowdControlSide = "squad";
+let selectedAnalysisCrowdControlId = null;
+let analysisCrowdControlSortState = { key: "effectiveRate", direction: "desc" };
+let analysisCrowdControlClassSortState = { key: "effectiveRate", direction: "desc" };
+let analysisCrowdControlComparisonSortState = { key: "delta", direction: "desc" };
+let analysisCrowdControlComparisonClassSortState = { key: "delta", direction: "desc" };
 let selectedAnalysisBoonTrendIds = null;
 let selectedAnalysisBurstComparisonIds = null;
 let selectedAnalysisPlayerImpactTrendIds = null;
@@ -9628,6 +9640,824 @@ function renderAnalysisBoons(snapshot) {
     renderAnalysisBoonDetail(selectedBoon);
 }
 
+function buildAnalysisEffectIcon(icon, name) {
+    return icon
+        ? `<img class="analysis-effect-icon" src="${escapeHtml(icon)}" alt="">`
+        : "";
+}
+
+function buildAnalysisEffectAvailability(summary) {
+    return buildAnalysisAvailabilityLine(summary?.availableFightCount ?? 0, summary?.filteredFightCount ?? 0);
+}
+
+function sortAnalysisEffectRows(rows, sortState, getValue) {
+    return [...(rows ?? [])].sort((left, right) => {
+        const leftValue = getValue(left, sortState.key);
+        const rightValue = getValue(right, sortState.key);
+        const primary = typeof leftValue === "string" || typeof rightValue === "string"
+            ? String(leftValue ?? "").localeCompare(String(rightValue ?? ""), undefined, { sensitivity: "base" })
+            : Number(leftValue ?? 0) - Number(rightValue ?? 0);
+        if (primary !== 0) {
+            return sortState.direction === "asc" ? primary : -primary;
+        }
+        return String(left.name ?? left.displayName ?? "").localeCompare(
+            String(right.name ?? right.displayName ?? ""),
+            undefined,
+            { sensitivity: "base" });
+    });
+}
+
+function getNextAnalysisEffectSortState(currentState, key) {
+    if (currentState.key === key) {
+        return { key, direction: currentState.direction === "asc" ? "desc" : "asc" };
+    }
+    return { key, direction: ["name", "class"].includes(key) ? "asc" : "desc" };
+}
+
+function updateAnalysisEffectSortHeaders(selector, sortState, dataKey) {
+    document.querySelectorAll(selector).forEach(button => {
+        const isActive = button.dataset[dataKey] === sortState.key;
+        button.classList.toggle("is-active", isActive);
+        button.dataset.sortDirection = isActive ? sortState.direction : "";
+        button.setAttribute("aria-sort", isActive ? (sortState.direction === "asc" ? "ascending" : "descending") : "none");
+    });
+}
+
+function getAnalysisConditionSortValue(condition, key) {
+    return {
+        name: condition.name,
+        fights: condition.fightCount,
+        applications: condition.applyCount,
+        applicationsRate: condition.applicationsPerSourcePlayerMinute,
+        pressureRate: condition.pressurePerSourcePlayerMinute,
+        damageRate: condition.damagePerSourcePlayerMinute
+    }[key];
+}
+
+function getAnalysisConditionClassSortValue(source, key) {
+    return {
+        class: source.displayName,
+        activeMinutes: source.activeMinutes,
+        applications: source.applyCount,
+        applicationsRate: source.applicationsPerActiveMinute,
+        pressureRate: source.pressurePerActiveMinute,
+        damageRate: source.damagePerActiveMinute
+    }[key];
+}
+
+function getAnalysisCrowdControlSortValue(effect, key) {
+    return {
+        name: effect.name,
+        fights: effect.fightCount,
+        events: effect.eventCount,
+        effective: effect.effectiveCount,
+        effectiveRate: effect.effectiveEventsPerSourcePlayerMinute,
+        durationRate: effect.durationPerSourcePlayerMinute
+    }[key];
+}
+
+function getAnalysisCrowdControlClassSortValue(source, key) {
+    return {
+        class: source.displayName,
+        activeMinutes: source.activeMinutes,
+        events: source.eventCount,
+        effective: source.effectiveCount,
+        effectiveRate: source.effectiveEventsPerActiveMinute,
+        durationRate: source.durationPerActiveMinute
+    }[key];
+}
+
+function buildAnalysisSideComparisons(squadRows, enemyRows, idKey, rateKey) {
+    const comparisons = new Map();
+    const addRows = (rows, sideKey) => {
+        (rows ?? []).forEach(row => {
+            const id = String(row?.[idKey] ?? "");
+            if (!id) {
+                return;
+            }
+            const comparison = comparisons.get(id) ?? {
+                id,
+                name: row.name ?? "Unknown",
+                icon: row.icon ?? null,
+                squadRow: null,
+                enemyRow: null
+            };
+            comparison[`${sideKey}Row`] = row;
+            comparison.name = comparison.name || row.name || "Unknown";
+            comparison.icon = comparison.icon || row.icon || null;
+            comparisons.set(id, comparison);
+        });
+    };
+
+    addRows(squadRows, "squad");
+    addRows(enemyRows, "enemy");
+    return [...comparisons.values()].map(comparison => {
+        const squadRate = Number(comparison.squadRow?.[rateKey] ?? 0);
+        const enemyRate = Number(comparison.enemyRow?.[rateKey] ?? 0);
+        return {
+            ...comparison,
+            squadRate,
+            enemyRate,
+            delta: squadRate - enemyRate
+        };
+    });
+}
+
+function buildAnalysisClassComparisons(squadSources, enemySources, rateKey) {
+    const comparisons = new Map();
+    const addSources = (sources, sideKey) => {
+        (sources ?? []).forEach(source => {
+            const className = source.classLabel || source.displayName || "Unknown class";
+            const key = className.toLocaleUpperCase();
+            const comparison = comparisons.get(key) ?? {
+                name: className,
+                icon: source.icon ?? null,
+                squadSource: null,
+                enemySource: null
+            };
+            comparison[`${sideKey}Source`] = source;
+            comparison.icon = comparison.icon || source.icon || null;
+            comparisons.set(key, comparison);
+        });
+    };
+
+    addSources(squadSources, "squad");
+    addSources(enemySources, "enemy");
+    return [...comparisons.values()].map(comparison => {
+        const squadRate = Number(comparison.squadSource?.[rateKey] ?? 0);
+        const enemyRate = Number(comparison.enemySource?.[rateKey] ?? 0);
+        return {
+            ...comparison,
+            squadMinutes: Number(comparison.squadSource?.activeMinutes ?? 0),
+            enemyMinutes: Number(comparison.enemySource?.activeMinutes ?? 0),
+            squadRate,
+            enemyRate,
+            delta: squadRate - enemyRate
+        };
+    });
+}
+
+function getAnalysisSideComparisonSortValue(comparison, key) {
+    return {
+        name: comparison.name,
+        squadRate: comparison.squadRate,
+        enemyRate: comparison.enemyRate,
+        delta: comparison.delta
+    }[key];
+}
+
+function getAnalysisClassComparisonSortValue(comparison, key) {
+    return {
+        class: comparison.name,
+        squadMinutes: comparison.squadMinutes,
+        squadRate: comparison.squadRate,
+        enemyMinutes: comparison.enemyMinutes,
+        enemyRate: comparison.enemyRate,
+        delta: comparison.delta
+    }[key];
+}
+
+function setAnalysisConditionSort(key) {
+    analysisConditionSortState = getNextAnalysisEffectSortState(analysisConditionSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisConditions(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisConditionClassSort(key) {
+    analysisConditionClassSortState = getNextAnalysisEffectSortState(analysisConditionClassSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisConditions(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisConditionComparisonSort(key) {
+    analysisConditionComparisonSortState = getNextAnalysisEffectSortState(analysisConditionComparisonSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisConditions(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisConditionComparisonClassSort(key) {
+    analysisConditionComparisonClassSortState = getNextAnalysisEffectSortState(analysisConditionComparisonClassSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisConditions(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisCrowdControlSort(key) {
+    analysisCrowdControlSortState = getNextAnalysisEffectSortState(analysisCrowdControlSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCrowdControl(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisCrowdControlClassSort(key) {
+    analysisCrowdControlClassSortState = getNextAnalysisEffectSortState(analysisCrowdControlClassSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCrowdControl(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisCrowdControlComparisonSort(key) {
+    analysisCrowdControlComparisonSortState = getNextAnalysisEffectSortState(analysisCrowdControlComparisonSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCrowdControl(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisCrowdControlComparisonClassSort(key) {
+    analysisCrowdControlComparisonClassSortState = getNextAnalysisEffectSortState(analysisCrowdControlComparisonClassSortState, key);
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCrowdControl(currentAnalysisSnapshot);
+    }
+}
+
+function renderAnalysisConditionTableHead(comparisonMode) {
+    setInnerHtml("#analysis-conditions-head", comparisonMode ? `
+        <tr>
+            <th><button class="sort-header" type="button" data-analysis-condition-comparison-sort="name">Condition</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-comparison-sort="squadRate">Squad apps / min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-comparison-sort="enemyRate">Enemy apps / min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-comparison-sort="delta">Squad Δ</button></th>
+        </tr>
+    ` : `
+        <tr>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="name">Condition</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="fights">Fights</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="applications">Applications</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="applicationsRate">Apps / player-min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="pressureRate">Pressure / player-min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-condition-sort="damageRate">Damage / player-min</button></th>
+        </tr>
+    `);
+}
+
+function renderAnalysisCrowdControlTableHead(comparisonMode) {
+    setInnerHtml("#analysis-crowd-control-head", comparisonMode ? `
+        <tr>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-sort="name">CC category</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-sort="squadRate">Squad events / min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-sort="enemyRate">Enemy events / min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-sort="delta">Squad Δ</button></th>
+        </tr>
+    ` : `
+        <tr>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="name">CC skill</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="fights">Fights</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="events">Events</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="effective">Effective</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="effectiveRate">Effective / player-min</button></th>
+            <th><button class="sort-header" type="button" data-analysis-crowd-control-sort="durationRate">Duration / player-min</button></th>
+        </tr>
+    `);
+}
+
+function renderAnalysisConditionComparisonDetail(comparison, summary) {
+    const container = document.querySelector("#analysis-condition-detail");
+    if (!container) {
+        return;
+    }
+    if (!comparison) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const classes = sortAnalysisEffectRows(
+        buildAnalysisClassComparisons(
+            comparison.squadRow?.sources,
+            comparison.enemyRow?.sources,
+            "applicationsPerActiveMinute"),
+        analysisConditionComparisonClassSortState,
+        getAnalysisClassComparisonSortValue);
+    container.className = "analysis-player-detail";
+    container.innerHTML = `
+        <div class="section-heading">
+            <div>
+                <h3 class="analysis-effect-name">${buildAnalysisEffectIcon(comparison.icon, comparison.name)}<span>${escapeHtml(comparison.name)}</span></h3>
+                <p>Applications per class-minute on each side. Each denominator includes every active player-minute recorded for that class, including players with no applications.</p>
+            </div>
+        </div>
+        ${buildTagListHtml([
+            `${formatNumber(comparison.squadRate, 2)} squad apps / player-min`,
+            `${formatNumber(comparison.enemyRate, 2)} enemy apps / player-min`,
+            `${formatSignedNumber(comparison.delta, 2)} squad difference`
+        ])}
+        <div class="table-shell table-shell-scroll">
+            <table class="data-table data-table-compact">
+                <thead>
+                    <tr>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="class">Class</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="squadMinutes">Squad min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="squadRate">Squad apps / min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="enemyMinutes">Enemy min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="enemyRate">Enemy apps / min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-comparison-class-sort="delta">Squad Δ</button></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${classes.length ? classes.map(row => `
+                        <tr>
+                            <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(row.icon, row.name)}<strong>${escapeHtml(row.name)}</strong></span></td>
+                            <td>${escapeHtml(formatNumber(row.squadMinutes, 1))}</td>
+                            <td>${escapeHtml(formatNumber(row.squadRate, 2))}</td>
+                            <td>${escapeHtml(formatNumber(row.enemyMinutes, 1))}</td>
+                            <td>${escapeHtml(formatNumber(row.enemyRate, 2))}</td>
+                            <td>${escapeHtml(formatSignedNumber(row.delta, 2))}</td>
+                        </tr>
+                    `).join("") : `<tr><td colspan="6">No class-attributed applications were retained for this condition.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+        <p class="workspace-note">Positive differences favor the squad; negative differences favor enemies. A zero on one side can also mean that class was absent from that side.</p>
+        <details class="analysis-card analysis-card--wide analysis-collapsible-card">
+            <summary class="analysis-collapsible-summary"><strong>Measurement caveats</strong></summary>
+            <ul>${(summary?.caveats ?? []).map(caveat => `<li>${escapeHtml(caveat)}</li>`).join("")}</ul>
+        </details>
+    `;
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-condition-comparison-class-sort]",
+        analysisConditionComparisonClassSortState,
+        "analysisConditionComparisonClassSort");
+}
+
+function renderAnalysisConditionComparison(summary) {
+    const comparisons = sortAnalysisEffectRows(
+        buildAnalysisSideComparisons(
+            summary.squad?.conditions,
+            summary.enemy?.conditions,
+            "buffId",
+            "applicationsPerSourcePlayerMinute"),
+        analysisConditionComparisonSortState,
+        getAnalysisSideComparisonSortValue);
+    if (!comparisons.some(comparison => comparison.id === String(selectedAnalysisConditionId ?? ""))) {
+        selectedAnalysisConditionId = comparisons.length ? comparisons[0].id : null;
+    }
+
+    renderAnalysisConditionTableHead(true);
+    const squadRate = Number(summary.squad?.applicationsPerSourcePlayerMinute ?? 0);
+    const enemyRate = Number(summary.enemy?.applicationsPerSourcePlayerMinute ?? 0);
+    setInnerHtml("#analysis-condition-cards", [
+        buildAnalysisOverviewStandardCard({
+            title: "Data coverage",
+            value: `${formatNumber(summary.availableFightCount ?? 0)} / ${formatNumber(summary.filteredFightCount ?? 0)}`,
+            detail: buildAnalysisEffectAvailability(summary)
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Squad applications / player-min",
+            value: formatNumber(squadRate, 2),
+            detail: `${formatNumber(summary.squad?.applyCount ?? 0)} attributed squad applications.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Enemy applications / player-min",
+            value: formatNumber(enemyRate, 2),
+            detail: `${formatNumber(summary.enemy?.applyCount ?? 0)} attributed enemy applications.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Squad difference",
+            value: formatSignedNumber(squadRate - enemyRate, 2),
+            detail: "Positive means more squad applications per active player-minute."
+        })
+    ].join(""));
+
+    setInnerHtml("#analysis-conditions-body", comparisons.length ? comparisons.map(comparison => `
+        <tr class="is-clickable ${comparison.id === String(selectedAnalysisConditionId) ? "is-selected" : ""}" data-analysis-condition-id="${escapeHtml(comparison.id)}">
+            <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(comparison.icon, comparison.name)}<strong>${escapeHtml(comparison.name)}</strong></span></td>
+            <td>${escapeHtml(formatNumber(comparison.squadRate, 2))}</td>
+            <td>${escapeHtml(formatNumber(comparison.enemyRate, 2))}</td>
+            <td>${escapeHtml(formatSignedNumber(comparison.delta, 2))}</td>
+        </tr>
+    `).join("") : `<tr><td colspan="4">No attributed condition applications matched the current filter.</td></tr>`);
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-condition-comparison-sort]",
+        analysisConditionComparisonSortState,
+        "analysisConditionComparisonSort");
+    renderAnalysisConditionComparisonDetail(
+        comparisons.find(comparison => comparison.id === String(selectedAnalysisConditionId)) ?? null,
+        summary);
+}
+
+function renderAnalysisConditionDetail(condition, summary) {
+    const container = document.querySelector("#analysis-condition-detail");
+    if (!container) {
+        return;
+    }
+
+    if (!condition) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const sources = sortAnalysisEffectRows(
+        condition.sources ?? [],
+        analysisConditionClassSortState,
+        getAnalysisConditionClassSortValue);
+    const pressureLabel = condition.stackBased ? "stack pressure" : "player-uptime points";
+    container.className = "analysis-player-detail";
+    container.innerHTML = `
+        <div class="section-heading">
+            <div>
+                <h3 class="analysis-effect-name">${buildAnalysisEffectIcon(condition.icon, condition.name)}<span>${escapeHtml(condition.name)}</span></h3>
+                <p>${escapeHtml(`${formatNumber(condition.applyCount)} credited applications and ${formatNumber(condition.extensionCount)} extensions across ${formatNumber(condition.fightCount)} fights. Class rates use all active minutes for that class.`)}</p>
+            </div>
+        </div>
+        ${buildTagListHtml([
+            `${formatNumber(condition.applicationsPerSourcePlayerMinute, 2)} apps / source player-min`,
+            `${formatNumber(condition.pressurePerSourcePlayerMinute, 2)} ${pressureLabel} / source player-min`,
+            `${formatNumber(condition.damagePerSourcePlayerMinute, 1)} damage / source player-min`,
+            `${formatNumber(condition.affectedPlayerCount)} source-target links`
+        ])}
+        <div class="table-shell table-shell-scroll">
+            <table class="data-table data-table-compact">
+                <thead>
+                    <tr>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="class">Class</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="activeMinutes">Class min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="applications">Apps</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="applicationsRate">Apps / class-min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="pressureRate">Pressure / class-min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-condition-class-sort="damageRate">Damage / class-min</button></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sources.length
+                        ? sources.map(source => `
+                            <tr>
+                                <td>
+                                    <div class="analysis-effect-name">
+                                        ${buildAnalysisEffectIcon(source.icon, source.displayName)}
+                                        <span class="analysis-effect-source-name">
+                                            <strong>${escapeHtml(source.displayName)}</strong>
+                                        </span>
+                                    </div>
+                                </td>
+                                <td>${escapeHtml(formatNumber(source.activeMinutes, 1))}</td>
+                                <td>${escapeHtml(formatNumber(source.applyCount))}</td>
+                                <td>${escapeHtml(formatNumber(source.applicationsPerActiveMinute, 2))}</td>
+                                <td>${escapeHtml(formatNumber(source.pressurePerActiveMinute, 2))}</td>
+                                <td>${escapeHtml(formatNumber(source.damagePerActiveMinute, 1))}</td>
+                            </tr>
+                        `).join("")
+                        : `<tr><td colspan="6">No attributed classes were retained for this condition.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+        <p class="workspace-note">${escapeHtml(sources.length < Number(condition.sourceCount ?? 0)
+            ? `Showing the top ${sources.length} of ${condition.sourceCount} attributed classes.`
+            : `Showing all ${sources.length} attributed classes.`)}</p>
+        <details class="analysis-card analysis-card--wide analysis-collapsible-card">
+            <summary class="analysis-collapsible-summary"><strong>Measurement caveats</strong></summary>
+            <ul>${(summary?.caveats ?? []).map(caveat => `<li>${escapeHtml(caveat)}</li>`).join("")}</ul>
+        </details>
+    `;
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-condition-class-sort]",
+        analysisConditionClassSortState,
+        "analysisConditionClassSort");
+}
+
+function renderAnalysisConditions(snapshot) {
+    const summary = snapshot.conditions ?? {};
+    const sideSelect = document.querySelector("#analysis-condition-side");
+    if (sideSelect) {
+        sideSelect.value = analysisConditionSide;
+    }
+
+    if (analysisConditionSide === "compare") {
+        renderAnalysisConditionComparison(summary);
+        return;
+    }
+
+    renderAnalysisConditionTableHead(false);
+
+    const side = analysisConditionSide === "enemy" ? summary.enemy : summary.squad;
+    const conditions = sortAnalysisEffectRows(
+        side?.conditions ?? [],
+        analysisConditionSortState,
+        getAnalysisConditionSortValue);
+    if (!conditions.some(condition => String(condition.buffId) === String(selectedAnalysisConditionId ?? ""))) {
+        selectedAnalysisConditionId = conditions.length ? String(conditions[0].buffId) : null;
+    }
+
+    setInnerHtml("#analysis-condition-cards", [
+        buildAnalysisOverviewStandardCard({
+            title: "Data coverage",
+            value: `${formatNumber(summary.availableFightCount ?? 0)} / ${formatNumber(summary.filteredFightCount ?? 0)}`,
+            detail: buildAnalysisEffectAvailability(summary)
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Source player-minutes",
+            value: formatNumber(side?.sourcePlayerMinutes ?? 0, 1),
+            detail: "Summed active time for every player on the applying side."
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Applications / player-min",
+            value: formatNumber(side?.applicationsPerSourcePlayerMinute ?? 0, 2),
+            detail: `${formatNumber(side?.applyCount ?? 0)} credited applications and ${formatNumber(side?.extensionCount ?? 0)} extensions.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Condition damage",
+            value: formatNumber(side?.conditionDamage ?? 0),
+            detail: `${formatNumber(side?.pressure ?? 0, 1)} total attributed pressure across tracked conditions.`
+        })
+    ].join(""));
+
+    setInnerHtml("#analysis-conditions-body", conditions.length
+        ? conditions.map(condition => `
+            <tr class="is-clickable ${String(condition.buffId) === String(selectedAnalysisConditionId) ? "is-selected" : ""}" data-analysis-condition-id="${escapeHtml(String(condition.buffId))}">
+                <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(condition.icon, condition.name)}<strong>${escapeHtml(condition.name)}</strong></span></td>
+                <td>${escapeHtml(formatNumber(condition.fightCount))}</td>
+                <td>${escapeHtml(formatNumber(condition.applyCount))}</td>
+                <td>${escapeHtml(formatNumber(condition.applicationsPerSourcePlayerMinute, 2))}</td>
+                <td>${escapeHtml(formatNumber(condition.pressurePerSourcePlayerMinute, 2))}</td>
+                <td>${escapeHtml(formatNumber(condition.damagePerSourcePlayerMinute, 1))}</td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="6">${escapeHtml(summary.availableFightCount > 0
+            ? "No attributed condition applications matched this side and filter."
+            : "Reparse fights with Analyst schema 1.26.0 or newer to populate player-attributed conditions.")}</td></tr>`);
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-condition-sort]",
+        analysisConditionSortState,
+        "analysisConditionSort");
+
+    renderAnalysisConditionDetail(
+        conditions.find(condition => String(condition.buffId) === String(selectedAnalysisConditionId)) ?? null,
+        summary);
+}
+
+function renderAnalysisCrowdControlComparisonDetail(comparison, summary) {
+    const container = document.querySelector("#analysis-crowd-control-detail");
+    if (!container) {
+        return;
+    }
+    if (!comparison) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const classes = sortAnalysisEffectRows(
+        buildAnalysisClassComparisons(
+            comparison.squadRow?.sources,
+            comparison.enemyRow?.sources,
+            "eventsPerActiveMinute"),
+        analysisCrowdControlComparisonClassSortState,
+        getAnalysisClassComparisonSortValue);
+    container.className = "analysis-player-detail";
+    container.innerHTML = `
+        <div class="section-heading">
+            <div>
+                <h3 class="analysis-effect-name">${buildAnalysisEffectIcon(comparison.icon, comparison.name)}<span>${escapeHtml(comparison.name)}</span></h3>
+                <p>Recorded CC events per class-minute on each side. Each denominator includes every active player-minute recorded for that class, including players with no event.</p>
+            </div>
+        </div>
+        ${buildTagListHtml([
+            `${formatNumber(comparison.squadRate, 2)} squad events / player-min`,
+            `${formatNumber(comparison.enemyRate, 2)} enemy events / player-min`,
+            `${formatSignedNumber(comparison.delta, 2)} squad difference`
+        ])}
+        <div class="table-shell table-shell-scroll">
+            <table class="data-table data-table-compact">
+                <thead>
+                    <tr>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="class">Class</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="squadMinutes">Squad min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="squadRate">Squad events / min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="enemyMinutes">Enemy min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="enemyRate">Enemy events / min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-comparison-class-sort="delta">Squad Δ</button></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${classes.length ? classes.map(row => `
+                        <tr>
+                            <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(row.icon, row.name)}<strong>${escapeHtml(row.name)}</strong></span></td>
+                            <td>${escapeHtml(formatNumber(row.squadMinutes, 1))}</td>
+                            <td>${escapeHtml(formatNumber(row.squadRate, 2))}</td>
+                            <td>${escapeHtml(formatNumber(row.enemyMinutes, 1))}</td>
+                            <td>${escapeHtml(formatNumber(row.enemyRate, 2))}</td>
+                            <td>${escapeHtml(formatSignedNumber(row.delta, 2))}</td>
+                        </tr>
+                    `).join("") : `<tr><td colspan="6">No class-attributed events were retained for this CC category.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+        <p class="workspace-note">Positive differences favor the squad; negative differences favor enemies. This comparison uses recorded events, not duration or inferred Stability effectiveness.</p>
+        <details class="analysis-card analysis-card--wide analysis-collapsible-card">
+            <summary class="analysis-collapsible-summary"><strong>Measurement caveats</strong></summary>
+            <ul>${(summary?.caveats ?? []).map(caveat => `<li>${escapeHtml(caveat)}</li>`).join("")}</ul>
+        </details>
+    `;
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-crowd-control-comparison-class-sort]",
+        analysisCrowdControlComparisonClassSortState,
+        "analysisCrowdControlComparisonClassSort");
+}
+
+function renderAnalysisCrowdControlComparison(summary) {
+    const comparisons = sortAnalysisEffectRows(
+        buildAnalysisSideComparisons(
+            summary.squad?.effects,
+            summary.enemy?.effects,
+            "skillId",
+            "eventsPerSourcePlayerMinute"),
+        analysisCrowdControlComparisonSortState,
+        getAnalysisSideComparisonSortValue);
+    if (!comparisons.some(comparison => comparison.id === String(selectedAnalysisCrowdControlId ?? ""))) {
+        selectedAnalysisCrowdControlId = comparisons.length ? comparisons[0].id : null;
+    }
+
+    renderAnalysisCrowdControlTableHead(true);
+    const squadRate = Number(summary.squad?.eventsPerSourcePlayerMinute ?? 0);
+    const enemyRate = Number(summary.enemy?.eventsPerSourcePlayerMinute ?? 0);
+    setInnerHtml("#analysis-crowd-control-cards", [
+        buildAnalysisOverviewStandardCard({
+            title: "Data coverage",
+            value: `${formatNumber(summary.availableFightCount ?? 0)} / ${formatNumber(summary.filteredFightCount ?? 0)}`,
+            detail: buildAnalysisEffectAvailability(summary)
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Squad CC events / player-min",
+            value: formatNumber(squadRate, 2),
+            detail: `${formatNumber(summary.squad?.eventCount ?? 0)} attributed squad events.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Enemy CC events / player-min",
+            value: formatNumber(enemyRate, 2),
+            detail: `${formatNumber(summary.enemy?.eventCount ?? 0)} attributed enemy events.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Squad difference",
+            value: formatSignedNumber(squadRate - enemyRate, 2),
+            detail: "Positive means more squad CC events per active player-minute."
+        })
+    ].join(""));
+
+    setInnerHtml("#analysis-crowd-control-body", comparisons.length ? comparisons.map(comparison => `
+        <tr class="is-clickable ${comparison.id === String(selectedAnalysisCrowdControlId) ? "is-selected" : ""}" data-analysis-crowd-control-id="${escapeHtml(comparison.id)}">
+            <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(comparison.icon, comparison.name)}<strong>${escapeHtml(comparison.name)}</strong></span></td>
+            <td>${escapeHtml(formatNumber(comparison.squadRate, 2))}</td>
+            <td>${escapeHtml(formatNumber(comparison.enemyRate, 2))}</td>
+            <td>${escapeHtml(formatSignedNumber(comparison.delta, 2))}</td>
+        </tr>
+    `).join("") : `<tr><td colspan="4">No attributed crowd-control events matched the current filter.</td></tr>`);
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-crowd-control-comparison-sort]",
+        analysisCrowdControlComparisonSortState,
+        "analysisCrowdControlComparisonSort");
+    renderAnalysisCrowdControlComparisonDetail(
+        comparisons.find(comparison => comparison.id === String(selectedAnalysisCrowdControlId)) ?? null,
+        summary);
+}
+
+function renderAnalysisCrowdControlDetail(effect, summary) {
+    const container = document.querySelector("#analysis-crowd-control-detail");
+    if (!container) {
+        return;
+    }
+
+    if (!effect) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const sources = sortAnalysisEffectRows(
+        effect.sources ?? [],
+        analysisCrowdControlClassSortState,
+        getAnalysisCrowdControlClassSortValue);
+    container.className = "analysis-player-detail";
+    container.innerHTML = `
+        <div class="section-heading">
+            <div>
+                <h3 class="analysis-effect-name">${buildAnalysisEffectIcon(effect.icon, effect.name)}<span>${escapeHtml(effect.name)}</span></h3>
+                <p>${escapeHtml(`${formatNumber(effect.effectiveCount)} effective events from ${formatNumber(effect.eventCount)} recorded events across ${formatNumber(effect.fightCount)} fights. Class rates use all active minutes for that class.`)}</p>
+            </div>
+        </div>
+        ${buildTagListHtml([
+            `${formatNumber(effect.effectiveEventsPerSourcePlayerMinute, 2)} effective / source player-min`,
+            `${formatPercent(effect.effectiveRatePercent)} effective rate`,
+            `${formatNumber(effect.durationPerSourcePlayerMinute, 2)}s duration / source player-min`,
+            `${formatNumber(effect.affectedPlayerCount)} source-target links`
+        ])}
+        <div class="table-shell table-shell-scroll">
+            <table class="data-table data-table-compact">
+                <thead>
+                    <tr>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="class">Class</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="activeMinutes">Class min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="events">Events</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="effective">Effective</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="effectiveRate">Effective / class-min</button></th>
+                        <th><button class="sort-header" type="button" data-analysis-crowd-control-class-sort="durationRate">Duration / class-min</button></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sources.length
+                        ? sources.map(source => `
+                            <tr>
+                                <td>
+                                    <div class="analysis-effect-name">
+                                        ${buildAnalysisEffectIcon(source.icon, source.displayName)}
+                                        <span class="analysis-effect-source-name">
+                                            <strong>${escapeHtml(source.displayName)}</strong>
+                                        </span>
+                                    </div>
+                                </td>
+                                <td>${escapeHtml(formatNumber(source.activeMinutes, 1))}</td>
+                                <td>${escapeHtml(formatNumber(source.eventCount))}</td>
+                                <td>${escapeHtml(`${formatNumber(source.effectiveCount)} (${formatPercent(source.effectiveRatePercent)})`)}</td>
+                                <td>${escapeHtml(formatNumber(source.effectiveEventsPerActiveMinute, 2))}</td>
+                                <td>${escapeHtml(`${formatNumber(source.durationPerActiveMinute, 2)}s`)}</td>
+                            </tr>
+                        `).join("")
+                        : `<tr><td colspan="6">No attributed classes were retained for this CC skill.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+        <p class="workspace-note">${escapeHtml(sources.length < Number(effect.sourceCount ?? 0)
+            ? `Showing the top ${sources.length} of ${effect.sourceCount} attributed classes.`
+            : `Showing all ${sources.length} attributed classes.`)}</p>
+        <details class="analysis-card analysis-card--wide analysis-collapsible-card">
+            <summary class="analysis-collapsible-summary"><strong>Measurement caveats</strong></summary>
+            <ul>${(summary?.caveats ?? []).map(caveat => `<li>${escapeHtml(caveat)}</li>`).join("")}</ul>
+        </details>
+    `;
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-crowd-control-class-sort]",
+        analysisCrowdControlClassSortState,
+        "analysisCrowdControlClassSort");
+}
+
+function renderAnalysisCrowdControl(snapshot) {
+    const summary = snapshot.crowdControl ?? {};
+    const sideSelect = document.querySelector("#analysis-crowd-control-side");
+    if (sideSelect) {
+        sideSelect.value = analysisCrowdControlSide;
+    }
+
+    if (analysisCrowdControlSide === "compare") {
+        renderAnalysisCrowdControlComparison(summary);
+        return;
+    }
+
+    renderAnalysisCrowdControlTableHead(false);
+
+    const side = analysisCrowdControlSide === "enemy" ? summary.enemy : summary.squad;
+    const effects = sortAnalysisEffectRows(
+        side?.effects ?? [],
+        analysisCrowdControlSortState,
+        getAnalysisCrowdControlSortValue);
+    if (!effects.some(effect => String(effect.skillId) === String(selectedAnalysisCrowdControlId ?? ""))) {
+        selectedAnalysisCrowdControlId = effects.length ? String(effects[0].skillId) : null;
+    }
+
+    setInnerHtml("#analysis-crowd-control-cards", [
+        buildAnalysisOverviewStandardCard({
+            title: "Data coverage",
+            value: `${formatNumber(summary.availableFightCount ?? 0)} / ${formatNumber(summary.filteredFightCount ?? 0)}`,
+            detail: buildAnalysisEffectAvailability(summary)
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Source player-minutes",
+            value: formatNumber(side?.sourcePlayerMinutes ?? 0, 1),
+            detail: "Summed active time for every player on the applying side."
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Effective CC / player-min",
+            value: formatNumber(side?.effectiveEventsPerSourcePlayerMinute ?? 0, 2),
+            detail: `${formatNumber(side?.effectiveCount ?? 0)} effective from ${formatNumber(side?.eventCount ?? 0)} recorded events.`
+        }),
+        buildAnalysisOverviewStandardCard({
+            title: "Recorded duration",
+            value: `${formatNumber(side?.durationSeconds ?? 0, 1)}s`,
+            detail: "Total arcDPS duration for attributed crowd-control events."
+        })
+    ].join(""));
+
+    setInnerHtml("#analysis-crowd-control-body", effects.length
+        ? effects.map(effect => `
+            <tr class="is-clickable ${String(effect.skillId) === String(selectedAnalysisCrowdControlId) ? "is-selected" : ""}" data-analysis-crowd-control-id="${escapeHtml(String(effect.skillId))}">
+                <td><span class="analysis-effect-name">${buildAnalysisEffectIcon(effect.icon, effect.name)}<strong>${escapeHtml(effect.name)}</strong></span></td>
+                <td>${escapeHtml(formatNumber(effect.fightCount))}</td>
+                <td>${escapeHtml(formatNumber(effect.eventCount))}</td>
+                <td>${escapeHtml(`${formatNumber(effect.effectiveCount)} (${formatPercent(effect.effectiveRatePercent)})`)}</td>
+                <td>${escapeHtml(formatNumber(effect.effectiveEventsPerSourcePlayerMinute, 2))}</td>
+                <td>${escapeHtml(`${formatNumber(effect.durationPerSourcePlayerMinute, 2)}s`)}</td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="6">${escapeHtml(summary.availableFightCount > 0
+            ? "No attributed crowd-control events matched this side and filter."
+            : "Reparse fights with Analyst schema 1.26.0 or newer to populate player-attributed crowd control.")}</td></tr>`);
+    updateAnalysisEffectSortHeaders(
+        "[data-analysis-crowd-control-sort]",
+        analysisCrowdControlSortState,
+        "analysisCrowdControlSort");
+
+    renderAnalysisCrowdControlDetail(
+        effects.find(effect => String(effect.skillId) === String(selectedAnalysisCrowdControlId)) ?? null,
+        summary);
+}
+
 function resetAnalysisPanelScroll(tabKey) {
     const panel = document.querySelector(`[data-analysis-panel="${tabKey}"]`);
     if (!panel) {
@@ -10305,6 +11135,12 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-boon-trend-tooltip", "");
     setInnerHtml("#analysis-boons-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-boon-detail", "");
+    setInnerHtml("#analysis-condition-cards", "");
+    setInnerHtml("#analysis-conditions-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-condition-detail", "");
+    setInnerHtml("#analysis-crowd-control-cards", "");
+    setInnerHtml("#analysis-crowd-control-body", `<tr><td colspan="6">${escapeHtml(message)}</td></tr>`);
+    setInnerHtml("#analysis-crowd-control-detail", "");
     document.querySelector("#analysis-comp-helper-summary").textContent = message;
     setInnerHtml("#analysis-comp-helper-locks", "");
     setInnerHtml("#analysis-comp-helper-candidates-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
@@ -10340,6 +11176,8 @@ function renderAnalysis(snapshot) {
     renderAnalysisTopFive(snapshot);
     renderAnalysisLanes(snapshot);
     renderAnalysisBoons(snapshot);
+    renderAnalysisConditions(snapshot);
+    renderAnalysisCrowdControl(snapshot);
     renderAnalysisCompHelperPlaceholder("Open Comp Helper to load candidate player cards for the current filter.");
 
     setActiveAnalysisTab(activeAnalysisTab);
@@ -13178,6 +14016,80 @@ document.querySelector("#analysis-lane-detail").addEventListener("click", event 
     }
 
     setActiveAnalysisLaneDetailTab(button.dataset.analysisLaneDetailTab);
+});
+document.querySelector("#analysis-condition-side").addEventListener("change", event => {
+    analysisConditionSide = ["squad", "enemy", "compare"].includes(event.target.value) ? event.target.value : "squad";
+    selectedAnalysisConditionId = null;
+    if (currentAnalysisSnapshot) {
+        renderAnalysisConditions(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-conditions-body").addEventListener("click", event => {
+    const row = event.target.closest("[data-analysis-condition-id]");
+    if (!row || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisConditionId = row.dataset.analysisConditionId;
+    renderAnalysisConditions(currentAnalysisSnapshot);
+});
+document.querySelector("#analysis-panel-conditions").addEventListener("click", event => {
+    const comparisonSort = event.target.closest("[data-analysis-condition-comparison-sort]");
+    if (comparisonSort) {
+        setAnalysisConditionComparisonSort(comparisonSort.dataset.analysisConditionComparisonSort);
+        return;
+    }
+    const comparisonClassSort = event.target.closest("[data-analysis-condition-comparison-class-sort]");
+    if (comparisonClassSort) {
+        setAnalysisConditionComparisonClassSort(comparisonClassSort.dataset.analysisConditionComparisonClassSort);
+        return;
+    }
+    const sort = event.target.closest("[data-analysis-condition-sort]");
+    if (sort) {
+        setAnalysisConditionSort(sort.dataset.analysisConditionSort);
+        return;
+    }
+    const classSort = event.target.closest("[data-analysis-condition-class-sort]");
+    if (classSort) {
+        setAnalysisConditionClassSort(classSort.dataset.analysisConditionClassSort);
+    }
+});
+document.querySelector("#analysis-crowd-control-side").addEventListener("change", event => {
+    analysisCrowdControlSide = ["squad", "enemy", "compare"].includes(event.target.value) ? event.target.value : "squad";
+    selectedAnalysisCrowdControlId = null;
+    if (currentAnalysisSnapshot) {
+        renderAnalysisCrowdControl(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-crowd-control-body").addEventListener("click", event => {
+    const row = event.target.closest("[data-analysis-crowd-control-id]");
+    if (!row || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisCrowdControlId = row.dataset.analysisCrowdControlId;
+    renderAnalysisCrowdControl(currentAnalysisSnapshot);
+});
+document.querySelector("#analysis-panel-crowd-control").addEventListener("click", event => {
+    const comparisonSort = event.target.closest("[data-analysis-crowd-control-comparison-sort]");
+    if (comparisonSort) {
+        setAnalysisCrowdControlComparisonSort(comparisonSort.dataset.analysisCrowdControlComparisonSort);
+        return;
+    }
+    const comparisonClassSort = event.target.closest("[data-analysis-crowd-control-comparison-class-sort]");
+    if (comparisonClassSort) {
+        setAnalysisCrowdControlComparisonClassSort(comparisonClassSort.dataset.analysisCrowdControlComparisonClassSort);
+        return;
+    }
+    const sort = event.target.closest("[data-analysis-crowd-control-sort]");
+    if (sort) {
+        setAnalysisCrowdControlSort(sort.dataset.analysisCrowdControlSort);
+        return;
+    }
+    const classSort = event.target.closest("[data-analysis-crowd-control-class-sort]");
+    if (classSort) {
+        setAnalysisCrowdControlClassSort(classSort.dataset.analysisCrowdControlClassSort);
+    }
 });
 document.querySelector("#auth-login-form").addEventListener("submit", event => {
     void handleAuthLogin(event);
