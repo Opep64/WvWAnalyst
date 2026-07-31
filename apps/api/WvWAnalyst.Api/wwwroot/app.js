@@ -4,6 +4,9 @@ const ACTIVE_APP_TAB_KEY = "wvw-analyst.active-app-tab";
 const FIGHT_SHAPE_DIAGNOSTICS_KEY = "wvw-analyst.show-fight-shape-diagnostics";
 const ANALYSIS_TREND_MODE_KEY = "wvw-analyst.analysis-trend-mode";
 const ANALYSIS_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-trend-smoothing";
+const ANALYSIS_ENEMY_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-enemy-trend-smoothing";
+const ANALYSIS_ENEMY_TREND_COLORS_KEY = "wvw-analyst.analysis-enemy-trend-colors";
+const ANALYSIS_ENEMY_TREND_METRIC_KEY = "wvw-analyst.analysis-enemy-trend-metric";
 const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
@@ -42,6 +45,12 @@ let analysisPlayerSortState = { key: "performance", direction: "desc" };
 let analysisClassSortState = { key: "performance", direction: "desc" };
 let analysisClassPlayerSortState = { key: "performance", direction: "desc" };
 let analysisEnemySortState = { key: "total", direction: "desc" };
+let analysisEnemiesViewMode = "table";
+let selectedAnalysisEnemyTrendClasses = null;
+let analysisEnemyTrendSmoothingWindow = 0;
+let analysisEnemyTrendMetric = "composition";
+let customAnalysisEnemyTrendColors = new Map();
+let currentAnalysisEnemyTrendColors = new Map();
 let selectedAnalysisPlayerAccount = null;
 let selectedAnalysisClassLabel = null;
 let selectedAnalysisLaneKeys = [];
@@ -99,6 +108,24 @@ const ANALYSIS_TREND_MODE_OPTIONS = {
     }
 };
 const ANALYSIS_TREND_SMOOTHING_OPTIONS = [0, 3, 5, 8];
+const ANALYSIS_ENEMY_TREND_PALETTE = [
+    "#58a6ff",
+    "#f05ad7",
+    "#58d68d",
+    "#f6c85f",
+    "#ff7b72",
+    "#a78bfa",
+    "#22d3ee",
+    "#fb923c",
+    "#e879f9",
+    "#84cc16",
+    "#f472b6",
+    "#2dd4bf",
+    "#facc15",
+    "#c084fc",
+    "#38bdf8",
+    "#a3e635"
+];
 const ANALYSIS_TREND_METRICS = [
     { key: "overallScore", title: "Overall trend", averageKey: "averageOverallScore", fallbackValue: "n/a", detail: "Execution score across the selected trend buckets.", comparisonLabel: "Overall" },
     { key: "contextDelta", title: "Context delta trend", averageKey: "averageContextDelta", fallbackValue: "n/a", detail: "Actual execution score minus expected score for similar fights.", comparisonLabel: "Context delta", signed: true, positiveLabel: "Better", negativeLabel: "Worse", rangeMode: "signed" },
@@ -2380,6 +2407,7 @@ function joinKeyFilterValues(values) {
 function getPatchErasFromSource(source) {
     return source?.patchEras
         ?? source?.patchMetadata?.patchEras
+        ?? source?.options?.patchEras
         ?? currentPatchMetadata?.patchEras
         ?? [];
 }
@@ -7516,9 +7544,22 @@ function renderAnalysisEnemies(snapshot) {
     const rows = getSortedAnalysisEnemies(snapshot);
     const summary = document.querySelector("#analysis-enemies-summary");
     const body = document.querySelector("#analysis-enemies-body");
+    const tableView = document.querySelector("#analysis-enemies-table-view");
+    const graphView = document.querySelector("#analysis-enemies-graph-view");
     const totalCount = rows.reduce((sum, row) => sum + Number(row.totalCount ?? 0), 0);
     const performanceCount = rows.reduce((sum, row) => sum + Number(row.performanceSampleCount ?? 0), 0);
     updateAnalysisEnemySortHeaders();
+    document.querySelectorAll("[data-analysis-enemies-view]").forEach(button => {
+        const isActive = button.dataset.analysisEnemiesView === analysisEnemiesViewMode;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+    if (tableView) {
+        tableView.hidden = analysisEnemiesViewMode !== "table";
+    }
+    if (graphView) {
+        graphView.hidden = analysisEnemiesViewMode !== "graph";
+    }
 
     if (summary) {
         if (rows.length === 0) {
@@ -7537,6 +7578,547 @@ function renderAnalysisEnemies(snapshot) {
     body.innerHTML = rows.length > 0
         ? rows.map(buildAnalysisEnemyClassRow).join("")
         : `<tr><td colspan="10">No enemy class summaries matched the current filters.</td></tr>`;
+
+    if (analysisEnemiesViewMode === "graph") {
+        renderAnalysisEnemyClassTrends(snapshot);
+    }
+}
+
+function setAnalysisEnemiesViewMode(mode) {
+    analysisEnemiesViewMode = mode === "graph" ? "graph" : "table";
+    if (currentAnalysisSnapshot) {
+        renderAnalysisEnemies(currentAnalysisSnapshot);
+    }
+}
+
+function getAnalysisEnemyTrendFilteredFights() {
+    const fights = currentDashboardSnapshot?.fightBrowser?.fights ?? [];
+    const filters = getAnalysisFiltersFromUi();
+    const patchEras = currentAnalysisSnapshot?.options?.patchEras ?? currentPatchMetadata?.patchEras ?? [];
+
+    return fights
+        .filter(fight => !filters.commander || (fight.fightIndex?.commanderDisplayNames ?? [])
+            .some(commander => stringEqualsIgnoreCase(commander, filters.commander)))
+        .filter(fight => filters.outcome === "all" || stringEqualsIgnoreCase(getOutcomeCode(fight), filters.outcome))
+        .filter(fight => {
+            const dateKey = getFightLocalDateString(fight);
+            return (!filters.startDate || (dateKey && dateKey >= filters.startDate))
+                && (!filters.endDate || (dateKey && dateKey <= filters.endDate));
+        })
+        .filter(fight => matchesFightSideClassFilters(fight, "squad", filters.squadIncludeClasses, filters.squadExcludeClasses))
+        .filter(fight => matchesFightSideClassFilters(fight, "enemy", filters.enemyIncludeClasses, filters.enemyExcludeClasses))
+        .filter(fight => matchesPatchScope(fight, filters.patchScope, patchEras))
+        .filter(fight => matchesFightAttributeFilters(fight, filters.fightAttributes));
+}
+
+function buildAnalysisEnemyNightTrends() {
+    const nightsByDate = new Map();
+    const fights = getAnalysisEnemyTrendFilteredFights();
+
+    fights.forEach(fight => {
+        const dateKey = getFightLocalDateString(fight);
+        if (!dateKey) {
+            return;
+        }
+
+        const classRows = (fight.fightIndex?.enemySide?.classes ?? [])
+            .filter(row => row?.classLabel && Number(row.count ?? 0) > 0);
+        const classTotal = classRows.reduce((sum, row) => sum + Number(row.count ?? 0), 0);
+        const enemyPlayers = Number(fight.fightIndex?.enemyPlayerCount ?? fight.fightIndex?.enemyTargetCount ?? classTotal);
+        if (enemyPlayers <= 0) {
+            return;
+        }
+
+        let night = nightsByDate.get(dateKey);
+        if (!night) {
+            night = {
+                dateKey,
+                fightCount: 0,
+                enemyPlayerCount: 0,
+                classCounts: new Map()
+            };
+            nightsByDate.set(dateKey, night);
+        }
+
+        night.fightCount++;
+        night.enemyPlayerCount += enemyPlayers;
+        classRows.forEach(row => {
+            const label = String(row.classLabel).trim();
+            night.classCounts.set(label, (night.classCounts.get(label) ?? 0) + Number(row.count ?? 0));
+        });
+    });
+
+    return {
+        fights,
+        nights: Array.from(nightsByDate.values())
+            .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
+    };
+}
+
+function getAnalysisEnemyTrendColor(classLabel) {
+    const label = String(classLabel ?? "");
+    const resolvedColor = currentAnalysisEnemyTrendColors.get(label)
+        ?? customAnalysisEnemyTrendColors.get(label);
+    if (resolvedColor) {
+        return resolvedColor;
+    }
+
+    let hash = 0;
+    for (const character of label) {
+        hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+    }
+    return ANALYSIS_ENEMY_TREND_PALETTE[Math.abs(hash) % ANALYSIS_ENEMY_TREND_PALETTE.length];
+}
+
+function buildAnalysisEnemyTrendColorMap(selectedLabels) {
+    const resolved = new Map();
+    const selected = [...selectedLabels]
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+    const autoLabels = [];
+    const occupiedColors = new Set();
+
+    selected.forEach(label => {
+        const customColor = customAnalysisEnemyTrendColors.get(label);
+        if (customColor) {
+            resolved.set(label, customColor);
+            occupiedColors.add(customColor.toLowerCase());
+        } else {
+            autoLabels.push(label);
+        }
+    });
+
+    const availableColors = ANALYSIS_ENEMY_TREND_PALETTE
+        .filter(color => !occupiedColors.has(color.toLowerCase()));
+    autoLabels.forEach((label, index) => {
+        const color = availableColors[index]
+            ?? ANALYSIS_ENEMY_TREND_PALETTE[index % ANALYSIS_ENEMY_TREND_PALETTE.length];
+        resolved.set(label, color);
+    });
+
+    return resolved;
+}
+
+function saveCustomAnalysisEnemyTrendColors() {
+    localStorage.setItem(
+        ANALYSIS_ENEMY_TREND_COLORS_KEY,
+        JSON.stringify(Object.fromEntries(customAnalysisEnemyTrendColors)));
+}
+
+function hydrateCustomAnalysisEnemyTrendColors() {
+    customAnalysisEnemyTrendColors = new Map();
+    try {
+        const stored = JSON.parse(localStorage.getItem(ANALYSIS_ENEMY_TREND_COLORS_KEY) ?? "{}");
+        Object.entries(stored ?? {}).forEach(([label, color]) => {
+            if (label && /^#[0-9a-f]{6}$/i.test(String(color))) {
+                customAnalysisEnemyTrendColors.set(label, String(color).toLowerCase());
+            }
+        });
+    } catch {
+        customAnalysisEnemyTrendColors = new Map();
+    }
+}
+
+function syncSelectedAnalysisEnemyTrendClasses(rows) {
+    if (selectedAnalysisEnemyTrendClasses !== null) {
+        return;
+    }
+
+    selectedAnalysisEnemyTrendClasses = new Set(
+        [...rows]
+            .sort((left, right) => Number(right.totalCount ?? 0) - Number(left.totalCount ?? 0))
+            .slice(0, 8)
+            .map(row => row.classLabel)
+            .filter(Boolean));
+}
+
+function buildAnalysisEnemyClassOptions(rows) {
+    const selected = selectedAnalysisEnemyTrendClasses ?? new Set();
+    return [...rows]
+        .sort((left, right) => String(left.classLabel ?? "").localeCompare(String(right.classLabel ?? ""), undefined, { sensitivity: "base" }))
+        .map(row => {
+            const label = String(row.classLabel ?? "Unknown class");
+            const color = getAnalysisEnemyTrendColor(label);
+            const icon = row.icon
+                ? `<img src="${escapeHtml(row.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+                : "";
+            return `
+                <label class="analysis-enemies-class-option" style="--enemy-class-color: ${escapeHtml(color)}">
+                    <input type="checkbox" data-analysis-enemy-trend-class="${escapeHtml(label)}" ${selected.has(label) ? "checked" : ""}>
+                    <input class="analysis-enemies-class-color" type="color" value="${escapeHtml(color)}" data-analysis-enemy-trend-color="${escapeHtml(label)}" aria-label="Choose graph color for ${escapeHtml(label)}" title="Choose graph color for ${escapeHtml(label)}">
+                    ${icon}
+                    <span>${escapeHtml(label)}</span>
+                </label>
+            `;
+        })
+        .join("");
+}
+
+function formatAnalysisEnemyTrendDate(dateKey) {
+    const [year, month, day] = String(dateKey ?? "").split("-").map(Number);
+    if (!year || !month || !day) {
+        return dateKey ?? "";
+    }
+    return new Date(year, month - 1, day, 12).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function getAnalysisEnemyTrendCeiling(maxValue) {
+    const value = Math.max(1, Number(maxValue ?? 0));
+    if (value <= 1) {
+        return 1;
+    }
+    if (value <= 2) {
+        return Math.ceil(value * 4) / 4;
+    }
+    return Math.ceil(value * 2) / 2;
+}
+
+function buildAnalysisEnemyPatchBoundaryMarkup(nights, patchEras, xAt, top, bottom, right) {
+    if (nights.length < 2 || (patchEras?.length ?? 0) === 0) {
+        return "";
+    }
+
+    const nightDates = nights.map(night => parseAnalysisLocalDate(night.dateKey));
+    const nightTimes = nightDates.map(date => date ? startOfLocalDay(date).getTime() : null);
+    const firstTime = nightTimes[0];
+    const lastTime = nightTimes[nightTimes.length - 1];
+    if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
+        return "";
+    }
+
+    const boundaries = (patchEras ?? [])
+        .map(era => {
+            const date = parseAnalysisLocalDate(era?.startsOn);
+            if (!date) {
+                return null;
+            }
+
+            const time = startOfLocalDay(date).getTime();
+            if (time < firstTime || time > lastTime) {
+                return null;
+            }
+
+            let x = null;
+            const exactIndex = nightTimes.findIndex(nightTime => nightTime === time);
+            if (exactIndex >= 0) {
+                x = xAt(exactIndex);
+            } else {
+                for (let index = 1; index < nightTimes.length; index += 1) {
+                    const leftTime = nightTimes[index - 1];
+                    const rightTime = nightTimes[index];
+                    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime) || time > rightTime) {
+                        continue;
+                    }
+
+                    const ratio = rightTime === leftTime ? 1 : (time - leftTime) / (rightTime - leftTime);
+                    x = xAt(index - 1) + ratio * (xAt(index) - xAt(index - 1));
+                    break;
+                }
+            }
+
+            return Number.isFinite(x)
+                ? {
+                    x,
+                    date,
+                    title: `${era?.label ?? "Patch boundary"} (${formatAnalysisLocalDateKey(date)})`
+                }
+                : null;
+        })
+        .filter(Boolean)
+        .sort((leftBoundary, rightBoundary) => leftBoundary.x - rightBoundary.x);
+
+    let previousX = -Infinity;
+    let labelLane = 0;
+    return boundaries.map(boundary => {
+        labelLane = boundary.x - previousX < 120 ? (labelLane + 1) % 2 : 0;
+        previousX = boundary.x;
+        const anchor = boundary.x > right - 120 ? "end" : "start";
+        const labelX = anchor === "end" ? boundary.x - 6 : boundary.x + 6;
+        const labelY = top + 14 + (labelLane * 14);
+        return `
+            <g class="analysis-enemies-chart-patch-boundary">
+                <line x1="${boundary.x.toFixed(2)}" y1="${top}" x2="${boundary.x.toFixed(2)}" y2="${bottom}">
+                    <title>${escapeHtml(boundary.title)}</title>
+                </line>
+                <text x="${labelX.toFixed(2)}" y="${labelY}" text-anchor="${anchor}">${escapeHtml(formatAnalysisDateMarkerLabel(boundary.date))}</text>
+            </g>
+        `;
+    }).join("");
+}
+
+function buildAnalysisEnemyThreatNights(snapshot) {
+    return (snapshot.enemyThreatTrends ?? [])
+        .filter(night => night?.dateKey)
+        .map(night => ({
+            dateKey: night.dateKey,
+            fightCount: Number(night.fightCount ?? 0),
+            threatScores: new Map(
+                (night.classes ?? [])
+                    .filter(row => row?.classLabel)
+                    .map(row => [
+                        row.classLabel,
+                        row.threatScore == null ? null : Number(row.threatScore)
+                    ]))
+        }))
+        .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+function buildAnalysisEnemyTrendPath(values, xAt, yAt) {
+    let started = false;
+    return values.map((value, index) => {
+        if (value == null || !Number.isFinite(Number(value))) {
+            started = false;
+            return "";
+        }
+
+        const command = started ? "L" : "M";
+        started = true;
+        return `${command} ${xAt(index).toFixed(2)} ${yAt(value).toFixed(2)}`;
+    }).filter(Boolean).join(" ");
+}
+
+function buildAnalysisEnemyTrendChart(nights, selectedLabels, patchEras = [], metric = "composition") {
+    if (nights.length === 0) {
+        return `<div class="analysis-enemies-chart-empty">No dated fights matched the current filters.</div>`;
+    }
+    if (selectedLabels.length === 0) {
+        return `<div class="analysis-enemies-chart-empty">Select one or more classes to graph.</div>`;
+    }
+
+    const width = 1000;
+    const height = 520;
+    const left = 70;
+    const right = 972;
+    const top = 30;
+    const bottom = 452;
+    const plotWidth = right - left;
+    const plotHeight = bottom - top;
+    const isThreat = metric === "threat";
+    const smoothingWindow = normalizeAnalysisTrendSmoothingWindow(analysisEnemyTrendSmoothingWindow);
+    const series = selectedLabels.map(label => {
+        const rawValues = nights.map(night => {
+            if (isThreat) {
+                const value = night.threatScores?.get(label);
+                return value == null || !Number.isFinite(Number(value)) ? null : Number(value);
+            }
+            return 5 * Number(night.classCounts.get(label) ?? 0) / night.enemyPlayerCount;
+        });
+        return {
+            label,
+            color: getAnalysisEnemyTrendColor(label),
+            rawValues,
+            displayValues: smoothingWindow > 1
+                ? buildRollingAverage(rawValues, smoothingWindow)
+                : rawValues
+        };
+    });
+    const numericValues = series
+        .flatMap(entry => entry.rawValues)
+        .filter(value => value != null && Number.isFinite(Number(value)))
+        .map(Number);
+    const maxValue = numericValues.length === 0 ? 1 : Math.max(1, ...numericValues);
+    const ceiling = isThreat ? 100 : getAnalysisEnemyTrendCeiling(maxValue);
+    const xAt = index => nights.length === 1
+        ? left + plotWidth / 2
+        : left + index / (nights.length - 1) * plotWidth;
+    const yAt = value => bottom - Math.max(0, Number(value ?? 0)) / ceiling * plotHeight;
+    const grid = [];
+
+    for (let index = 0; index <= 4; index++) {
+        const value = ceiling * index / 4;
+        const y = yAt(value);
+        grid.push(`
+            <line class="analysis-enemies-chart-grid-line" x1="${left}" y1="${y.toFixed(2)}" x2="${right}" y2="${y.toFixed(2)}"></line>
+            <text class="analysis-enemies-chart-axis-label" x="${left - 12}" y="${(y + 4).toFixed(2)}" text-anchor="end">${escapeHtml(formatNumber(value, isThreat ? 0 : 2))}</text>
+        `);
+    }
+
+    const maxTickCount = 10;
+    const tickStep = Math.max(1, Math.ceil(nights.length / maxTickCount));
+    const xTicks = nights
+        .map((night, index) => ({ night, index }))
+        .filter(entry => entry.index % tickStep === 0 || entry.index === nights.length - 1)
+        .map(entry => `
+            <text class="analysis-enemies-chart-axis-label" x="${xAt(entry.index).toFixed(2)}" y="${bottom + 26}" text-anchor="middle">${escapeHtml(formatAnalysisEnemyTrendDate(entry.night.dateKey))}</text>
+        `);
+    const onePerFiveY = !isThreat && ceiling >= 1 ? yAt(1) : null;
+    const referenceLine = onePerFiveY === null
+        ? ""
+        : `
+            <line class="analysis-enemies-chart-reference-line" x1="${left}" y1="${onePerFiveY.toFixed(2)}" x2="${right}" y2="${onePerFiveY.toFixed(2)}"></line>
+            <text class="analysis-enemies-chart-reference-label" x="${right - 4}" y="${(onePerFiveY - 7).toFixed(2)}" text-anchor="end">1 per 5</text>
+        `;
+    const patchBoundaries = buildAnalysisEnemyPatchBoundaryMarkup(nights, patchEras, xAt, top, bottom, right);
+    const seriesMarkup = series.map(entry => {
+        const rawPath = smoothingWindow > 1
+            ? buildAnalysisEnemyTrendPath(entry.rawValues, xAt, yAt)
+            : "";
+        const path = buildAnalysisEnemyTrendPath(entry.displayValues, xAt, yAt);
+        const points = entry.displayValues.map((value, index) => {
+            if (value == null || !Number.isFinite(Number(value))) {
+                return "";
+            }
+
+            const valueLabel = isThreat
+                ? `${formatNumber(value, 1)} Threat`
+                : `${formatNumber(value, 2)} per 5`;
+            const tooltipParts = [
+                entry.label,
+                formatAnalysisEnemyTrendDate(nights[index].dateKey),
+                valueLabel
+            ];
+            if (smoothingWindow > 1) {
+                const rawValueLabel = isThreat
+                    ? `${formatNumber(entry.rawValues[index], 1)} Threat`
+                    : `${formatNumber(entry.rawValues[index], 2)} per 5`;
+                tooltipParts.push(
+                    `${smoothingWindow}-night trailing average`,
+                    `raw ${rawValueLabel}`);
+            }
+            tooltipParts.push(`${formatNumber(nights[index].fightCount)} fights`);
+            return `
+            <circle class="analysis-enemies-chart-point" cx="${xAt(index).toFixed(2)}" cy="${yAt(value).toFixed(2)}" r="4" fill="${escapeHtml(entry.color)}">
+                <title>${escapeHtml(tooltipParts.join(" | "))}</title>
+            </circle>
+        `;
+        }).join("");
+        return `
+            ${rawPath ? `<path class="analysis-enemies-chart-line analysis-enemies-chart-line-raw" d="${rawPath}" stroke="${escapeHtml(entry.color)}"></path>` : ""}
+            ${path ? `<path class="analysis-enemies-chart-line" d="${path}" stroke="${escapeHtml(entry.color)}"></path>` : ""}
+            ${points}
+        `;
+    }).join("");
+
+    return `
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${isThreat ? "Enemy class Threat score" : "Enemy class composition per five players"} by night">
+            ${grid.join("")}
+            ${referenceLine}
+            ${patchBoundaries}
+            ${xTicks.join("")}
+            <text class="analysis-enemies-chart-axis-title" x="${(left + right) / 2}" y="505" text-anchor="middle">Night</text>
+            <text class="analysis-enemies-chart-axis-title" transform="translate(20 ${(top + bottom) / 2}) rotate(-90)" text-anchor="middle">${isThreat ? "Threat score" : "Players per 5"}</text>
+            ${seriesMarkup}
+        </svg>
+    `;
+}
+
+function renderAnalysisEnemyClassTrends(snapshot) {
+    const rows = snapshot.topEnemyClasses ?? [];
+    syncSelectedAnalysisEnemyTrendClasses(rows);
+    const options = document.querySelector("#analysis-enemies-class-options");
+    const selectionSummary = document.querySelector("#analysis-enemies-class-selection-summary");
+    const chartScope = document.querySelector("#analysis-enemies-chart-scope");
+    const chart = document.querySelector("#analysis-enemies-chart");
+    const chartTitle = document.querySelector("#analysis-enemies-chart-title");
+    const chartDescription = document.querySelector("#analysis-enemies-chart-description");
+    const availableLabels = new Set(rows.map(row => row.classLabel).filter(Boolean));
+    const selectedLabels = Array.from(selectedAnalysisEnemyTrendClasses ?? [])
+        .filter(label => availableLabels.has(label))
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+    currentAnalysisEnemyTrendColors = buildAnalysisEnemyTrendColorMap(selectedLabels);
+    const isThreat = analysisEnemyTrendMetric === "threat";
+    const compositionTrend = isThreat ? null : buildAnalysisEnemyNightTrends();
+    const nights = isThreat
+        ? buildAnalysisEnemyThreatNights(snapshot)
+        : compositionTrend.nights;
+    const fightCount = isThreat
+        ? nights.reduce((sum, night) => sum + Number(night.fightCount ?? 0), 0)
+        : compositionTrend.fights.length;
+
+    if (options) {
+        options.innerHTML = buildAnalysisEnemyClassOptions(rows);
+    }
+    if (selectionSummary) {
+        selectionSummary.textContent = `${formatNumber(selectedLabels.length)} of ${formatNumber(rows.length)} selected`;
+    }
+    if (chartTitle) {
+        chartTitle.textContent = isThreat
+            ? "Enemy Threat by night"
+            : "Enemy composition by night";
+    }
+    if (chartDescription) {
+        chartDescription.textContent = isThreat
+            ? "Threat uses the table calculation, normalized against all classes in the current filtered selection."
+            : "Each value is the number of players of that class per five enemy players.";
+    }
+    document.querySelector("#analysis-enemies-metric").value = analysisEnemyTrendMetric;
+    if (chartScope) {
+        chartScope.textContent = `${formatNumber(nights.length)} nights | ${formatNumber(fightCount)} fights`;
+    }
+    if (chart) {
+        chart.innerHTML = buildAnalysisEnemyTrendChart(
+            nights,
+            selectedLabels,
+            getPatchErasFromSource(snapshot),
+            analysisEnemyTrendMetric);
+    }
+}
+
+function setAllAnalysisEnemyTrendClasses(selected) {
+    if (!currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisEnemyTrendClasses = selected
+        ? new Set((currentAnalysisSnapshot.topEnemyClasses ?? []).map(row => row.classLabel).filter(Boolean))
+        : new Set();
+    renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
+}
+
+function setAnalysisEnemyTrendSmoothingWindow(value) {
+    analysisEnemyTrendSmoothingWindow = normalizeAnalysisTrendSmoothingWindow(value);
+    localStorage.setItem(ANALYSIS_ENEMY_TREND_SMOOTHING_KEY, String(analysisEnemyTrendSmoothingWindow));
+    document.querySelector("#analysis-enemies-smoothing").value = String(analysisEnemyTrendSmoothingWindow);
+    if (currentAnalysisSnapshot && analysisEnemiesViewMode === "graph") {
+        renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
+    }
+}
+
+function setAnalysisEnemyTrendMetric(value) {
+    analysisEnemyTrendMetric = value === "threat" ? "threat" : "composition";
+    localStorage.setItem(ANALYSIS_ENEMY_TREND_METRIC_KEY, analysisEnemyTrendMetric);
+    document.querySelector("#analysis-enemies-metric").value = analysisEnemyTrendMetric;
+    if (currentAnalysisSnapshot && analysisEnemiesViewMode === "graph") {
+        renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
+    }
+}
+
+function resetSelectedAnalysisEnemyTrendColors() {
+    for (const label of selectedAnalysisEnemyTrendClasses ?? []) {
+        customAnalysisEnemyTrendColors.delete(label);
+    }
+    saveCustomAnalysisEnemyTrendColors();
+    if (currentAnalysisSnapshot) {
+        renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
+    }
+}
+
+function handleAnalysisEnemyTrendClassChange(event) {
+    const colorInput = event.target.closest("[data-analysis-enemy-trend-color]");
+    if (colorInput && currentAnalysisSnapshot) {
+        const classLabel = colorInput.dataset.analysisEnemyTrendColor;
+        const color = String(colorInput.value ?? "").toLowerCase();
+        if (classLabel && /^#[0-9a-f]{6}$/.test(color)) {
+            customAnalysisEnemyTrendColors.set(classLabel, color);
+            saveCustomAnalysisEnemyTrendColors();
+            renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
+        }
+        return;
+    }
+
+    const input = event.target.closest("[data-analysis-enemy-trend-class]");
+    if (!input || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisEnemyTrendClasses ??= new Set();
+    const classLabel = input.dataset.analysisEnemyTrendClass;
+    if (input.checked) {
+        selectedAnalysisEnemyTrendClasses.add(classLabel);
+    } else {
+        selectedAnalysisEnemyTrendClasses.delete(classLabel);
+    }
+    renderAnalysisEnemyClassTrends(currentAnalysisSnapshot);
 }
 
 function formatAnalysisTopFiveValue(category, value) {
@@ -9707,6 +10289,10 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     setInnerHtml("#analysis-class-detail", "");
     document.querySelector("#analysis-enemies-summary").textContent = message;
     setInnerHtml("#analysis-enemies-body", `<tr><td colspan="10">${escapeHtml(message)}</td></tr>`);
+    document.querySelector("#analysis-enemies-class-selection-summary").textContent = "Choose classes to graph";
+    document.querySelector("#analysis-enemies-chart-scope").textContent = "";
+    setInnerHtml("#analysis-enemies-class-options", "");
+    setInnerHtml("#analysis-enemies-chart", `<div class="analysis-enemies-chart-empty">${escapeHtml(message)}</div>`);
     document.querySelector("#analysis-top-five-summary").textContent = message;
     setInnerHtml("#analysis-top-five-categories", "");
     setAnalysisTopFiveExportEnabled(false);
@@ -12037,6 +12623,17 @@ function hydrateAnalysisTrendControls() {
 
     document.querySelector("#analysis-trend-mode").value = analysisTrendMode;
     document.querySelector("#analysis-trend-smoothing").value = String(analysisTrendSmoothingWindow);
+
+    const storedEnemySmoothing = localStorage.getItem(ANALYSIS_ENEMY_TREND_SMOOTHING_KEY);
+    analysisEnemyTrendSmoothingWindow = storedEnemySmoothing === null
+        ? 0
+        : normalizeAnalysisTrendSmoothingWindow(storedEnemySmoothing);
+    document.querySelector("#analysis-enemies-smoothing").value = String(analysisEnemyTrendSmoothingWindow);
+    analysisEnemyTrendMetric = localStorage.getItem(ANALYSIS_ENEMY_TREND_METRIC_KEY) === "threat"
+        ? "threat"
+        : "composition";
+    document.querySelector("#analysis-enemies-metric").value = analysisEnemyTrendMetric;
+    hydrateCustomAnalysisEnemyTrendColors();
 }
 
 function setBatchButtonBusy(isBusy) {
@@ -12615,6 +13212,19 @@ document.querySelectorAll("[data-analysis-class-sort]").forEach(button => {
 });
 document.querySelectorAll("[data-analysis-enemy-sort]").forEach(button => {
     button.addEventListener("click", () => setAnalysisEnemySort(button.dataset.analysisEnemySort));
+});
+document.querySelectorAll("[data-analysis-enemies-view]").forEach(button => {
+    button.addEventListener("click", () => setAnalysisEnemiesViewMode(button.dataset.analysisEnemiesView));
+});
+document.querySelector("#analysis-enemies-select-all").addEventListener("click", () => setAllAnalysisEnemyTrendClasses(true));
+document.querySelector("#analysis-enemies-clear-all").addEventListener("click", () => setAllAnalysisEnemyTrendClasses(false));
+document.querySelector("#analysis-enemies-auto-colors").addEventListener("click", resetSelectedAnalysisEnemyTrendColors);
+document.querySelector("#analysis-enemies-class-options").addEventListener("change", handleAnalysisEnemyTrendClassChange);
+document.querySelector("#analysis-enemies-metric").addEventListener("change", event => {
+    setAnalysisEnemyTrendMetric(event.target.value);
+});
+document.querySelector("#analysis-enemies-smoothing").addEventListener("change", event => {
+    setAnalysisEnemyTrendSmoothingWindow(event.target.value);
 });
 document.querySelectorAll("[data-analysis-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAnalysisTab(button.dataset.analysisTab, { resetScroll: true }));

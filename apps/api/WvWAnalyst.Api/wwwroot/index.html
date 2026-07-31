@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260511auth">
+    <link rel="stylesheet" href="/styles.css?v=20260731enemytrends5">
 </head>
 <body>
     <div class="page-shell">
@@ -1223,8 +1223,14 @@
                     <div id="analysis-comp-helper-suggestions"></div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-enemies" data-analysis-panel="enemies" role="tabpanel" aria-labelledby="analysis-tab-enemies" hidden>
-                    <p class="workspace-note analysis-panel-note" id="analysis-enemies-summary">Enemy class counts across the selected fights.</p>
-                    <div class="table-shell table-shell-scroll table-shell-analysis-enemies">
+                    <div class="analysis-enemies-toolbar">
+                        <p class="workspace-note analysis-panel-note" id="analysis-enemies-summary">Enemy class counts across the selected fights.</p>
+                        <div class="analysis-enemies-view-toggle" role="group" aria-label="Enemy class view">
+                            <button class="analysis-enemies-view-button is-active" type="button" data-analysis-enemies-view="table" aria-pressed="true">Table</button>
+                            <button class="analysis-enemies-view-button" type="button" data-analysis-enemies-view="graph" aria-pressed="false">Graph</button>
+                        </div>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-analysis-enemies" id="analysis-enemies-table-view">
                         <table class="data-table data-table-compact">
                             <thead>
                                 <tr>
@@ -1243,6 +1249,50 @@
                             <tbody id="analysis-enemies-body"></tbody>
                         </table>
                     </div>
+                    <div class="analysis-enemies-graph-workspace" id="analysis-enemies-graph-view" hidden>
+                        <aside class="analysis-enemies-class-picker">
+                            <div class="analysis-enemies-class-picker-header">
+                                <div>
+                                    <strong>Classes</strong>
+                                    <span id="analysis-enemies-class-selection-summary">Choose classes to graph</span>
+                                </div>
+                                <div class="analysis-enemies-class-picker-actions">
+                                    <button class="action-link action-link-button" id="analysis-enemies-select-all" type="button">Select all</button>
+                                    <button class="action-link action-link-button" id="analysis-enemies-clear-all" type="button">Clear all</button>
+                                    <button class="action-link action-link-button" id="analysis-enemies-auto-colors" type="button" title="Reset selected classes to automatically spaced colors.">Auto colors</button>
+                                </div>
+                            </div>
+                            <div class="analysis-enemies-class-options" id="analysis-enemies-class-options"></div>
+                        </aside>
+                        <section class="analysis-enemies-chart-card">
+                            <div class="analysis-enemies-chart-heading">
+                                <div>
+                                    <strong id="analysis-enemies-chart-title">Enemy composition by night</strong>
+                                    <span id="analysis-enemies-chart-description">Each value is the number of players of that class per five enemy players.</span>
+                                </div>
+                                <div class="analysis-enemies-chart-controls">
+                                    <label>
+                                        <span>Metric</span>
+                                        <select id="analysis-enemies-metric">
+                                            <option value="composition">Composition per 5</option>
+                                            <option value="threat">Threat score</option>
+                                        </select>
+                                    </label>
+                                    <label>
+                                        <span>Smoothing</span>
+                                        <select id="analysis-enemies-smoothing">
+                                            <option value="0">Off</option>
+                                            <option value="3">3 nights</option>
+                                            <option value="5">5 nights</option>
+                                            <option value="8">8 nights</option>
+                                        </select>
+                                    </label>
+                                    <span id="analysis-enemies-chart-scope"></span>
+                                </div>
+                            </div>
+                            <div class="analysis-enemies-chart" id="analysis-enemies-chart"></div>
+                        </section>
+                    </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-top-five" data-analysis-panel="top-five" role="tabpanel" aria-labelledby="analysis-tab-top-five" hidden>
                     <div class="analysis-top-five-toolbar">
@@ -1256,6 +1306,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260511auth" defer></script>
+    <script src="/app.js?v=20260731enemytrends5" defer></script>
 </body>
 </html>

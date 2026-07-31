@@ -2025,6 +2025,311 @@ h1 {
     min-width: 1320px;
 }
 
+.analysis-enemies-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.analysis-enemies-toolbar .analysis-panel-note {
+    margin: 0;
+}
+
+.analysis-enemies-view-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(8, 17, 26, 0.72);
+}
+
+.analysis-enemies-view-button {
+    min-width: 76px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 9px;
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+}
+
+.analysis-enemies-view-button:hover {
+    color: var(--ink);
+}
+
+.analysis-enemies-view-button.is-active {
+    color: #06131e;
+    background: var(--accent);
+}
+
+.analysis-enemies-graph-workspace {
+    display: grid;
+    grid-template-columns: minmax(330px, 0.72fr) minmax(0, 1.8fr);
+    align-items: stretch;
+    gap: 14px;
+}
+
+.analysis-enemies-graph-workspace[hidden] {
+    display: none;
+}
+
+.analysis-enemies-class-picker,
+.analysis-enemies-chart-card {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(8, 17, 26, 0.54);
+}
+
+.analysis-enemies-class-picker {
+    padding: 12px;
+}
+
+.analysis-enemies-class-picker-header,
+.analysis-enemies-chart-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.analysis-enemies-class-picker-header > div:first-child,
+.analysis-enemies-chart-heading > div {
+    display: grid;
+    gap: 3px;
+}
+
+.analysis-enemies-class-picker-header span,
+.analysis-enemies-chart-heading span {
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.analysis-enemies-class-picker-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.analysis-enemies-class-picker-actions .action-link-button {
+    min-height: 30px;
+    padding: 5px 9px;
+    font-size: 0.78rem;
+}
+
+.analysis-enemies-class-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    align-content: start;
+    gap: 6px;
+    max-height: 580px;
+    margin-top: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.analysis-enemies-class-option {
+    display: grid;
+    grid-template-columns: auto 18px 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 6px 8px;
+    border: 1px solid rgba(127, 158, 184, 0.18);
+    border-radius: 9px;
+    color: var(--muted);
+    background: rgba(13, 26, 37, 0.7);
+    cursor: pointer;
+    font-size: 0.79rem;
+    font-weight: 700;
+}
+
+.analysis-enemies-class-option:hover {
+    border-color: rgba(82, 180, 255, 0.46);
+    color: var(--ink);
+}
+
+.analysis-enemies-class-option:has(input:checked) {
+    border-color: color-mix(in srgb, var(--enemy-class-color) 62%, transparent);
+    color: var(--ink);
+    background: color-mix(in srgb, var(--enemy-class-color) 10%, rgba(13, 26, 37, 0.78));
+}
+
+.analysis-enemies-class-option input {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--enemy-class-color);
+}
+
+.analysis-enemies-class-option img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+}
+
+.analysis-enemies-class-option > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.analysis-enemies-class-color {
+    width: 18px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.analysis-enemies-class-color::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.analysis-enemies-class-color::-webkit-color-swatch {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+}
+
+.analysis-enemies-class-color::-moz-color-swatch {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+}
+
+.analysis-enemies-chart-card {
+    display: grid;
+    grid-template-rows: auto minmax(380px, 1fr);
+    padding: 14px;
+}
+
+.analysis-enemies-chart-heading {
+    padding: 0 4px 10px;
+}
+
+.analysis-enemies-chart-controls {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.analysis-enemies-chart-controls label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.analysis-enemies-chart-controls select {
+    min-width: 118px;
+    padding: 7px 30px 7px 9px;
+}
+
+#analysis-enemies-metric {
+    min-width: 156px;
+}
+
+.analysis-enemies-chart-controls > span {
+    padding-bottom: 8px;
+    text-align: right;
+}
+
+.analysis-enemies-chart {
+    display: grid;
+    min-height: 420px;
+    place-items: center;
+}
+
+.analysis-enemies-chart svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+.analysis-enemies-chart-grid-line {
+    stroke: rgba(151, 176, 197, 0.17);
+    stroke-width: 1;
+}
+
+.analysis-enemies-chart-axis-label,
+.analysis-enemies-chart-axis-title,
+.analysis-enemies-chart-reference-label {
+    fill: var(--muted);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.analysis-enemies-chart-axis-title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.analysis-enemies-chart-reference-line {
+    stroke: rgba(255, 205, 91, 0.72);
+    stroke-width: 1.5;
+    stroke-dasharray: 7 6;
+}
+
+.analysis-enemies-chart-reference-label {
+    fill: #ffd879;
+    font-weight: 700;
+}
+
+.analysis-enemies-chart-patch-boundary line {
+    stroke: rgba(250, 204, 21, 0.72);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 5;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-enemies-chart-patch-boundary text {
+    fill: #fde68a;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    paint-order: stroke;
+    stroke: rgba(5, 12, 20, 0.9);
+    stroke-linejoin: round;
+    stroke-width: 3px;
+}
+
+.analysis-enemies-chart-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.6;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-enemies-chart-line-raw {
+    opacity: 0.22;
+    stroke-width: 1.35;
+}
+
+.analysis-enemies-chart-point {
+    stroke: #07131d;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+
+.analysis-enemies-chart-empty {
+    max-width: 420px;
+    color: var(--muted);
+    text-align: center;
+}
+
 .analysis-top-five-toolbar {
     display: flex;
     align-items: flex-start;
@@ -3838,8 +4143,14 @@ h1 {
     .analysis-boons-layout,
     .analysis-lanes-layout,
     .analysis-split-panel,
-    .analysis-split-panel-classes {
+    .analysis-split-panel-classes,
+    .analysis-enemies-graph-workspace {
         grid-template-columns: 1fr;
+    }
+
+    .analysis-enemies-class-options {
+        grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+        max-height: 300px;
     }
 
     .analysis-pillar-outcome-row {
@@ -3909,6 +4220,40 @@ h1 {
     .analysis-workbench {
         position: static;
         padding: 8px;
+    }
+
+    .analysis-enemies-toolbar,
+    .analysis-enemies-class-picker-header,
+    .analysis-enemies-chart-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .analysis-enemies-view-toggle {
+        align-self: flex-start;
+    }
+
+    .analysis-enemies-class-picker-actions {
+        justify-content: flex-start;
+    }
+
+    .analysis-enemies-chart-controls {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .analysis-enemies-chart-controls > span {
+        padding-bottom: 8px;
+        text-align: left;
+    }
+
+    .analysis-enemies-chart {
+        min-height: 310px;
+        overflow-x: auto;
+    }
+
+    .analysis-enemies-chart svg {
+        min-width: 680px;
     }
 
     .analysis-scope-bar {

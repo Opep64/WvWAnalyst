@@ -302,6 +302,7 @@ public sealed class FightAnalysisService
             TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
+            EnemyThreatTrends: BuildEnemyThreatTrends(filteredFights),
             TopFive: BuildTopFive(filteredFights),
             TopLanes: BuildTopLanes(filteredFights),
             BoonTrends: BuildBoonTrends(filteredFights),
@@ -2785,6 +2786,40 @@ public sealed class FightAnalysisService
             .ToArray();
     }
 
+    private static IReadOnlyList<FightAnalysisEnemyThreatTrendPointDto> BuildEnemyThreatTrends(
+        IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        var scaleRows = BuildTopEnemyClasses(fights);
+        return fights
+            .Select(fight => new
+            {
+                Fight = fight,
+                Date = GetFightLocalDate(fight)
+            })
+            .Where(entry => entry.Date.HasValue)
+            .GroupBy(entry => entry.Date!.Value)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var nightlyFights = group
+                    .Select(entry => entry.Fight)
+                    .ToArray();
+                var nightlyRows = ApplyEnemyThreatScores(
+                    BuildTopEnemyClasses(nightlyFights),
+                    scaleRows);
+
+                return new FightAnalysisEnemyThreatTrendPointDto(
+                    DateKey: group.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    FightCount: nightlyFights.Length,
+                    Classes: nightlyRows
+                        .Select(row => new FightAnalysisEnemyThreatClassPointDto(
+                            ClassLabel: row.ClassLabel,
+                            ThreatScore: row.ThreatScore))
+                        .ToArray());
+            })
+            .ToArray();
+    }
+
     private static EnemyClassPerformanceAggregate GetEnemyClassAggregate(
         Dictionary<string, EnemyClassPerformanceAggregate> aggregates,
         string classLabel)
@@ -2811,17 +2846,24 @@ public sealed class FightAnalysisService
 
     private static IReadOnlyList<FightAnalysisEnemyClassRowDto> ApplyEnemyThreatScores(IReadOnlyList<FightAnalysisEnemyClassRowDto> rows)
     {
+        return ApplyEnemyThreatScores(rows, rows);
+    }
+
+    private static IReadOnlyList<FightAnalysisEnemyClassRowDto> ApplyEnemyThreatScores(
+        IReadOnlyList<FightAnalysisEnemyClassRowDto> rows,
+        IReadOnlyList<FightAnalysisEnemyClassRowDto> scaleRows)
+    {
         if (rows.Count == 0)
         {
             return rows;
         }
 
-        double maxAverageDps = rows.Max(row => row.AverageDps ?? 0.0);
-        double maxBestDps = rows.Max(row => row.BestDps ?? 0.0);
-        double maxAverageStrips = rows.Max(row => row.AverageStripsPerMinute ?? 0.0);
-        double maxBestStrips = rows.Max(row => row.BestStripsPerMinute ?? 0.0);
-        double maxDamageBurstRate = rows.Max(GetDamageBurstRate);
-        double maxStripBurstRate = rows.Max(GetStripBurstRate);
+        double maxAverageDps = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(row => row.AverageDps ?? 0.0);
+        double maxBestDps = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(row => row.BestDps ?? 0.0);
+        double maxAverageStrips = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(row => row.AverageStripsPerMinute ?? 0.0);
+        double maxBestStrips = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(row => row.BestStripsPerMinute ?? 0.0);
+        double maxDamageBurstRate = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(GetDamageBurstRate);
+        double maxStripBurstRate = scaleRows.Count == 0 ? 0.0 : scaleRows.Max(GetStripBurstRate);
 
         return rows
             .Select(row =>
