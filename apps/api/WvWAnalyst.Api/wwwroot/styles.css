@@ -3029,6 +3029,38 @@ h1 {
     background: rgba(7, 89, 133, 0.18);
 }
 
+.effectiveness-perspective-note {
+    margin-bottom: 14px;
+    border-left: 3px solid #2dd4bf;
+    padding: 10px 12px;
+    color: #ccfbf1;
+    background: rgba(13, 148, 136, 0.14);
+}
+
+.effectiveness-help-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: help;
+}
+
+.effectiveness-help-label > span {
+    display: inline-grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 999px;
+    color: #cbd5e1;
+    font-size: 0.65rem;
+    line-height: 1;
+}
+
+.effectiveness-help-label:focus-visible {
+    outline: 2px solid rgba(94, 234, 212, 0.7);
+    outline-offset: 3px;
+}
+
 .effectiveness-result-card-win {
     border-color: rgba(52, 211, 153, 0.25);
 }

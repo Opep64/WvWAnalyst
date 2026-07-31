@@ -9132,6 +9132,28 @@ function buildEffectivenessConfidenceBadge(confidenceLabel) {
     return `<span class="effectiveness-confidence effectiveness-confidence-${level}">${escapeHtml(confidenceLabel ?? "Limited")}</span>`;
 }
 
+function buildEffectivenessHelpLabel(label, helpText) {
+    return `
+        <span
+            class="effectiveness-help-label"
+            tabindex="0"
+            title="${escapeHtml(helpText)}"
+            aria-label="${escapeHtml(`${label}: ${helpText}`)}">
+            ${escapeHtml(label)}
+            <span aria-hidden="true">?</span>
+        </span>
+    `;
+}
+
+function getEffectivenessQuestionLabels() {
+    const squadPerspective = effectivenessPerspective === "squad";
+    return {
+        "down-pressure": squadPerspective ? "Creating enemy downs" : "Creating squad downs",
+        "down-conversion": squadPerspective ? "Converting enemy downs" : "Converting squad downs",
+        "down-recovery": squadPerspective ? "Recovering squad downs" : "Recovering enemy downs"
+    };
+}
+
 function updateEffectivenessModeChrome() {
     const winLossMode = effectivenessMode === "win-loss";
     document.querySelector("#analysis-effectiveness-title").textContent = winLossMode
@@ -9139,7 +9161,7 @@ function updateEffectivenessModeChrome() {
         : "What changes around fight outcomes?";
     document.querySelector("#analysis-effectiveness-description").textContent = winLossMode
         ? "Compare the same fight-weighted outcome signal in wins and losses. The Outcome filter is intentionally ignored so both cohorts remain available; all other Analysis filters still apply."
-        : "Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Stronger association means a signal changed more consistently and with better evidence; it does not prove causation.";
+        : "Compare outcome windows with ordinary or unsuccessful windows across equally weighted fights. Higher signal strength means a larger, better-supported change; it does not prove causation.";
     document.querySelector("#analysis-effectiveness-method-badge").textContent = winLossMode
         ? "Win/loss separation"
         : "Historical associations";
@@ -9151,6 +9173,11 @@ function updateEffectivenessModeChrome() {
     });
     document.querySelectorAll("[data-effectiveness-family]").forEach(button => {
         button.classList.toggle("is-active", button.dataset.effectivenessFamily === effectivenessOutcomeFamily);
+        const label = getEffectivenessQuestionLabels()[button.dataset.effectivenessFamily];
+        if (label) {
+            button.textContent = label;
+            button.setAttribute("aria-label", label);
+        }
     });
 }
 
@@ -9269,7 +9296,7 @@ function renderHistoricalEffectiveness(snapshot) {
             <div class="effectiveness-section-heading">
                 <div>
                     <h3>Strongest overall signals</h3>
-                    <p class="workspace-note">Ranked by association strength. Evidence reflects fight support, coverage, balance, and precision.</p>
+                    <p class="workspace-note">Ranked by signal strength. Evidence reflects fight support, coverage, balance, and precision.</p>
                 </div>
             </div>
             <div class="table-shell table-shell-scroll effectiveness-table-shell">
@@ -9281,7 +9308,7 @@ function renderHistoricalEffectiveness(snapshot) {
                             <th>Outcome avg</th>
                             <th>Comparison avg</th>
                             <th>Lift</th>
-                            <th>Association</th>
+                            <th>${buildEffectivenessHelpLabel("Signal strength", "A 0 to 100 score combining the size of the outcome-versus-baseline change with evidence quality. It is not a win probability or proof of causation.")}</th>
                             <th>Evidence</th>
                         </tr>
                     </thead>
@@ -9297,7 +9324,7 @@ function renderHistoricalEffectiveness(snapshot) {
             <div class="effectiveness-section-heading">
                 <div>
                     <h3>Conditions and crowd control</h3>
-                    <p class="workspace-note">Eligible rows are ranked by association; excluded rows remain visible so the evidence threshold is transparent.</p>
+                    <p class="workspace-note">Eligible rows are ranked by signal strength; excluded rows remain visible so the evidence threshold is transparent.</p>
                 </div>
             </div>
             ${namedEffects.length
@@ -9310,7 +9337,7 @@ function renderHistoricalEffectiveness(snapshot) {
                                 <th>Outcome avg</th>
                                 <th>Comparison avg</th>
                                 <th>Lift</th>
-                                <th>Association</th>
+                                <th>${buildEffectivenessHelpLabel("Signal strength", "A 0 to 100 score combining the size of the outcome-versus-baseline change with evidence quality. It is not a win probability or proof of causation.")}</th>
                                 <th>Evidence</th>
                                 <th>Ranking result</th>
                             </tr>
@@ -9351,25 +9378,39 @@ function buildWinLossSignalCell(item, cohort) {
     const difference = cohort === "win" ? item.winDifference : item.lossDifference;
     return `
         <strong>${formatSignedPercent(lift)}</strong>
-        <span class="table-inline-note">Association ${formatNumber(association, 1)}</span>
+        <span class="table-inline-note" title="Signal strength combines the baseline-adjusted change with evidence quality; it is not a win probability.">Signal strength ${formatNumber(association, 1)}</span>
         <span class="table-inline-note">${formatSignedEffectivenessValue(difference, item.unit)} vs baseline</span>
     `;
 }
 
+function formatWinLossDirectionLabel(directionLabel) {
+    switch (String(directionLabel ?? "").toLowerCase()) {
+        case "stronger in wins":
+        case "stronger in squad wins":
+            return "More associated with squad wins";
+        case "stronger in losses":
+        case "stronger in squad losses":
+            return "More associated with squad losses";
+        default:
+            return "Similar association in squad wins and losses";
+    }
+}
+
 function buildWinLossMetricRow(metric) {
     const rank = metric.rank == null ? "&mdash;" : escapeHtml(metric.rank);
+    const directionLabel = formatWinLossDirectionLabel(metric.directionLabel);
     return `
         <tr class="${metric.rank == null ? "effectiveness-unranked" : ""}">
             <td><span class="effectiveness-rank">${rank}</span></td>
             <td>
                 <strong>${escapeHtml(metric.label)}</strong>
-                <span class="table-inline-note">${escapeHtml(metric.group)} &middot; ${escapeHtml(metric.directionLabel)}</span>
+                <span class="table-inline-note">${escapeHtml(metric.group)} &middot; ${escapeHtml(directionLabel)}</span>
             </td>
             <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(metric, "win")}</td>
             <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(metric, "loss")}</td>
             <td>
                 <strong>${formatSignedEffectivenessValue(metric.resultEdge, metric.unit)}</strong>
-                <span class="table-inline-note">${escapeHtml(metric.directionLabel)}</span>
+                <span class="table-inline-note">Signal: ${escapeHtml(directionLabel)}</span>
             </td>
             <td>
                 <strong>${formatNumber(metric.separationScore, 1)}</strong>
@@ -9386,18 +9427,19 @@ function buildWinLossMetricRow(metric) {
 function buildWinLossEffectRow(effect) {
     const rank = effect.rank == null ? "&mdash;" : escapeHtml(effect.rank);
     const typeLabel = String(effect.effectType ?? "").toLowerCase() === "cc" ? "CC" : "Condition";
+    const directionLabel = formatWinLossDirectionLabel(effect.directionLabel);
     return `
         <tr class="${effect.rank == null ? "effectiveness-unranked" : ""}">
             <td><span class="effectiveness-rank">${rank}</span></td>
             <td>
                 <strong>${escapeHtml(effect.name)}</strong>
-                <span class="table-inline-note">${escapeHtml(typeLabel)} &middot; ${escapeHtml(effect.directionLabel)}</span>
+                <span class="table-inline-note">${escapeHtml(typeLabel)} &middot; ${escapeHtml(directionLabel)}</span>
             </td>
             <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(effect, "win")}</td>
             <td class="effectiveness-cohort-cell">${buildWinLossSignalCell(effect, "loss")}</td>
             <td>
                 <strong>${formatSignedEffectivenessValue(effect.resultEdge, effect.unit)}</strong>
-                <span class="table-inline-note">${escapeHtml(effect.directionLabel)}</span>
+                <span class="table-inline-note">Signal: ${escapeHtml(directionLabel)}</span>
             </td>
             <td>
                 <strong>${formatNumber(effect.separationScore, 1)}</strong>
@@ -9417,15 +9459,24 @@ function buildWinLossScopeCards(snapshot) {
     const totalFights = Number(wins.filteredFightCount ?? 0) + Number(losses.filteredFightCount ?? 0);
     const cachedFights = Number(wins.cacheFightCount ?? 0) + Number(losses.cacheFightCount ?? 0);
     const coverage = totalFights > 0 ? cachedFights / totalFights * 100 : 0;
+    const measuredTeam = effectivenessPerspective === "squad" ? "Our Squad" : "Enemy Team";
+    const measuredDescription = effectivenessPerspective === "squad"
+        ? "The values below measure our squad's actions."
+        : "The values below measure enemy-team actions against our squad.";
     return `
+        <div class="effectiveness-perspective-note">
+            <strong>Measured team: ${escapeHtml(measuredTeam)}.</strong>
+            ${escapeHtml(measuredDescription)}
+            <strong>Squad Wins</strong> and <strong>Squad Losses</strong> always refer to our squad's fight result.
+        </div>
         <div class="stats-grid effectiveness-scope-grid">
             <article class="analysis-card effectiveness-result-card effectiveness-result-card-win">
-                <strong>Wins compared</strong>
+                <strong>Squad wins compared</strong>
                 <div class="analysis-card-value">${formatNumber(wins.filteredFightCount)}</div>
                 <div class="table-inline-note">${formatNumber(wins.observationCount)} outcome and comparison windows.</div>
             </article>
             <article class="analysis-card effectiveness-result-card effectiveness-result-card-loss">
-                <strong>Losses compared</strong>
+                <strong>Squad losses compared</strong>
                 <div class="analysis-card-value">${formatNumber(losses.filteredFightCount)}</div>
                 <div class="table-inline-note">${formatNumber(losses.observationCount)} outcome and comparison windows.</div>
             </article>
@@ -9469,15 +9520,16 @@ function renderHistoricalEffectivenessWinLoss(snapshot) {
             (right.rank == null ? Number.MAX_SAFE_INTEGER : right.rank) ||
             Number(right.separationScore ?? 0) - Number(left.separationScore ?? 0));
     const unavailableMetrics = (report.metrics ?? []).filter(metric => !metric.available);
+    const measuredTeam = effectivenessPerspective === "squad" ? "Our Squad" : "Enemy Team";
     const perspectiveDescription = effectivenessPerspective === "squad"
-        ? "Positive result edge means the squad signal was stronger in wins."
-        : "Positive result edge means the enemy signal was stronger in squad losses.";
+        ? "Positive raw result edge means the squad's baseline-adjusted value was higher in squad wins."
+        : "Positive raw result edge means the enemy's baseline-adjusted value was higher in squad losses.";
 
     setInnerHtml("#analysis-effectiveness-content", `
         ${buildWinLossScopeCards(snapshot)}
         <div class="effectiveness-report-heading">
             <div>
-                <h3>${escapeHtml(report.outcomeLabel)} signal in wins versus losses</h3>
+                <h3>${escapeHtml(measuredTeam)} signals around ${escapeHtml(String(report.outcomeLabel ?? "").toLowerCase())}: squad wins versus squad losses</h3>
                 <p class="workspace-note">${formatNumber(report.winPairedFightCount)} paired win fights and ${formatNumber(report.lossPairedFightCount)} paired loss fights. ${escapeHtml(perspectiveDescription)}</p>
             </div>
             ${buildEffectivenessConfidenceBadge(report.confidenceLabel)}
@@ -9486,7 +9538,7 @@ function renderHistoricalEffectivenessWinLoss(snapshot) {
             <div class="effectiveness-section-heading">
                 <div>
                     <h3>Strongest win/loss differences</h3>
-                    <p class="workspace-note">Win and loss lift compare the outcome window with its own baseline. Separation ranks how differently the signal behaves between results.</p>
+                    <p class="workspace-note">Each lift compares the event window with its own cohort baseline. Raw result edge shows the difference in original units; separation determines rank from the difference in signal strength and its evidence.</p>
                 </div>
             </div>
             <div class="table-shell table-shell-scroll effectiveness-table-shell">
@@ -9495,11 +9547,11 @@ function renderHistoricalEffectivenessWinLoss(snapshot) {
                         <tr>
                             <th>Rank</th>
                             <th>Signal</th>
-                            <th>Wins</th>
-                            <th>Losses</th>
-                            <th>Result edge</th>
-                            <th>Separation</th>
-                            <th>Evidence</th>
+                            <th>Squad wins</th>
+                            <th>Squad losses</th>
+                            <th>${buildEffectivenessHelpLabel("Raw result edge", "The difference between the win-cohort and loss-cohort baseline-adjusted values, shown in the signal's original unit. Its sign is perspective-aware and it does not determine rank.")}</th>
+                            <th>${buildEffectivenessHelpLabel("Separation", "The evidence-weighted difference in signal strength between squad wins and squad losses. Separation determines rank.")}</th>
+                            <th>${buildEffectivenessHelpLabel("Evidence", "Support and precision for this comparison, including paired-fight counts, cohort balance, coverage, and uncertainty.")}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -9524,11 +9576,11 @@ function renderHistoricalEffectivenessWinLoss(snapshot) {
                             <tr>
                                 <th>Rank</th>
                                 <th>Effect</th>
-                                <th>Wins</th>
-                                <th>Losses</th>
-                                <th>Result edge</th>
-                                <th>Separation</th>
-                                <th>Evidence</th>
+                                <th>Squad wins</th>
+                                <th>Squad losses</th>
+                                <th>${buildEffectivenessHelpLabel("Raw result edge", "The difference between the win-cohort and loss-cohort baseline-adjusted values, shown in the effect's original unit. Its sign is perspective-aware and it does not determine rank.")}</th>
+                                <th>${buildEffectivenessHelpLabel("Separation", "The evidence-weighted difference in signal strength between squad wins and squad losses. Separation determines rank.")}</th>
+                                <th>${buildEffectivenessHelpLabel("Evidence", "Support and precision for this comparison, including paired-fight counts, cohort balance, coverage, and uncertainty.")}</th>
                             </tr>
                         </thead>
                         <tbody>${namedEffects.map(buildWinLossEffectRow).join("")}</tbody>
