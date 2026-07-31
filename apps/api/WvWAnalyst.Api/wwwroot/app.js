@@ -35,6 +35,7 @@ let manageResetBusy = false;
 let manageCommanderDeleteBusy = false;
 let manageDateRangeDeleteBusy = false;
 let activityLogBusy = false;
+let fightDossierRequestVersion = 0;
 let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let effectivenessMode = "associations";
@@ -1944,6 +1945,52 @@ function buildFightDossierUrl(fightId) {
     params.set("tab", "fight-browser");
     params.set("fightId", fightId);
     return `/?${params.toString()}`;
+}
+
+function placeFightDossierAfterFightBrowser() {
+    const fightBrowserPanel = document.querySelector("#fight-browser-panel");
+    const dossierPanel = document.querySelector("#fight-dossier-panel");
+    if (fightBrowserPanel && dossierPanel) {
+        fightBrowserPanel.insertAdjacentElement("afterend", dossierPanel);
+    }
+}
+
+function updateFightDossierHistory(fightId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", "fight-browser");
+    if (fightId) {
+        url.searchParams.set("fightId", fightId);
+    } else {
+        url.searchParams.delete("fightId");
+    }
+
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function updateSelectedFightRows(fightId) {
+    document.querySelectorAll("[data-fight-id]").forEach(row => {
+        row.classList.toggle("is-selected", Boolean(fightId) && row.dataset.fightId === fightId);
+    });
+}
+
+function scrollFightDossierIntoView() {
+    const panel = document.querySelector("#fight-dossier-panel");
+    if (!panel || panel.hidden) {
+        return;
+    }
+
+    panel.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start"
+    });
+}
+
+function scrollDashboardToTop() {
+    window.scrollTo({
+        top: 0,
+        left: window.scrollX,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    });
 }
 
 function resolveInitialAppTab() {
@@ -11218,7 +11265,7 @@ function buildRecentParseRow(fight, selectedFightId) {
     const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
 
     return `
-        <tr class="${selectedClass.trim()}">
+        <tr class="${selectedClass.trim()}" data-fight-id="${escapeHtml(fight.fightId)}">
             <td>${escapeHtml(parsedAt || "-")}</td>
             <td>
                 <span class="table-title">${escapeHtml(fightTitle)}</span>
@@ -11231,7 +11278,7 @@ function buildRecentParseRow(fight, selectedFightId) {
             <td><span class="${buildStatusClass(fight.status)}">${escapeHtml(fight.status)}</span></td>
             <td>
                 <div class="table-actions">
-                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Summary</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}" data-fight-summary-id="${escapeHtml(fight.fightId)}">Summary</a>
                     ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
@@ -11459,7 +11506,7 @@ function buildFightBrowserRow(fight, selectedFightId) {
         : "";
 
     return `
-        <tr class="${rowClasses.join(" ")}"${pressurePreviewAttributes}>
+        <tr class="${rowClasses.join(" ")}" data-fight-id="${escapeHtml(fight.fightId)}"${pressurePreviewAttributes}>
             <td>${escapeHtml(fightTime || "-")}</td>
             <td>${escapeHtml(commander)}</td>
             <td>${escapeHtml(duration)}</td>
@@ -11471,7 +11518,7 @@ function buildFightBrowserRow(fight, selectedFightId) {
             <td>${buildAttributePills(fight.attributes)}</td>
             <td>
                 <div class="table-actions">
-                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}">Summary</a>
+                    <a href="${escapeHtml(buildFightDossierUrl(fight.fightId))}" data-fight-summary-id="${escapeHtml(fight.fightId)}">Summary</a>
                     ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
                     ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
                 </div>
@@ -12024,6 +12071,39 @@ function toggleFightBrowserTopBursts() {
     }
 }
 
+function resetFightDossierContent() {
+    [
+        "#dossier-context-list",
+        "#dossier-participants-list",
+        "#dossier-outcome-list",
+        "#dossier-execution-list",
+        "#dossier-confidence-list",
+        "#dossier-fight-shape",
+        "#dossier-commander-focus-list",
+        "#dossier-parser-list",
+        "#dossier-commanders-list",
+        "#dossier-extensions-list",
+        "#dossier-artifact-links",
+        "#dossier-squad-stats",
+        "#dossier-enemy-stats",
+        "#dossier-enemy-classes",
+        "#dossier-scoreboard-body",
+        "#dossier-pillar-grid",
+        "#dossier-player-body"
+    ].forEach(selector => setInnerHtml(selector, ""));
+}
+
+function renderFightDossierLoading(fightId) {
+    const panel = document.querySelector("#fight-dossier-panel");
+    panel.hidden = false;
+    setActiveAppTab("fight-browser");
+    document.querySelector("#dossier-title").textContent = "Loading Fight Summary";
+    document.querySelector("#dossier-subtitle").textContent = `Loading ${fightId}...`;
+    document.querySelector("#dossier-back-link").setAttribute("href", getDashboardUrl("fight-browser"));
+    resetFightDossierContent();
+    setInnerHtml("#dossier-context-list", '<p class="workspace-note">Loading the selected fight...</p>');
+}
+
 function renderFightDossier(detail) {
     const panel = document.querySelector("#fight-dossier-panel");
     panel.hidden = false;
@@ -12256,11 +12336,7 @@ function renderFightDossier(detail) {
 
 function clearFightDossier() {
     document.querySelector("#fight-dossier-panel").hidden = true;
-    setInnerHtml("#dossier-pillar-grid", "");
-    setInnerHtml("#dossier-player-body", "");
-    setInnerHtml("#dossier-commander-focus-list", "");
-    setInnerHtml("#dossier-fight-shape", "");
-    setInnerHtml("#dossier-enemy-classes", "");
+    resetFightDossierContent();
 }
 
 function renderFightDossierError(fightId, error) {
@@ -12269,23 +12345,65 @@ function renderFightDossierError(fightId, error) {
     document.querySelector("#dossier-title").textContent = "Fight Summary";
     document.querySelector("#dossier-subtitle").textContent = `Could not load ${fightId}.`;
     document.querySelector("#dossier-back-link").setAttribute("href", getDashboardUrl("fight-browser"));
-    setInnerHtml("#dossier-context-list", "");
-    setInnerHtml("#dossier-participants-list", "");
-    setInnerHtml("#dossier-outcome-list", "");
-    setInnerHtml("#dossier-execution-list", "");
-    setInnerHtml("#dossier-confidence-list", "");
-    setInnerHtml("#dossier-fight-shape", "");
-    setInnerHtml("#dossier-commander-focus-list", "");
+    resetFightDossierContent();
     setInnerHtml("#dossier-parser-list", buildTagListHtml([error instanceof Error ? error.message : String(error)]));
-    setInnerHtml("#dossier-commanders-list", "");
-    setInnerHtml("#dossier-extensions-list", "");
-    setInnerHtml("#dossier-artifact-links", "");
-    setInnerHtml("#dossier-squad-stats", "");
-    setInnerHtml("#dossier-enemy-stats", "");
-    setInnerHtml("#dossier-enemy-classes", "");
-    setInnerHtml("#dossier-scoreboard-body", "");
-    setInnerHtml("#dossier-pillar-grid", "");
-    setInnerHtml("#dossier-player-body", "");
+}
+
+async function showFightDossier(fightId, options = {}) {
+    const { updateHistory = true, scrollIntoView = true } = options;
+    const normalizedFightId = String(fightId ?? "").trim();
+    if (!normalizedFightId) {
+        return;
+    }
+
+    const requestVersion = ++fightDossierRequestVersion;
+    if (updateHistory && getSelectedFightId() !== normalizedFightId) {
+        updateFightDossierHistory(normalizedFightId);
+    }
+
+    updateSelectedFightRows(normalizedFightId);
+    renderFightDossierLoading(normalizedFightId);
+    if (scrollIntoView) {
+        window.requestAnimationFrame(scrollFightDossierIntoView);
+    }
+
+    try {
+        const detail = await loadFightDetail(normalizedFightId);
+        if (requestVersion === fightDossierRequestVersion) {
+            renderFightDossier(detail);
+        }
+    } catch (error) {
+        if (requestVersion === fightDossierRequestVersion) {
+            renderFightDossierError(normalizedFightId, error);
+        }
+    }
+}
+
+function closeFightDossier(options = {}) {
+    const { updateHistory = true, scrollToTop = true } = options;
+    fightDossierRequestVersion += 1;
+    clearFightDossier();
+    updateSelectedFightRows(null);
+    setActiveAppTab("fight-browser");
+    if (updateHistory && getSelectedFightId()) {
+        updateFightDossierHistory(null);
+    }
+    if (scrollToTop) {
+        window.requestAnimationFrame(scrollDashboardToTop);
+    }
+}
+
+function handleFightDossierHistoryChange() {
+    const requestedTab = getRequestedAppTab() ?? "manage";
+    setActiveAppTab(requestedTab);
+    const fightId = getSelectedFightId();
+    if (fightId) {
+        void showFightDossier(fightId, { updateHistory: false });
+        return;
+    }
+
+    closeFightDossier({ updateHistory: false, scrollToTop: false });
+    setActiveAppTab(requestedTab);
 }
 
 function renderBatchStatus(result, success) {
@@ -13560,12 +13678,7 @@ async function main() {
         renderAnalysisLoading("Open the Analysis tab to load analysis.");
 
         if (selectedFightId) {
-            try {
-                const detail = await loadFightDetail(selectedFightId);
-                renderFightDossier(detail);
-            } catch (error) {
-                renderFightDossierError(selectedFightId, error);
-            }
+            await showFightDossier(selectedFightId, { updateHistory: false });
         } else {
             clearFightDossier();
         }
@@ -13771,6 +13884,26 @@ document.querySelector("#fight-browser-body").addEventListener("pointerout", hid
 document.querySelector("#fight-browser-body").addEventListener("pointermove", moveFightPressurePreview);
 document.querySelector("#fight-browser-body").addEventListener("focusin", showFightPressurePreview);
 document.querySelector("#fight-browser-body").addEventListener("focusout", hideFightPressurePreview);
+document.querySelector("#app-main").addEventListener("click", event => {
+    const summaryLink = event.target.closest("[data-fight-summary-id]");
+    if (!summaryLink
+        || event.defaultPrevented
+        || event.button !== 0
+        || event.ctrlKey
+        || event.metaKey
+        || event.shiftKey
+        || event.altKey) {
+        return;
+    }
+
+    event.preventDefault();
+    void showFightDossier(summaryLink.dataset.fightSummaryId);
+});
+document.querySelector("#dossier-back-link").addEventListener("click", event => {
+    event.preventDefault();
+    closeFightDossier();
+});
+window.addEventListener("popstate", handleFightDossierHistoryChange);
 document.querySelector("#analysis-class-filters").addEventListener("click", event => {
     const button = event.target.closest("[data-class-filter-clear]");
     if (!button) {
@@ -14172,6 +14305,7 @@ document.querySelector("#analysis-panel-effectiveness").addEventListener("click"
     }
 });
 
+placeFightDossierAfterFightBrowser();
 hydrateBatchForm();
 hydrateAnalysisTrendControls();
 applyCompHelperProfile("balanced");
