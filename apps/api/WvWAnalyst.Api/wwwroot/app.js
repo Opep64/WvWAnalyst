@@ -24,6 +24,8 @@ let lastBatchResult = null;
 let activeBatchJobId = null;
 let batchStatusPollHandle = null;
 let manageActivityRefreshHandle = null;
+let manageActivityRefreshPromise = null;
+let mainLoadPromise = null;
 let analysisLoadPromise = null;
 let showFightBrowserTopBursts = false;
 let showFightShapeDiagnostics = localStorage.getItem(FIGHT_SHAPE_DIAGNOSTICS_KEY) === "true";
@@ -11114,11 +11116,16 @@ function renderAnalysis(snapshot) {
 
 async function ensureAnalysisLoaded(force = false) {
     if (!force && currentAnalysisSnapshot) {
+        renderAnalysis(currentAnalysisSnapshot);
         return currentAnalysisSnapshot;
     }
 
     if (analysisLoadPromise) {
-        return analysisLoadPromise;
+        const snapshot = await analysisLoadPromise;
+        if (snapshot) {
+            renderAnalysis(snapshot);
+        }
+        return snapshot;
     }
 
     renderAnalysisLoading(force ? "Refreshing analysis..." : "Loading analysis...");
@@ -12429,10 +12436,45 @@ function scheduleManageActivityRefresh(snapshot) {
     if (snapshot?.manageActivity?.uploadRunning && !snapshot.manageActivity.parseRunning) {
         manageActivityRefreshHandle = window.setTimeout(() => {
             if (!activeBatchJobId && !batchStatusPollHandle) {
-                void main();
+                void refreshManageActivityState();
             }
         }, 1500);
     }
+}
+
+async function refreshManageActivityState() {
+    if (manageActivityRefreshPromise) {
+        return manageActivityRefreshPromise;
+    }
+
+    const uploadWasRunning = Boolean(currentDashboardSnapshot?.manageActivity?.uploadRunning);
+    manageActivityRefreshPromise = loadDashboard()
+        .then(snapshot => {
+            currentDashboardSnapshot = snapshot;
+            renderWorkspace(snapshot);
+            syncSharedManageState(snapshot);
+            scheduleManageActivityRefresh(snapshot);
+
+            if (uploadWasRunning && !snapshot?.manageActivity?.uploadRunning) {
+                void refreshActivityLog({ silent: true });
+            }
+
+            return snapshot;
+        })
+        .catch(error => {
+            if (error?.status === 401) {
+                renderAuthState({ enabled: true, authenticated: false, username: null });
+                return null;
+            }
+
+            setActivityLogStatus(error instanceof Error ? error.message : String(error), false);
+            return null;
+        })
+        .finally(() => {
+            manageActivityRefreshPromise = null;
+        });
+
+    return manageActivityRefreshPromise;
 }
 
 function syncSharedManageState(snapshot) {
@@ -13551,9 +13593,20 @@ function resumeBatchJobPollingIfNeeded() {
     startBatchJobPolling(storedJobId);
 }
 
-async function main() {
+function main() {
+    if (mainLoadPromise) {
+        return mainLoadPromise;
+    }
+
+    mainLoadPromise = runMain()
+        .finally(() => {
+            mainLoadPromise = null;
+        });
+    return mainLoadPromise;
+}
+
+async function runMain() {
     const selectedFightId = getSelectedFightId();
-    currentAnalysisSnapshot = null;
 
     try {
         const [snapshot, compHelperConfig] = await Promise.all([
@@ -13570,7 +13623,6 @@ async function main() {
         void refreshActivityLog({ silent: true });
         renderRecentParses(snapshot, selectedFightId);
         renderFightBrowser(snapshot, selectedFightId);
-        renderAnalysisLoading("Open the Analysis tab to load analysis.");
 
         if (selectedFightId) {
             await showFightDossier(selectedFightId, { updateHistory: false });
@@ -13584,7 +13636,11 @@ async function main() {
         renderBatchResults(lastBatchResult);
 
         if (activeAppTab === "analysis") {
+            currentAnalysisSnapshot = null;
             await ensureAnalysisLoaded();
+        } else {
+            currentAnalysisSnapshot = null;
+            renderAnalysisLoading("Open the Analysis tab to load analysis.");
         }
     } catch (error) {
         if (error?.status === 401) {
