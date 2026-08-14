@@ -34,7 +34,6 @@ public sealed class ParserImportService
     private readonly ParserCliLocator _parserCliLocator;
     private readonly FightCatalogService _fightCatalog;
     private readonly EliteInsightsFightIndexer _fightIndexer;
-    private readonly FightOutcomeObservationCacheService _outcomeObservationCache;
     private readonly ILogger<ParserImportService> _logger;
     private readonly SemaphoreSlim _catalogCommitGate = new(1, 1);
     private readonly SemaphoreSlim _archiveMoveGate = new(1, 1);
@@ -44,14 +43,12 @@ public sealed class ParserImportService
         ParserCliLocator parserCliLocator,
         FightCatalogService fightCatalog,
         EliteInsightsFightIndexer fightIndexer,
-        FightOutcomeObservationCacheService outcomeObservationCache,
         ILogger<ParserImportService> logger)
     {
         _paths = paths;
         _parserCliLocator = parserCliLocator;
         _fightCatalog = fightCatalog;
         _fightIndexer = fightIndexer;
-        _outcomeObservationCache = outcomeObservationCache;
         _logger = logger;
     }
 
@@ -352,12 +349,9 @@ public sealed class ParserImportService
 
                 FightIndexSnapshot? fightIndex = null;
                 string? fightFingerprint = null;
-                FightOutcomeObservationCacheDto? outcomeObservationCache = null;
-
             if (!string.IsNullOrWhiteSpace(stagedAnalysisArtifactPath))
             {
                 var indexedFight = _fightIndexer.TryIndexFight(stagedAnalysisArtifactPath, eliteInsightsJsonPath: null);
-                outcomeObservationCache = _outcomeObservationCache.TryBuild(stagedAnalysisArtifactPath);
                 if (indexedFight is not null)
                 {
                     fightIndex = new FightIndexSnapshot(
@@ -448,13 +442,6 @@ public sealed class ParserImportService
 
                 ReplaceDirectory(stagedParserOutputDirectoryPath, finalParserOutputDirectoryPath);
 
-                var outcomeObservationCacheRelativePath = await _outcomeObservationCache.WriteAsync(
-                    fightDirectoryPath,
-                    parseSucceeded ? outcomeObservationCache : null,
-                    fightId,
-                    sourceFileName,
-                    sourceFileSha256,
-                    cancellationToken);
                 var generatedArtifactRelativePaths = GetRelativeGeneratedArtifacts(
                     fightDirectoryPath,
                     finalParserOutputDirectoryPath,
@@ -489,7 +476,7 @@ public sealed class ParserImportService
                     RawLogRelativePath: null,
                     AnalysisJsonArtifactRelativePath: null,
                     PressurePreviewArtifactRelativePath: pressurePreviewArtifactRelativePath,
-                    OutcomeObservationCacheRelativePath: outcomeObservationCacheRelativePath,
+                    OutcomeObservationCacheRelativePath: null,
                     HtmlArtifactRelativePath: htmlArtifactRelativePath,
                     JsonArtifactRelativePath: null,
                     GeneratedArtifactRelativePaths: generatedArtifactRelativePaths,

@@ -75,8 +75,6 @@ builder.Services.AddSingleton<FightAttributeService>();
 builder.Services.AddSingleton<FightOutcomeObservationCacheService>();
 builder.Services.AddSingleton<OutcomeObservationCachePackImportService>();
 builder.Services.AddSingleton<FightAnalysisService>();
-builder.Services.AddSingleton<HistoricalEffectivenessService>();
-builder.Services.AddSingleton<HistoricalEffectivenessWinLossService>();
 builder.Services.AddSingleton<PrototypeDashboardService>();
 builder.Services.AddSingleton<AuthUserStore>();
 builder.Services.AddSingleton<PasswordHashService>();
@@ -303,54 +301,6 @@ app.MapGet("/api/analysis", (
         startDate,
         endDate,
         outcome,
-        squadIncludeClasses,
-        squadExcludeClasses,
-        enemyIncludeClasses,
-        enemyExcludeClasses,
-        patchScope,
-        patchEraIds,
-        fightAttributes)));
-app.MapGet("/api/analysis/effectiveness", (
-    string? commander,
-    string? startDate,
-    string? endDate,
-    string? outcome,
-    string? squadIncludeClasses,
-    string? squadExcludeClasses,
-    string? enemyIncludeClasses,
-    string? enemyExcludeClasses,
-    string? patchScope,
-    string? patchEraIds,
-    string? fightAttributes,
-    HistoricalEffectivenessService service) =>
-    Results.Ok(service.BuildSnapshot(
-        commander,
-        startDate,
-        endDate,
-        outcome,
-        squadIncludeClasses,
-        squadExcludeClasses,
-        enemyIncludeClasses,
-        enemyExcludeClasses,
-        patchScope,
-        patchEraIds,
-        fightAttributes)));
-app.MapGet("/api/analysis/effectiveness/win-loss", (
-    string? commander,
-    string? startDate,
-    string? endDate,
-    string? squadIncludeClasses,
-    string? squadExcludeClasses,
-    string? enemyIncludeClasses,
-    string? enemyExcludeClasses,
-    string? patchScope,
-    string? patchEraIds,
-    string? fightAttributes,
-    HistoricalEffectivenessWinLossService service) =>
-    Results.Ok(service.BuildSnapshot(
-        commander,
-        startDate,
-        endDate,
         squadIncludeClasses,
         squadExcludeClasses,
         enemyIncludeClasses,
