@@ -11084,7 +11084,64 @@ function renderAnalysisError(message) {
     renderAnalysisLoading(message);
 }
 
-function renderAnalysis(snapshot) {
+function captureAnalysisScrollState() {
+    const workbench = document.querySelector(".analysis-workbench");
+    const activePanel = document.querySelector(`[data-analysis-panel="${activeAnalysisTab}"]`);
+    const elements = new Set();
+    [workbench, activePanel].filter(Boolean).forEach(root => {
+        elements.add(root);
+        root.querySelectorAll("*").forEach(element => {
+            if (element.scrollTop !== 0 || element.scrollLeft !== 0) {
+                elements.add(element);
+            }
+        });
+    });
+
+    return {
+        windowLeft: window.scrollX,
+        windowTop: window.scrollY,
+        elements: Array.from(elements)
+            .filter(element => element.scrollTop !== 0 || element.scrollLeft !== 0)
+            .map(element => ({
+                element,
+                id: element.id || null,
+                left: element.scrollLeft,
+                top: element.scrollTop
+            }))
+    };
+}
+
+function restoreAnalysisScrollState(state) {
+    if (!state) {
+        return;
+    }
+
+    const restore = () => {
+        window.scrollTo({
+            top: state.windowTop,
+            left: state.windowLeft,
+            behavior: "auto"
+        });
+        state.elements.forEach(position => {
+            const element = position.element?.isConnected
+                ? position.element
+                : position.id
+                    ? document.getElementById(position.id)
+                    : null;
+            if (!element) {
+                return;
+            }
+
+            element.scrollTop = position.top;
+            element.scrollLeft = position.left;
+        });
+    };
+
+    restore();
+    window.requestAnimationFrame(restore);
+}
+
+function renderAnalysis(snapshot, scrollState = captureAnalysisScrollState()) {
     currentAnalysisSnapshot = snapshot;
     resetAnalysisPlayerDetailState();
 
@@ -11112,6 +11169,7 @@ function renderAnalysis(snapshot) {
     renderAnalysisCompHelperPlaceholder("Open Comp Helper to load candidate player cards for the current filter.");
 
     setActiveAnalysisTab(activeAnalysisTab);
+    restoreAnalysisScrollState(scrollState);
 }
 
 async function ensureAnalysisLoaded(force = false) {
@@ -11128,10 +11186,11 @@ async function ensureAnalysisLoaded(force = false) {
         return snapshot;
     }
 
+    const scrollState = captureAnalysisScrollState();
     renderAnalysisLoading(force ? "Refreshing analysis..." : "Loading analysis...");
     analysisLoadPromise = loadAnalysis(getAnalysisFiltersFromUi())
         .then(snapshot => {
-            renderAnalysis(snapshot);
+            renderAnalysis(snapshot, scrollState);
             return snapshot;
         })
         .catch(error => {
