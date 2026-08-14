@@ -299,6 +299,7 @@ public sealed class FightAnalysisService
             Trends: BuildTrends(filteredFights, expectedScoreLookup),
             NightlyTeamScores: BuildNightlyTeamScores(filteredFights),
             BurstTrends: BuildBurstTrends(filteredFights),
+            Positioning: BuildPositioning(filteredFights),
             TopPlayers: BuildPlayerSummaryRows(topPlayerDetails),
             TopClasses: BuildTopClasses(filteredFights, totalClassSampleCounts, totalClassPlayerFightCounts, patchImpactsForSelection),
             TopEnemyClasses: BuildTopEnemyClasses(filteredFights),
@@ -1331,6 +1332,241 @@ public sealed class FightAnalysisService
                     AverageOverallScore: averageScore);
             })
             .ToArray();
+    }
+
+    private static FightAnalysisPositioningDto BuildPositioning(IReadOnlyList<FightArtifactSummaryDto> fights)
+    {
+        bool groupedByNight = fights
+            .Select(GetFightLocalDate)
+            .Where(date => date.HasValue)
+            .Select(date => date!.Value)
+            .Distinct()
+            .Take(2)
+            .Count() > 1;
+
+        var samples = fights
+            .SelectMany(fight => (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+                .Where(player => !string.IsNullOrWhiteSpace(player.Account)
+                    && player.HasPositioningData
+                    && player.PositioningSamples > 0)
+                .Select(player => new PlayerPositioningSample(
+                    Fight: fight,
+                    Account: player.Account!.Trim(),
+                    PositioningSamples: player.PositioningSamples,
+                    WeightedInPositionRate: player.InPositionRate * player.PositioningSamples)))
+            .GroupBy(sample => $"{sample.Fight.FightId}\n{sample.Account}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PlayerPositioningSample(
+                Fight: group.First().Fight,
+                Account: group.First().Account,
+                PositioningSamples: group.Sum(sample => sample.PositioningSamples),
+                WeightedInPositionRate: group.Sum(sample => sample.WeightedInPositionRate)))
+            .OrderBy(sample => GetFightSortValue(sample.Fight))
+            .ToArray();
+
+        string GetPointKey(PlayerPositioningSample sample)
+        {
+            if (groupedByNight && GetFightLocalDate(sample.Fight) is DateOnly date)
+            {
+                return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            return sample.Fight.FightId;
+        }
+
+        string GetPointLabel(PlayerPositioningSample sample)
+        {
+            if (groupedByNight && GetFightLocalDate(sample.Fight) is DateOnly date)
+            {
+                return date.ToString("MMM d", CultureInfo.InvariantCulture);
+            }
+
+            string fightName = sample.Fight.FightIndex?.FightName
+                ?? sample.Fight.SourceFileName
+                ?? sample.Fight.FightId;
+            string timeLabel = GetFightDateTimeOffset(sample.Fight)?.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
+                ?? "Unknown time";
+            return $"{timeLabel} · {fightName}";
+        }
+
+        FightAnalysisPositioningPointDto BuildPoint(IGrouping<string, PlayerPositioningSample> group)
+        {
+            var bucketSamples = group.ToArray();
+            int positioningSamples = bucketSamples.Sum(sample => sample.PositioningSamples);
+            return new FightAnalysisPositioningPointDto(
+                Key: group.Key,
+                Label: GetPointLabel(bucketSamples[0]),
+                FightCount: bucketSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                PositioningSamples: positioningSamples,
+                InPositionRate: Math.Round(bucketSamples.Sum(sample => sample.WeightedInPositionRate) / positioningSamples, 1));
+        }
+
+        var teamPoints = samples
+            .GroupBy(GetPointKey, StringComparer.OrdinalIgnoreCase)
+            .Select(BuildPoint)
+            .ToArray();
+
+        int teamPositioningSamples = samples.Sum(sample => sample.PositioningSamples);
+        double? averageTeamInPositionRate = teamPositioningSamples > 0
+            ? Math.Round(samples.Sum(sample => sample.WeightedInPositionRate) / teamPositioningSamples, 1)
+            : null;
+
+        var players = samples
+            .GroupBy(sample => sample.Account, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var playerSamples = group.ToArray();
+                int positioningSamples = playerSamples.Sum(sample => sample.PositioningSamples);
+                return new FightAnalysisPositioningPlayerDto(
+                    Account: group.Key,
+                    FightCount: playerSamples.Select(sample => sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    PositioningSamples: positioningSamples,
+                    AverageInPositionRate: Math.Round(playerSamples.Sum(sample => sample.WeightedInPositionRate) / positioningSamples, 1),
+                    Points: playerSamples
+                        .GroupBy(GetPointKey, StringComparer.OrdinalIgnoreCase)
+                        .Select(BuildPoint)
+                        .ToArray());
+            })
+            .OrderBy(player => player.Account, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var commanderSamples = samples
+            .Select(sample => new
+            {
+                Sample = sample,
+                Commander = GetPositioningCommanderIdentity(sample.Fight)
+            })
+            .Where(entry => entry.Commander is not null)
+            .Select(entry => new CommanderPositioningSample(entry.Sample, entry.Commander!))
+            .ToArray();
+        int commanderPositioningSamples = commanderSamples.Sum(sample => sample.Sample.PositioningSamples);
+        double? averageCommanderInPositionRate = commanderPositioningSamples > 0
+            ? Math.Round(commanderSamples.Sum(sample => sample.Sample.WeightedInPositionRate) / commanderPositioningSamples, 1)
+            : null;
+
+        FightAnalysisPositioningPointDto BuildCommanderPoint(IGrouping<string, CommanderPositioningSample> group)
+        {
+            var bucketSamples = group.ToArray();
+            int positioningSamples = bucketSamples.Sum(sample => sample.Sample.PositioningSamples);
+            return new FightAnalysisPositioningPointDto(
+                Key: group.Key,
+                Label: GetPointLabel(bucketSamples[0].Sample),
+                FightCount: bucketSamples.Select(sample => sample.Sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                PositioningSamples: positioningSamples,
+                InPositionRate: Math.Round(bucketSamples.Sum(sample => sample.Sample.WeightedInPositionRate) / positioningSamples, 1));
+        }
+
+        var commanders = commanderSamples
+            .GroupBy(
+                sample => sample.Commander.Account is not null || sample.Commander.Character is not null
+                    ? $"{sample.Commander.Account}\n{sample.Commander.Character}"
+                    : sample.Commander.DisplayName,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var characterSamples = group.ToArray();
+                var commander = characterSamples[0].Commander;
+                int positioningSamples = characterSamples.Sum(entry => entry.Sample.PositioningSamples);
+                return new FightAnalysisPositioningCommanderDto(
+                    Commander: commander.DisplayName,
+                    Character: commander.Character,
+                    Account: commander.Account,
+                    FightCount: characterSamples.Select(entry => entry.Sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    PositioningSamples: positioningSamples,
+                    AverageInPositionRate: Math.Round(characterSamples.Sum(entry => entry.Sample.WeightedInPositionRate) / positioningSamples, 1));
+            })
+            .OrderBy(commander => commander.Account ?? commander.Commander, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(commander => commander.Character ?? commander.Commander, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var commanderAccounts = commanderSamples
+            .Where(sample => !string.IsNullOrWhiteSpace(sample.Commander.Account))
+            .GroupBy(sample => sample.Commander.Account!, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var accountSamples = group.ToArray();
+                var accountFights = accountSamples
+                    .Select(sample => sample.Sample.Fight)
+                    .GroupBy(fight => fight.FightId, StringComparer.OrdinalIgnoreCase)
+                    .Select(fightGroup => fightGroup.First())
+                    .ToArray();
+                int positioningSamples = accountSamples.Sum(sample => sample.Sample.PositioningSamples);
+                var characters = accountSamples
+                    .GroupBy(
+                        sample => sample.Commander.Character ?? sample.Commander.DisplayName,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(characterGroup =>
+                    {
+                        var characterSamples = characterGroup.ToArray();
+                        int characterPositioningSamples = characterSamples.Sum(sample => sample.Sample.PositioningSamples);
+                        return new FightAnalysisPositioningCommanderCharacterDto(
+                            Character: characterGroup.Key,
+                            FightCount: characterSamples.Select(sample => sample.Sample.Fight.FightId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                            PositioningSamples: characterPositioningSamples,
+                            AverageInPositionRate: Math.Round(characterSamples.Sum(sample => sample.Sample.WeightedInPositionRate) / characterPositioningSamples, 1),
+                            Points: characterSamples
+                                .GroupBy(sample => GetPointKey(sample.Sample), StringComparer.OrdinalIgnoreCase)
+                                .Select(BuildCommanderPoint)
+                                .ToArray());
+                    })
+                    .OrderBy(character => character.Character, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return new FightAnalysisPositioningCommanderAccountDto(
+                    Account: group.Key,
+                    FightCount: accountFights.Length,
+                    WinCount: accountFights.Count(IsSquadWin),
+                    LossCount: accountFights.Count(IsEnemyWin),
+                    DrawCount: accountFights.Count(fight => string.Equals(fight.FightIndex?.Outcome.OutcomeCode, "draw", StringComparison.OrdinalIgnoreCase)),
+                    PositioningSamples: positioningSamples,
+                    AverageInPositionRate: Math.Round(accountSamples.Sum(sample => sample.Sample.WeightedInPositionRate) / positioningSamples, 1),
+                    Characters: characters);
+            })
+            .OrderBy(commander => commander.Account, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new FightAnalysisPositioningDto(
+            GroupedByNight: groupedByNight,
+            PointUnitLabel: groupedByNight ? "night" : "fight",
+            AverageTeamInPositionRate: averageTeamInPositionRate,
+            AverageCommanderInPositionRate: averageCommanderInPositionRate,
+            TeamPositioningSamples: teamPositioningSamples,
+            TeamPoints: teamPoints,
+            Players: players,
+            Commanders: commanders,
+            CommanderAccounts: commanderAccounts);
+    }
+
+    private static PositioningCommanderIdentity? GetPositioningCommanderIdentity(FightArtifactSummaryDto fight)
+    {
+        static string? NormalizeIdentityPart(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        var commanderPlayer = (fight.FightIndex?.Players ?? Array.Empty<FightPlayerIndexDto>())
+            .FirstOrDefault(player => player.IsCommander);
+        string? character = NormalizeIdentityPart(commanderPlayer?.Character);
+        string? account = NormalizeIdentityPart(commanderPlayer?.Account);
+        string? displayName = fight.FightIndex?.CommanderDisplayNames?
+            .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name))?.Trim();
+
+        if (character is null && account is null && displayName is not null)
+        {
+            int accountStart = displayName.LastIndexOf(" (", StringComparison.Ordinal);
+            if (accountStart > 0 && displayName.EndsWith(')'))
+            {
+                character = NormalizeIdentityPart(displayName[..accountStart]);
+                account = NormalizeIdentityPart(displayName[(accountStart + 2)..^1]);
+            }
+        }
+
+        if (character is null && account is null && displayName is null)
+        {
+            return null;
+        }
+
+        displayName ??= character is not null && account is not null
+            ? $"{character} ({account})"
+            : character ?? account!;
+        return new PositioningCommanderIdentity(displayName, character, account);
     }
 
     private static double? CalculateTeamScoreAverage(IReadOnlyList<FightArtifactSummaryDto> fights)
@@ -5713,6 +5949,21 @@ internal sealed record FightAnalysisTrackedBoon(
 internal sealed record PlayerFightSample(
     FightArtifactSummaryDto Fight,
     FightPlayerIndexDto Player);
+
+internal sealed record PlayerPositioningSample(
+    FightArtifactSummaryDto Fight,
+    string Account,
+    int PositioningSamples,
+    double WeightedInPositionRate);
+
+internal sealed record PositioningCommanderIdentity(
+    string DisplayName,
+    string? Character,
+    string? Account);
+
+internal sealed record CommanderPositioningSample(
+    PlayerPositioningSample Sample,
+    PositioningCommanderIdentity Commander);
 
 internal sealed record TopFiveActorSample(
     FightArtifactSummaryDto Fight,

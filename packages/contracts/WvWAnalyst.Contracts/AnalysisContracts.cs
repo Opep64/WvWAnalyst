@@ -8,6 +8,7 @@ public sealed record FightAnalysisSnapshotDto(
     IReadOnlyList<FightAnalysisTrendPointDto> Trends,
     IReadOnlyList<FightAnalysisTeamScoreTrendPointDto> NightlyTeamScores,
     IReadOnlyList<FightAnalysisBurstTrendPointDto> BurstTrends,
+    FightAnalysisPositioningDto Positioning,
     IReadOnlyList<FightAnalysisPlayerSummaryRowDto> TopPlayers,
     IReadOnlyList<FightAnalysisClassRowDto> TopClasses,
     IReadOnlyList<FightAnalysisEnemyClassRowDto> TopEnemyClasses,
@@ -19,6 +20,56 @@ public sealed record FightAnalysisSnapshotDto(
     FightAnalysisConditionSummaryDto Conditions,
     FightAnalysisCrowdControlSummaryDto CrowdControl,
     FightAnalysisDifferenceReportDto WinLossDifferences);
+
+public sealed record FightAnalysisPositioningDto(
+    bool GroupedByNight,
+    string PointUnitLabel,
+    double? AverageTeamInPositionRate,
+    double? AverageCommanderInPositionRate,
+    int TeamPositioningSamples,
+    IReadOnlyList<FightAnalysisPositioningPointDto> TeamPoints,
+    IReadOnlyList<FightAnalysisPositioningPlayerDto> Players,
+    IReadOnlyList<FightAnalysisPositioningCommanderDto> Commanders,
+    IReadOnlyList<FightAnalysisPositioningCommanderAccountDto> CommanderAccounts);
+
+public sealed record FightAnalysisPositioningCommanderDto(
+    string Commander,
+    string? Character,
+    string? Account,
+    int FightCount,
+    int PositioningSamples,
+    double AverageInPositionRate);
+
+public sealed record FightAnalysisPositioningCommanderAccountDto(
+    string Account,
+    int FightCount,
+    int WinCount,
+    int LossCount,
+    int DrawCount,
+    int PositioningSamples,
+    double AverageInPositionRate,
+    IReadOnlyList<FightAnalysisPositioningCommanderCharacterDto> Characters);
+
+public sealed record FightAnalysisPositioningCommanderCharacterDto(
+    string Character,
+    int FightCount,
+    int PositioningSamples,
+    double AverageInPositionRate,
+    IReadOnlyList<FightAnalysisPositioningPointDto> Points);
+
+public sealed record FightAnalysisPositioningPlayerDto(
+    string Account,
+    int FightCount,
+    int PositioningSamples,
+    double AverageInPositionRate,
+    IReadOnlyList<FightAnalysisPositioningPointDto> Points);
+
+public sealed record FightAnalysisPositioningPointDto(
+    string Key,
+    string Label,
+    int FightCount,
+    int PositioningSamples,
+    double InPositionRate);
 
 public sealed record FightAnalysisFilterOptionsDto(
     IReadOnlyList<string> Commanders,

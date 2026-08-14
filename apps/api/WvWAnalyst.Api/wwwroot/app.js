@@ -8,6 +8,7 @@ const ANALYSIS_ENEMY_TREND_SMOOTHING_KEY = "wvw-analyst.analysis-enemy-trend-smo
 const ANALYSIS_ENEMY_TREND_COLORS_KEY = "wvw-analyst.analysis-enemy-trend-colors";
 const ANALYSIS_ENEMY_TREND_METRIC_KEY = "wvw-analyst.analysis-enemy-trend-metric";
 const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay";
+const ANALYSIS_POSITIONING_SQUAD_AVERAGE_KEY = "wvw-analyst.analysis-positioning-squad-average";
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
@@ -36,6 +37,15 @@ let activeAppTab = "manage";
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "performance", direction: "desc" };
+let selectedAnalysisPositioningAccount = null;
+let analysisPositioningSortState = { key: "account", direction: "asc" };
+let showAnalysisPositioningSquadAverage = localStorage.getItem(ANALYSIS_POSITIONING_SQUAD_AVERAGE_KEY) !== "false";
+let activeAnalysisPositioningView = "players";
+let activeAnalysisPositioningCommanderView = "overview";
+let selectedAnalysisPositioningCommanderAccount = null;
+let selectedAnalysisPositioningCommanderCharacterOwner = null;
+let selectedAnalysisPositioningCommanderCharacters = new Set();
+let analysisPositioningCommanderSortState = { key: "fights", direction: "desc" };
 let analysisClassSortState = { key: "performance", direction: "desc" };
 let analysisClassPlayerSortState = { key: "performance", direction: "desc" };
 let analysisEnemySortState = { key: "total", direction: "desc" };
@@ -6423,6 +6433,77 @@ function buildCharacterLaneCard(lane, totalFights) {
     `;
 }
 
+function getAnalysisPositioningSortValue(player, sortKey) {
+    switch (sortKey) {
+        case "average":
+            return Number(player.averageInPositionRate ?? 0);
+        case "fights":
+            return Number(player.fightCount ?? 0);
+        case "samples":
+            return Number(player.positioningSamples ?? 0);
+        case "account":
+        default:
+            return String(player.account ?? "").toLowerCase();
+    }
+}
+
+function updateAnalysisPositioningSortHeaders() {
+    document.querySelectorAll("[data-analysis-positioning-sort]").forEach(button => {
+        const isActive = button.dataset.analysisPositioningSort === analysisPositioningSortState.key;
+        button.classList.toggle("is-active", isActive);
+        button.dataset.sortDirection = isActive ? analysisPositioningSortState.direction : "";
+        button.setAttribute("aria-sort", isActive ? (analysisPositioningSortState.direction === "asc" ? "ascending" : "descending") : "none");
+    });
+}
+
+function setAnalysisPositioningSort(sortKey) {
+    if (!sortKey) {
+        return;
+    }
+
+    if (analysisPositioningSortState.key === sortKey) {
+        analysisPositioningSortState = {
+            key: sortKey,
+            direction: analysisPositioningSortState.direction === "asc" ? "desc" : "asc"
+        };
+    } else {
+        analysisPositioningSortState = {
+            key: sortKey,
+            direction: sortKey === "account" ? "asc" : "desc"
+        };
+    }
+
+    if (currentAnalysisSnapshot) {
+        renderAnalysisPositioning(currentAnalysisSnapshot);
+    } else {
+        updateAnalysisPositioningSortHeaders();
+    }
+}
+
+function setActiveAnalysisPositioningView(view) {
+    activeAnalysisPositioningView = view === "commanders" ? "commanders" : "players";
+    document.querySelectorAll("[data-analysis-positioning-view]").forEach(button => {
+        const isActive = button.dataset.analysisPositioningView === activeAnalysisPositioningView;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    document.querySelector("#analysis-positioning-players-view").hidden = activeAnalysisPositioningView !== "players";
+    document.querySelector("#analysis-positioning-commanders-view").hidden = activeAnalysisPositioningView !== "commanders";
+}
+
+function setActiveAnalysisPositioningCommanderView(view) {
+    activeAnalysisPositioningCommanderView = view === "accounts" ? "accounts" : "overview";
+    document.querySelectorAll("[data-analysis-positioning-commander-view]").forEach(button => {
+        const isActive = button.dataset.analysisPositioningCommanderView === activeAnalysisPositioningCommanderView;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    document.querySelector("#analysis-positioning-commanders-overview").hidden = activeAnalysisPositioningCommanderView !== "overview";
+    document.querySelector("#analysis-positioning-commanders-accounts").hidden = activeAnalysisPositioningCommanderView !== "accounts";
+}
+
 function buildAnalysisTeamScoreOverlayControl() {
     return `
         <label class="analysis-boon-trend-option analysis-team-score-toggle ${showAnalysisTeamScoreOverlay ? "is-active" : ""}">
@@ -7130,6 +7211,533 @@ function renderAnalysisPlayers(snapshot) {
     } else {
         renderAnalysisPlayerDetailMessage("Open Players to load character cards for the selected player.");
     }
+}
+
+function getFilteredAnalysisPositioningPlayers(snapshot) {
+    const query = document.querySelector("#analysis-positioning-search")?.value.trim().toLowerCase() ?? "";
+    const minimumFightCount = snapshot.positioning?.groupedByNight ? MINIMUM_PLAYER_TABLE_FIGHTS : 0;
+    const players = (snapshot.positioning?.players ?? [])
+        .filter(player => Number(player.fightCount ?? 0) >= minimumFightCount)
+        .filter(player => !query || String(player.account ?? "").toLowerCase().includes(query));
+
+    players.sort((left, right) => {
+        const primary = compareFightBrowserValues(
+            getAnalysisPositioningSortValue(left, analysisPositioningSortState.key),
+            getAnalysisPositioningSortValue(right, analysisPositioningSortState.key));
+        if (primary !== 0) {
+            return analysisPositioningSortState.direction === "asc" ? primary : -primary;
+        }
+
+        return compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase());
+    });
+
+    return players;
+}
+
+function buildAnalysisPositioningPath(values, getX, getY) {
+    const commands = [];
+    let drawing = false;
+    values.forEach((value, index) => {
+        if (value == null) {
+            drawing = false;
+            return;
+        }
+
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            drawing = false;
+            return;
+        }
+
+        commands.push(`${drawing ? "L" : "M"} ${getX(index).toFixed(1)} ${getY(numeric).toFixed(1)}`);
+        drawing = true;
+    });
+    return commands.join(" ");
+}
+
+function buildAnalysisPositioningChart(positioning, player) {
+    const playerPoints = (player?.points ?? [])
+        .filter(point => point?.key && Number.isFinite(Number(point.inPositionRate)));
+    if (!player || playerPoints.length === 0) {
+        return `<div class="analysis-positioning-empty">No positioning samples matched the current scope.</div>`;
+    }
+
+    const teamPointLookup = new Map((positioning?.teamPoints ?? [])
+        .map(point => [String(point.key).toLowerCase(), point]));
+    const plottedPoints = playerPoints.map(playerPoint => ({
+        playerPoint,
+        teamPoint: teamPointLookup.get(String(playerPoint.key).toLowerCase()) ?? null
+    }));
+    const playerValues = plottedPoints.map(point => Number(point.playerPoint.inPositionRate));
+    const teamValues = plottedPoints.map(point => point.teamPoint == null ? null : Number(point.teamPoint.inPositionRate));
+    const teamAxisPoints = showAnalysisPositioningSquadAverage ? plottedPoints
+        .filter(point => point.teamPoint != null)
+        .map(point => ({ score: point.teamPoint.inPositionRate })) : [];
+    const axis = getAnalysisImpactTrendAxis(
+        [{ points: playerPoints.map(point => ({ impactScore: point.inPositionRate })) }],
+        teamAxisPoints);
+    const axisRange = Math.max(1, axis.max - axis.min);
+    const width = 760;
+    const height = 260;
+    const plot = { left: 44, top: 18, right: 18, bottom: 38 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const getX = index => Math.round((plot.left + (plottedPoints.length <= 1
+        ? plotWidth / 2
+        : index * plotWidth / (plottedPoints.length - 1))) * 100) / 100;
+    const getY = value => {
+        const clamped = Math.max(axis.min, Math.min(axis.max, Number(value) || 0));
+        return Math.round((plot.top + (axis.max - clamped) * plotHeight / axisRange) * 100) / 100;
+    };
+    const grid = getAnalysisImpactTrendGridValues(axis).map(value => `
+        <line class="grid-line" x1="${plot.left}" y1="${getY(value)}" x2="${width - plot.right}" y2="${getY(value)}"></line>
+        <text class="axis-label y-axis-label" x="${plot.left - 10}" y="${getY(value) + 4}">${escapeHtml(`${formatNumber(value, axisRange <= 20 ? 1 : 0)}%`)}</text>
+    `).join("");
+
+    const labels = getAnalysisBoonTrendAxisIndexes(plottedPoints.length).map(index => {
+        const point = plottedPoints[index].playerPoint;
+        const shortLabel = positioning.groupedByNight
+            ? point.label
+            : String(point.label ?? "").split(" · ")[0];
+        return `<text class="axis-label x-axis-label" x="${getX(index)}" y="${height - 12}">${escapeHtml(shortLabel)}</text>`;
+    }).join("");
+
+    const playerMarkers = plottedPoints.map((point, index) => {
+        const playerRate = Number(point.playerPoint.inPositionRate);
+        const squadRate = Number(point.teamPoint?.inPositionRate);
+        const hasSquadComparison = Number.isFinite(squadRate);
+        const meetsOrExceedsSquad = !hasSquadComparison || playerRate >= squadRate;
+        const pointColor = meetsOrExceedsSquad ? "#238a57" : "#b83a4b";
+        const comparisonLabel = !hasSquadComparison
+            ? "No squad comparison available"
+            : meetsOrExceedsSquad
+                ? `Met or exceeded squad ${formatPercent(squadRate)}`
+                : `Below squad ${formatPercent(squadRate)}`;
+        return `
+            <circle class="analysis-boon-trend-point analysis-positioning-point-player" cx="${getX(index)}" cy="${getY(playerRate)}" r="4.2" style="--boon-color: ${pointColor}">
+                <title>${escapeHtml(`${point.playerPoint.label}: ${player.account} ${formatPercent(playerRate)} in position · ${comparisonLabel} · ${formatNumber(point.playerPoint.positioningSamples)} samples`)}</title>
+            </circle>
+        `;
+    }).join("");
+    const squadAverageMarkup = showAnalysisPositioningSquadAverage ? `
+        <path class="analysis-team-score-overlay-line analysis-positioning-squad-line" d="${buildAnalysisPositioningPath(teamValues, getX, getY)}">
+            <title>Squad average for the same ${escapeHtml(positioning.groupedByNight ? "nights" : "fights")} where ${escapeHtml(player.account)} has positioning data</title>
+        </path>
+    ` : "";
+
+    return `
+        <svg class="analysis-boon-trend-chart analysis-positioning-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(`${player.account} positioning compared with the team average`)}">
+            ${grid}
+            ${squadAverageMarkup}
+            <path class="analysis-boon-trend-line" d="${buildAnalysisPositioningPath(playerValues, getX, getY)}" style="--boon-color: #5eead4"></path>
+            ${playerMarkers}
+            ${labels}
+        </svg>
+    `;
+}
+
+function buildAnalysisPositioningCommanderChart(positioning) {
+    const commanders = (positioning?.commanders ?? [])
+        .filter(commander => Number.isFinite(Number(commander.averageInPositionRate)));
+    const overallAverage = Number(positioning?.averageTeamInPositionRate);
+    if (commanders.length === 0 || !Number.isFinite(overallAverage)) {
+        return `<div class="analysis-positioning-empty">No commander positioning samples matched the current scope.</div>`;
+    }
+
+    const width = Math.max(760, 68 + 128 + (commanders.length * 150));
+    const height = 410;
+    const plot = { left: 58, top: 28, right: 128, bottom: 76 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const bandWidth = plotWidth / commanders.length;
+    const barWidth = Math.min(72, bandWidth * 0.56);
+    const values = commanders.map(commander => Number(commander.averageInPositionRate)).concat(overallAverage);
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    const dataSpan = dataMax - dataMin;
+    const padding = Math.max(2, dataSpan * 0.12);
+    const paddedMin = Math.max(0, dataMin - padding);
+    const paddedMax = Math.min(100, dataMax + padding);
+    const tickSteps = [1, 2, 5, 10, 20, 25, 50];
+    const paddedSpan = Math.max(1, paddedMax - paddedMin);
+    const tickStep = tickSteps.find(step => paddedSpan / step <= 7) ?? 50;
+    let yMin = Math.max(0, Math.floor(paddedMin / tickStep) * tickStep);
+    let yMax = Math.min(100, Math.ceil(paddedMax / tickStep) * tickStep);
+    if (yMax <= yMin) {
+        yMin = Math.max(0, yMin - tickStep);
+        yMax = Math.min(100, yMax + tickStep);
+    }
+    const axisSpan = Math.max(tickStep, yMax - yMin);
+    const getY = value => Math.round((plot.top + ((yMax - Math.max(yMin, Math.min(yMax, Number(value) || 0))) * plotHeight / axisSpan)) * 100) / 100;
+    const ticks = [];
+    for (let value = yMin; value <= yMax + (tickStep / 2); value += tickStep) {
+        ticks.push(Math.round(value * 10) / 10);
+    }
+
+    const grid = ticks.map(value => `
+        <line class="grid-line" x1="${plot.left}" y1="${getY(value)}" x2="${width - plot.right}" y2="${getY(value)}"></line>
+        <text class="axis-label y-axis-label" x="${plot.left - 10}" y="${getY(value) + 4}">${value}%</text>
+    `).join("");
+
+    const bars = commanders.map((commander, index) => {
+        const value = Number(commander.averageInPositionRate);
+        const centerX = plot.left + (bandWidth * index) + (bandWidth / 2);
+        const x = centerX - (barWidth / 2);
+        const y = getY(value);
+        const barHeight = getY(yMin) - y;
+        const axisLabel = String(commander.commander ?? "No commander");
+        let character = String(commander.character ?? "").trim();
+        let account = String(commander.account ?? "").trim();
+        if (!character && !account) {
+            const combinedMatch = axisLabel.match(/^(.*) \(([^()]*)\)$/);
+            if (combinedMatch) {
+                character = combinedMatch[1].trim();
+                account = combinedMatch[2].trim();
+            } else {
+                character = axisLabel;
+            }
+        }
+        const identityLabel = account && character
+            ? `${character} (${account})`
+            : character || account || axisLabel;
+        const secondaryLabel = account && character ? `GW2 ID: ${account}` : "";
+        return `
+            <rect class="analysis-positioning-commander-bar" x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="5">
+                <title>${escapeHtml(`${identityLabel}: squad averaged ${formatPercent(value)} in position · ${formatNumber(commander.fightCount)} fights · ${formatNumber(commander.positioningSamples)} eligible squad-player samples`)}</title>
+            </rect>
+            <text class="analysis-positioning-commander-value" x="${centerX}" y="${Math.max(plot.top + 12, y - 7)}" text-anchor="middle">${escapeHtml(formatPercent(value))}</text>
+            <text class="axis-label analysis-positioning-commander-axis-label" x="${centerX}" y="${height - 42}" text-anchor="middle">
+                <tspan class="analysis-positioning-commander-character" x="${centerX}">${escapeHtml(character || account || axisLabel)}</tspan>
+                ${secondaryLabel ? `<tspan class="analysis-positioning-commander-account" x="${centerX}" dy="16">${escapeHtml(secondaryLabel)}</tspan>` : ""}
+            </text>
+        `;
+    }).join("");
+
+    const overallY = getY(overallAverage);
+    const overallLabel = `Overall ${formatPercent(overallAverage)}`;
+    return `
+        <svg class="analysis-boon-trend-chart analysis-positioning-commander-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="min-width: ${width}px" role="img" aria-label="Squad positioning averages grouped by the commander leading each fight">
+            ${grid}
+            <line class="analysis-positioning-overall-line" x1="${plot.left}" y1="${overallY}" x2="${width - plot.right}" y2="${overallY}">
+                <title>${escapeHtml(`Squad positioning average across all filtered fights ${formatPercent(overallAverage)}`)}</title>
+            </line>
+            <text class="analysis-positioning-overall-label" x="${width - plot.right + 10}" y="${overallY + 4}" text-anchor="start">${escapeHtml(overallLabel)}</text>
+            ${bars}
+        </svg>
+    `;
+}
+
+function getAnalysisPositioningCommanderSortValue(commander, sortKey) {
+    switch (sortKey) {
+        case "average":
+            return Number(commander.averageInPositionRate ?? 0);
+        case "fights":
+            return Number(commander.fightCount ?? 0);
+        case "record": {
+            const decidedFights = Number(commander.winCount ?? 0) + Number(commander.lossCount ?? 0);
+            return decidedFights > 0 ? Number(commander.winCount ?? 0) / decidedFights : 0;
+        }
+        case "account":
+        default:
+            return String(commander.account ?? "").toLowerCase();
+    }
+}
+
+function updateAnalysisPositioningCommanderSortHeaders() {
+    document.querySelectorAll("[data-analysis-positioning-commander-sort]").forEach(button => {
+        const isActive = button.dataset.analysisPositioningCommanderSort === analysisPositioningCommanderSortState.key;
+        button.classList.toggle("is-active", isActive);
+        button.dataset.sortDirection = isActive ? analysisPositioningCommanderSortState.direction : "";
+        button.setAttribute("aria-sort", isActive ? (analysisPositioningCommanderSortState.direction === "asc" ? "ascending" : "descending") : "none");
+    });
+}
+
+function setAnalysisPositioningCommanderSort(sortKey) {
+    if (!sortKey) {
+        return;
+    }
+
+    if (analysisPositioningCommanderSortState.key === sortKey) {
+        analysisPositioningCommanderSortState = {
+            key: sortKey,
+            direction: analysisPositioningCommanderSortState.direction === "asc" ? "desc" : "asc"
+        };
+    } else {
+        analysisPositioningCommanderSortState = {
+            key: sortKey,
+            direction: sortKey === "account" ? "asc" : "desc"
+        };
+    }
+
+    if (currentAnalysisSnapshot) {
+        renderAnalysisPositioning(currentAnalysisSnapshot);
+    } else {
+        updateAnalysisPositioningCommanderSortHeaders();
+    }
+}
+
+function getFilteredAnalysisPositioningCommanderAccounts(positioning) {
+    const query = document.querySelector("#analysis-positioning-commander-search")?.value.trim().toLowerCase() ?? "";
+    const commanders = (positioning?.commanderAccounts ?? [])
+        .filter(commander => !query || String(commander.account ?? "").toLowerCase().includes(query));
+
+    commanders.sort((left, right) => {
+        const primary = compareFightBrowserValues(
+            getAnalysisPositioningCommanderSortValue(left, analysisPositioningCommanderSortState.key),
+            getAnalysisPositioningCommanderSortValue(right, analysisPositioningCommanderSortState.key));
+        if (primary !== 0) {
+            return analysisPositioningCommanderSortState.direction === "asc" ? primary : -primary;
+        }
+
+        return compareFightBrowserValues(String(left.account ?? "").toLowerCase(), String(right.account ?? "").toLowerCase());
+    });
+
+    return commanders;
+}
+
+function ensureAnalysisPositioningCommanderCharacterSelection(commander) {
+    const owner = String(commander?.account ?? "");
+    const characterNames = (commander?.characters ?? []).map(character => String(character.character ?? ""));
+    if (!stringEqualsIgnoreCase(owner, selectedAnalysisPositioningCommanderCharacterOwner)) {
+        selectedAnalysisPositioningCommanderCharacterOwner = owner;
+        selectedAnalysisPositioningCommanderCharacters = new Set(characterNames);
+        return;
+    }
+
+    const validNames = new Set(characterNames);
+    selectedAnalysisPositioningCommanderCharacters = new Set(
+        Array.from(selectedAnalysisPositioningCommanderCharacters).filter(name => validNames.has(name)));
+}
+
+function buildAnalysisPositioningCommanderCharacterLegend(commander) {
+    return (commander?.characters ?? []).map((character, index) => {
+        const name = String(character.character ?? "Unknown character");
+        const color = getAnalysisImpactTrendColor(index);
+        const checked = selectedAnalysisPositioningCommanderCharacters.has(name);
+        return `
+            <label class="analysis-boon-trend-option ${checked ? "is-active" : ""}">
+                <input type="checkbox" data-analysis-positioning-commander-character="${escapeHtml(name)}" ${checked ? "checked" : ""}>
+                <span class="analysis-boon-trend-swatch" style="--boon-color: ${escapeHtml(color)}"></span>
+                <span class="analysis-impact-trend-label">${escapeHtml(name)}</span>
+                <span class="analysis-impact-trend-account">${escapeHtml(`${formatNumber(character.fightCount)} fights · ${formatPercent(character.averageInPositionRate)}`)}</span>
+            </label>
+        `;
+    }).join("");
+}
+
+function buildAnalysisPositioningCommanderDetailChart(positioning, commander) {
+    const allCharacters = commander?.characters ?? [];
+    const selectedCharacters = allCharacters
+        .filter(character => selectedAnalysisPositioningCommanderCharacters.has(String(character.character ?? "")));
+    if (allCharacters.length === 0) {
+        return `<div class="analysis-positioning-empty">No commander positioning samples matched the current scope.</div>`;
+    }
+    if (selectedCharacters.length === 0) {
+        return `<div class="analysis-positioning-empty">Select at least one commanding character to graph.</div>`;
+    }
+
+    const selectedPointKeys = new Set(selectedCharacters
+        .flatMap(character => character.points ?? [])
+        .map(point => String(point.key ?? "").toLowerCase()));
+    const pointByKey = new Map();
+    selectedCharacters.forEach(character => (character.points ?? []).forEach(point => {
+        const key = String(point.key ?? "").toLowerCase();
+        if (key && !pointByKey.has(key)) {
+            pointByKey.set(key, point);
+        }
+    }));
+    const axisPoints = (positioning?.teamPoints ?? [])
+        .filter(point => selectedPointKeys.has(String(point.key ?? "").toLowerCase()))
+        .map(point => pointByKey.get(String(point.key ?? "").toLowerCase()) ?? point);
+    pointByKey.forEach((point, key) => {
+        if (!axisPoints.some(axisPoint => stringEqualsIgnoreCase(axisPoint.key, key))) {
+            axisPoints.push(point);
+        }
+    });
+    if (axisPoints.length === 0) {
+        return `<div class="analysis-positioning-empty">No commander positioning samples matched the current scope.</div>`;
+    }
+
+    const overallAverage = Number(positioning?.averageCommanderInPositionRate ?? positioning?.averageTeamInPositionRate);
+    const axis = getAnalysisImpactTrendAxis(
+        selectedCharacters.map(character => ({
+            points: (character.points ?? []).map(point => ({ impactScore: point.inPositionRate }))
+        })),
+        Number.isFinite(overallAverage) ? [{ score: overallAverage }] : []);
+    const axisRange = Math.max(1, axis.max - axis.min);
+    const width = 760;
+    const height = 300;
+    const plot = { left: 44, top: 18, right: 104, bottom: 38 };
+    const plotWidth = width - plot.left - plot.right;
+    const plotHeight = height - plot.top - plot.bottom;
+    const xForIndex = index => Math.round((plot.left + (axisPoints.length <= 1
+        ? plotWidth / 2
+        : index * plotWidth / (axisPoints.length - 1))) * 100) / 100;
+    const yForValue = value => {
+        const clamped = Math.max(axis.min, Math.min(axis.max, Number(value) || 0));
+        return Math.round((plot.top + (axis.max - clamped) * plotHeight / axisRange) * 100) / 100;
+    };
+    const pointIndex = new Map(axisPoints.map((point, index) => [String(point.key ?? "").toLowerCase(), index]));
+    const grid = getAnalysisImpactTrendGridValues(axis).map(value => `
+        <line class="grid-line" x1="${plot.left}" y1="${yForValue(value)}" x2="${width - plot.right}" y2="${yForValue(value)}"></line>
+        <text class="axis-label y-axis-label" x="${plot.left - 10}" y="${yForValue(value) + 4}">${escapeHtml(`${formatNumber(value, axisRange <= 20 ? 1 : 0)}%`)}</text>
+    `).join("");
+    const labels = getAnalysisBoonTrendAxisIndexes(axisPoints.length).map(index => {
+        const point = axisPoints[index];
+        const label = positioning?.groupedByNight ? point.label : String(point.label ?? "").substring(0, 5);
+        return `<text class="axis-label x-axis-label" x="${xForIndex(index)}" y="${height - 12}">${escapeHtml(label)}</text>`;
+    }).join("");
+    const overallY = Number.isFinite(overallAverage) ? yForValue(overallAverage) : null;
+    const overallMarkup = overallY == null ? "" : `
+        <line class="analysis-positioning-overall-line" x1="${plot.left}" y1="${overallY}" x2="${width - plot.right}" y2="${overallY}">
+            <title>${escapeHtml(`All-commanders positioning average ${formatPercent(overallAverage)}`)}</title>
+        </line>
+        <text class="analysis-positioning-overall-label" x="${width - plot.right + 8}" y="${overallY + 4}" text-anchor="start">${escapeHtml(`Overall ${formatPercent(overallAverage)}`)}</text>
+    `;
+    const series = selectedCharacters.map(character => {
+        const characterIndex = allCharacters.findIndex(item => stringEqualsIgnoreCase(item.character, character.character));
+        const color = getAnalysisImpactTrendColor(Math.max(0, characterIndex));
+        const pointLookup = new Map((character.points ?? []).map(point => [String(point.key ?? "").toLowerCase(), point]));
+        const values = axisPoints.map(point => pointLookup.get(String(point.key ?? "").toLowerCase())?.inPositionRate ?? null);
+        const path = buildAnalysisPositioningPath(values, xForIndex, yForValue);
+        const markers = (character.points ?? []).map(point => {
+            const index = pointIndex.get(String(point.key ?? "").toLowerCase());
+            if (index == null) {
+                return "";
+            }
+            return `
+                <circle class="analysis-boon-trend-point" cx="${xForIndex(index)}" cy="${yForValue(point.inPositionRate)}" r="4.2" style="--boon-color: ${escapeHtml(color)}">
+                    <title>${escapeHtml(`${character.character} · ${point.label}: ${formatPercent(point.inPositionRate)} in position · ${formatNumber(point.fightCount)} fight${Number(point.fightCount) === 1 ? "" : "s"} · ${formatNumber(point.positioningSamples)} samples`)}</title>
+                </circle>
+            `;
+        }).join("");
+        return `
+            ${path ? `<path class="analysis-boon-trend-line" d="${escapeHtml(path)}" style="--boon-color: ${escapeHtml(color)}"></path>` : ""}
+            ${markers}
+        `;
+    }).join("");
+
+    return `
+        <svg class="analysis-boon-trend-chart analysis-positioning-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(`${commander.account} squad positioning by commanding character over time`)}">
+            ${grid}
+            ${labels}
+            ${overallMarkup}
+            ${series}
+        </svg>
+    `;
+}
+
+function renderAnalysisPositioningCommanderAccounts(positioning) {
+    const commanders = getFilteredAnalysisPositioningCommanderAccounts(positioning);
+    updateAnalysisPositioningCommanderSortHeaders();
+    const body = document.querySelector("#analysis-positioning-commander-account-body");
+    const listSummary = document.querySelector("#analysis-positioning-commander-account-summary");
+    if (commanders.length === 0) {
+        selectedAnalysisPositioningCommanderAccount = null;
+        selectedAnalysisPositioningCommanderCharacterOwner = null;
+        selectedAnalysisPositioningCommanderCharacters = new Set();
+        listSummary.textContent = "No commander GW2 IDs matched the current filters.";
+        body.innerHTML = `<tr><td colspan="4">No commander rows matched the current filters.</td></tr>`;
+        document.querySelector("#analysis-positioning-commander-detail-title").textContent = "Commander positioning over time";
+        document.querySelector("#analysis-positioning-commander-detail-summary").textContent = "Select a commander GW2 ID to view its commanding characters.";
+        setInnerHtml("#analysis-positioning-commander-character-legend", "");
+        setInnerHtml("#analysis-positioning-commander-detail-chart", `<div class="analysis-positioning-empty">No commander positioning samples matched the current scope.</div>`);
+        return;
+    }
+
+    if (!commanders.some(commander => stringEqualsIgnoreCase(commander.account, selectedAnalysisPositioningCommanderAccount))) {
+        selectedAnalysisPositioningCommanderAccount = commanders[0].account;
+    }
+    const selectedCommander = commanders.find(commander => stringEqualsIgnoreCase(commander.account, selectedAnalysisPositioningCommanderAccount)) ?? commanders[0];
+    ensureAnalysisPositioningCommanderCharacterSelection(selectedCommander);
+    listSummary.textContent = `Showing ${formatNumber(commanders.length)} commander GW2 ID${commanders.length === 1 ? "" : "s"} with squad positioning data.`;
+    body.innerHTML = commanders.map(commander => {
+        const record = `${formatNumber(commander.winCount)}-${formatNumber(commander.lossCount)}${Number(commander.drawCount ?? 0) > 0 ? `-${formatNumber(commander.drawCount)}` : ""}`;
+        return `
+            <tr class="is-clickable${stringEqualsIgnoreCase(commander.account, selectedCommander.account) ? " is-selected" : ""}" data-analysis-positioning-commander-account="${escapeHtml(commander.account)}">
+                <td><strong class="mono">${escapeHtml(commander.account)}</strong><div class="table-inline-note">${escapeHtml(`${formatNumber(commander.characters?.length ?? 0)} character${commander.characters?.length === 1 ? "" : "s"}`)}</div></td>
+                <td>${escapeHtml(formatNumber(commander.fightCount))}</td>
+                <td><strong>${escapeHtml(record)}</strong><div class="table-inline-note">W-L${Number(commander.drawCount ?? 0) > 0 ? "-D" : ""}</div></td>
+                <td><strong>${escapeHtml(formatPercent(commander.averageInPositionRate))}</strong></td>
+            </tr>
+        `;
+    }).join("");
+
+    const drawCopy = Number(selectedCommander.drawCount ?? 0) > 0 ? ` · ${formatNumber(selectedCommander.drawCount)} draws` : "";
+    const unit = positioning?.groupedByNight ? "night" : "fight";
+    document.querySelector("#analysis-positioning-commander-detail-title").textContent = selectedCommander.account;
+    document.querySelector("#analysis-positioning-commander-detail-summary").textContent =
+        `${formatPercent(selectedCommander.averageInPositionRate)} squad average · ${formatNumber(selectedCommander.fightCount)} fights · ${formatNumber(selectedCommander.winCount)} wins / ${formatNumber(selectedCommander.lossCount)} losses${drawCopy}. Each point is one ${unit}${positioning?.groupedByNight ? " averaged across that night's fights" : ""}.`;
+    setInnerHtml("#analysis-positioning-commander-character-legend", buildAnalysisPositioningCommanderCharacterLegend(selectedCommander));
+    setInnerHtml("#analysis-positioning-commander-detail-chart", buildAnalysisPositioningCommanderDetailChart(positioning, selectedCommander));
+}
+
+function renderAnalysisPositioningCommanders(positioning) {
+    const commanders = positioning?.commanders ?? [];
+    const summary = commanders.length === 0
+        ? "No commander positioning samples matched the current filters."
+        : `${formatNumber(commanders.length)} commander character${commanders.length === 1 ? "" : "s"} · Squads averaged ${formatPercent(positioning.averageTeamInPositionRate)} in position across ${formatNumber(commanders.reduce((sum, commander) => sum + Number(commander.fightCount ?? 0), 0))} filtered fights with positioning data. Each bar pools eligible squad-player samples from fights led by that character and GW2 ID; the commander does not need positioning data.`;
+    document.querySelector("#analysis-positioning-commander-summary").textContent = summary;
+    setInnerHtml("#analysis-positioning-commander-chart", buildAnalysisPositioningCommanderChart(positioning));
+    renderAnalysisPositioningCommanderAccounts(positioning);
+    setActiveAnalysisPositioningCommanderView(activeAnalysisPositioningCommanderView);
+}
+
+function renderAnalysisPositioning(snapshot) {
+    const positioning = snapshot.positioning ?? {};
+    const body = document.querySelector("#analysis-positioning-body");
+    const summary = document.querySelector("#analysis-positioning-summary");
+    const players = getFilteredAnalysisPositioningPlayers(snapshot);
+    updateAnalysisPositioningSortHeaders();
+    renderAnalysisPositioningCommanders(positioning);
+    const squadAverageToggle = document.querySelector("#analysis-positioning-squad-average");
+    squadAverageToggle.checked = showAnalysisPositioningSquadAverage;
+    squadAverageToggle.closest(".analysis-positioning-team-toggle")?.classList.toggle("is-active", showAnalysisPositioningSquadAverage);
+
+    const pointMode = positioning.groupedByNight
+        ? "The chart averages all selected fights within each night."
+        : "The chart shows each fight from the selected night.";
+    const eligibilityMode = positioning.groupedByNight
+        ? ` Only players with at least ${MINIMUM_PLAYER_TABLE_FIGHTS} fights in the selected scope are listed.`
+        : " All players with positioning data are eligible for this single-night list.";
+    summary.textContent = players.length > 0
+        ? `Showing ${players.length} players with positioning data.${eligibilityMode} ${pointMode}`
+        : `No GW2 IDs with positioning data matched this filter.${eligibilityMode} ${pointMode}`;
+
+    if (players.length === 0) {
+        selectedAnalysisPositioningAccount = null;
+        body.innerHTML = `<tr><td colspan="4">No positioning rows matched the current filters.</td></tr>`;
+        document.querySelector("#analysis-positioning-chart-title").textContent = "Positioning over time";
+        document.querySelector("#analysis-positioning-chart-summary").textContent = pointMode;
+        setInnerHtml("#analysis-positioning-chart", `<div class="analysis-positioning-empty">No positioning samples matched the current scope.</div>`);
+        setActiveAnalysisPositioningView(activeAnalysisPositioningView);
+        return;
+    }
+
+    if (!players.some(player => stringEqualsIgnoreCase(player.account, selectedAnalysisPositioningAccount))) {
+        selectedAnalysisPositioningAccount = players[0].account;
+    }
+    const selectedPlayer = players.find(player => stringEqualsIgnoreCase(player.account, selectedAnalysisPositioningAccount)) ?? players[0];
+
+    body.innerHTML = players.map(player => `
+        <tr class="is-clickable${stringEqualsIgnoreCase(player.account, selectedPlayer.account) ? " is-selected" : ""}" data-analysis-positioning-account="${escapeHtml(player.account)}">
+            <td><strong class="mono">${escapeHtml(player.account)}</strong></td>
+            <td><strong>${escapeHtml(formatPercent(player.averageInPositionRate))}</strong></td>
+            <td>${escapeHtml(formatNumber(player.fightCount))}</td>
+            <td>${escapeHtml(formatNumber(player.positioningSamples))}</td>
+        </tr>
+    `).join("");
+
+    document.querySelector("#analysis-positioning-chart-title").textContent = selectedPlayer.account;
+    const plottedPointCount = selectedPlayer.points?.length ?? 0;
+    const plottedUnit = positioning.groupedByNight ? "night" : "fight";
+    const squadAverageSummary = showAnalysisPositioningSquadAverage
+        ? `Squad average is shown for those same ${plottedUnit}s.`
+        : "Squad average is hidden.";
+    document.querySelector("#analysis-positioning-chart-summary").textContent =
+        `${formatPercent(selectedPlayer.averageInPositionRate)} overall in position · ${formatNumber(plottedPointCount)} ${plottedUnit}${plottedPointCount === 1 ? "" : "s"} with data · ${squadAverageSummary} Green meets or exceeds squad; red is below squad.`;
+    setInnerHtml("#analysis-positioning-chart", buildAnalysisPositioningChart(positioning, selectedPlayer));
+    setActiveAnalysisPositioningView(activeAnalysisPositioningView);
 }
 
 function buildAnalysisClassRow(classRow) {
@@ -10425,6 +11033,19 @@ function renderAnalysisLoading(message = "Loading analysis...") {
     document.querySelector("#analysis-players-summary").textContent = message;
     setInnerHtml("#analysis-players-body", `<tr><td colspan="8">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-player-detail", "");
+    document.querySelector("#analysis-positioning-summary").textContent = message;
+    setInnerHtml("#analysis-positioning-body", `<tr><td colspan="4">${escapeHtml(message)}</td></tr>`);
+    document.querySelector("#analysis-positioning-chart-title").textContent = "Positioning over time";
+    document.querySelector("#analysis-positioning-chart-summary").textContent = message;
+    setInnerHtml("#analysis-positioning-chart", "");
+    document.querySelector("#analysis-positioning-commander-summary").textContent = message;
+    setInnerHtml("#analysis-positioning-commander-chart", "");
+    document.querySelector("#analysis-positioning-commander-account-summary").textContent = message;
+    setInnerHtml("#analysis-positioning-commander-account-body", `<tr><td colspan="4">${escapeHtml(message)}</td></tr>`);
+    document.querySelector("#analysis-positioning-commander-detail-title").textContent = "Commander positioning over time";
+    document.querySelector("#analysis-positioning-commander-detail-summary").textContent = message;
+    setInnerHtml("#analysis-positioning-commander-character-legend", "");
+    setInnerHtml("#analysis-positioning-commander-detail-chart", "");
     setInnerHtml("#analysis-classes-body", `<tr><td colspan="7">${escapeHtml(message)}</td></tr>`);
     setInnerHtml("#analysis-class-detail", "");
     document.querySelector("#analysis-enemies-summary").textContent = message;
@@ -10478,6 +11099,7 @@ function renderAnalysis(snapshot) {
     setInnerHtml("#analysis-scope-list", buildAnalysisScopeChipListHtml(snapshot));
 
     renderAnalysisPlayers(snapshot);
+    renderAnalysisPositioning(snapshot);
     renderAnalysisClasses(snapshot);
     renderAnalysisEnemies(snapshot);
     renderAnalysisTopFive(snapshot);
@@ -13524,6 +14146,67 @@ document.querySelectorAll("[data-fight-browser-sort]").forEach(button => {
 });
 document.querySelectorAll("[data-analysis-player-sort]").forEach(button => {
     button.addEventListener("click", () => setAnalysisPlayerSort(button.dataset.analysisPlayerSort));
+});
+document.querySelectorAll("[data-analysis-positioning-sort]").forEach(button => {
+    button.addEventListener("click", () => setAnalysisPositioningSort(button.dataset.analysisPositioningSort));
+});
+document.querySelectorAll("[data-analysis-positioning-view]").forEach(button => {
+    button.addEventListener("click", () => setActiveAnalysisPositioningView(button.dataset.analysisPositioningView));
+});
+document.querySelectorAll("[data-analysis-positioning-commander-view]").forEach(button => {
+    button.addEventListener("click", () => setActiveAnalysisPositioningCommanderView(button.dataset.analysisPositioningCommanderView));
+});
+document.querySelectorAll("[data-analysis-positioning-commander-sort]").forEach(button => {
+    button.addEventListener("click", () => setAnalysisPositioningCommanderSort(button.dataset.analysisPositioningCommanderSort));
+});
+document.querySelector("#analysis-positioning-squad-average").addEventListener("change", event => {
+    showAnalysisPositioningSquadAverage = event.target.checked;
+    localStorage.setItem(ANALYSIS_POSITIONING_SQUAD_AVERAGE_KEY, String(showAnalysisPositioningSquadAverage));
+    if (currentAnalysisSnapshot) {
+        renderAnalysisPositioning(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-positioning-search").addEventListener("input", () => {
+    if (currentAnalysisSnapshot) {
+        renderAnalysisPositioning(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-positioning-body").addEventListener("click", event => {
+    const row = event.target.closest("[data-analysis-positioning-account]");
+    if (!row || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisPositioningAccount = row.dataset.analysisPositioningAccount;
+    renderAnalysisPositioning(currentAnalysisSnapshot);
+});
+document.querySelector("#analysis-positioning-commander-search").addEventListener("input", () => {
+    if (currentAnalysisSnapshot) {
+        renderAnalysisPositioning(currentAnalysisSnapshot);
+    }
+});
+document.querySelector("#analysis-positioning-commander-account-body").addEventListener("click", event => {
+    const row = event.target.closest("[data-analysis-positioning-commander-account]");
+    if (!row || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    selectedAnalysisPositioningCommanderAccount = row.dataset.analysisPositioningCommanderAccount;
+    renderAnalysisPositioning(currentAnalysisSnapshot);
+});
+document.querySelector("#analysis-positioning-commander-character-legend").addEventListener("change", event => {
+    const input = event.target.closest("[data-analysis-positioning-commander-character]");
+    if (!input || !currentAnalysisSnapshot) {
+        return;
+    }
+
+    const character = input.dataset.analysisPositioningCommanderCharacter;
+    if (input.checked) {
+        selectedAnalysisPositioningCommanderCharacters.add(character);
+    } else {
+        selectedAnalysisPositioningCommanderCharacters.delete(character);
+    }
+    renderAnalysisPositioning(currentAnalysisSnapshot);
 });
 document.querySelectorAll("[data-analysis-class-sort]").forEach(button => {
     button.addEventListener("click", () => setAnalysisClassSort(button.dataset.analysisClassSort));

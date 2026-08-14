@@ -1697,6 +1697,286 @@ h1 {
     margin-top: 0;
 }
 
+.analysis-positioning-layout {
+    display: grid;
+    grid-template-columns: minmax(420px, 0.72fr) minmax(620px, 1.28fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.analysis-positioning-view-toggle {
+    margin-bottom: 14px;
+}
+
+.analysis-positioning-commander-view-toggle {
+    margin-bottom: 14px;
+}
+
+.analysis-positioning-list,
+.analysis-positioning-detail {
+    min-width: 0;
+}
+
+.analysis-positioning-detail {
+    position: sticky;
+    top: 108px;
+}
+
+.table-shell-analysis-positioning {
+    max-height: calc(100vh - 280px);
+}
+
+.analysis-positioning-table th:nth-child(2),
+.analysis-positioning-table td:nth-child(2),
+.analysis-positioning-table th:nth-child(3),
+.analysis-positioning-table td:nth-child(3),
+.analysis-positioning-table th:nth-child(4),
+.analysis-positioning-table td:nth-child(4) {
+    text-align: right;
+}
+
+.analysis-positioning-table {
+    table-layout: fixed;
+}
+
+.analysis-positioning-table th,
+.analysis-positioning-table td {
+    padding-right: 8px;
+    padding-left: 8px;
+}
+
+.analysis-positioning-table td:first-child {
+    overflow-wrap: anywhere;
+}
+
+.analysis-positioning-table th:nth-child(1) {
+    width: 40%;
+}
+
+.analysis-positioning-table th:nth-child(2) {
+    width: 22%;
+}
+
+.analysis-positioning-table th:nth-child(3) {
+    width: 18%;
+}
+
+.analysis-positioning-table th:nth-child(4) {
+    width: 20%;
+}
+
+.analysis-positioning-table th:not(:first-child) .sort-header {
+    justify-content: flex-end;
+    width: 100%;
+    gap: 4px;
+}
+
+.analysis-positioning-table th:nth-child(3) .sort-header,
+.analysis-positioning-table th:nth-child(4) .sort-header {
+    white-space: nowrap;
+}
+
+.analysis-positioning-card {
+    min-height: 440px;
+}
+
+.analysis-positioning-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.analysis-positioning-legend span,
+.analysis-positioning-legend label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border: 1px solid rgba(159, 176, 195, 0.16);
+    border-radius: 999px;
+    background: rgba(159, 176, 195, 0.07);
+}
+
+.analysis-positioning-team-toggle {
+    cursor: pointer;
+}
+
+.analysis-positioning-team-toggle input {
+    margin: 0;
+    accent-color: #cbd5e1;
+}
+
+.analysis-positioning-team-toggle:not(.is-active) .analysis-positioning-swatch-team {
+    opacity: 0.35;
+}
+
+.analysis-positioning-swatch {
+    display: inline-block;
+    width: 24px;
+    height: 0;
+    border-top: 3px solid var(--accent);
+}
+
+.analysis-positioning-swatch-team {
+    border-color: #cbd5e1;
+    border-top-style: dashed;
+}
+
+.analysis-positioning-swatch-player {
+    border-color: #5eead4;
+}
+
+.analysis-team-score-overlay-line.analysis-positioning-squad-line {
+    stroke: #cbd5e1;
+}
+
+.analysis-positioning-chart-wrap {
+    margin-top: 12px;
+}
+
+.analysis-positioning-chart {
+    min-height: 320px;
+}
+
+.analysis-positioning-empty {
+    display: grid;
+    min-height: 320px;
+    place-items: center;
+    color: var(--muted);
+    text-align: center;
+}
+
+.analysis-positioning-commander-card {
+    min-height: 460px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+#analysis-positioning-commanders-view {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.analysis-positioning-commander-card .section-heading p {
+    margin: 4px 0 0;
+    color: var(--muted);
+}
+
+.analysis-positioning-commander-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.analysis-positioning-commander-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.analysis-positioning-commander-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    background: #5eead4;
+}
+
+.analysis-positioning-overall-swatch {
+    width: 22px;
+    border-top: 2px dashed #cbd5e1;
+}
+
+.analysis-positioning-commander-chart-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-height: 410px;
+    margin-top: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.analysis-positioning-commander-chart {
+    display: block;
+    min-height: 410px;
+}
+
+.analysis-positioning-commander-bar {
+    fill: #5eead4;
+    fill-opacity: 0.78;
+    stroke: rgba(8, 13, 20, 0.92);
+    stroke-width: 1.5;
+}
+
+.analysis-positioning-commander-bar:hover {
+    fill-opacity: 1;
+}
+
+.analysis-positioning-commander-value,
+.analysis-positioning-overall-label {
+    fill: var(--ink);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.analysis-positioning-commander-axis-label {
+    font-size: 11px;
+    fill: var(--ink);
+}
+
+.analysis-positioning-commander-character {
+    font-weight: 700;
+}
+
+.analysis-positioning-commander-account {
+    fill: var(--muted);
+    font-size: 10px;
+}
+
+.analysis-positioning-commander-character-legend {
+    margin-top: 12px;
+}
+
+.analysis-positioning-commander-detail-layout {
+    grid-template-columns: minmax(470px, 0.8fr) minmax(560px, 1.2fr);
+}
+
+.analysis-positioning-commander-detail-layout .analysis-positioning-commander-legend span {
+    white-space: nowrap;
+}
+
+.analysis-positioning-commander-account-table th:nth-child(1) {
+    width: 32%;
+}
+
+.analysis-positioning-commander-account-table th:nth-child(2) {
+    width: 15%;
+}
+
+.analysis-positioning-commander-account-table th:nth-child(3) {
+    width: 23%;
+}
+
+.analysis-positioning-commander-account-table th:nth-child(4) {
+    width: 30%;
+}
+
+.analysis-positioning-overall-line {
+    stroke: #cbd5e1;
+    stroke-width: 2;
+    stroke-dasharray: 8 6;
+    vector-effect: non-scaling-stroke;
+}
+
 .analysis-lanes-layout {
     display: grid;
     grid-template-columns: minmax(220px, 0.28fr) minmax(0, 1fr);
@@ -3868,6 +4148,7 @@ h1 {
     .analysis-lanes-layout,
     .analysis-split-panel,
     .analysis-split-panel-classes,
+    .analysis-positioning-layout,
     .analysis-enemies-graph-workspace {
         grid-template-columns: 1fr;
     }
@@ -3944,6 +4225,14 @@ h1 {
     .analysis-workbench {
         position: static;
         padding: 8px;
+    }
+
+    .analysis-positioning-detail {
+        position: static;
+    }
+
+    .table-shell-analysis-positioning {
+        max-height: 420px;
     }
 
     .analysis-enemies-toolbar,

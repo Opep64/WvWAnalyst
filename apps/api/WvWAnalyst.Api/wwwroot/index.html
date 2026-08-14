@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260731burstpreview1">
+    <link rel="stylesheet" href="/styles.css?v=20260814positioningcommander2">
 </head>
 <body>
     <div class="page-shell">
@@ -757,6 +757,7 @@
                     <div class="analysis-tabs" role="tablist" aria-label="Analysis sections">
                         <button class="analysis-tab is-active" id="analysis-tab-overview" type="button" data-analysis-tab="overview" role="tab" aria-selected="true">Overview</button>
                         <button class="analysis-tab" id="analysis-tab-players" type="button" data-analysis-tab="players" role="tab" aria-selected="false">Players</button>
+                        <button class="analysis-tab" id="analysis-tab-positioning" type="button" data-analysis-tab="positioning" role="tab" aria-selected="false">Positioning</button>
                         <button class="analysis-tab" id="analysis-tab-classes" type="button" data-analysis-tab="classes" role="tab" aria-selected="false">Classes</button>
                         <button class="analysis-tab" id="analysis-tab-lanes" type="button" data-analysis-tab="lanes" role="tab" aria-selected="false">Lanes</button>
                         <button class="analysis-tab" id="analysis-tab-boons" type="button" data-analysis-tab="boons" role="tab" aria-selected="false">Boons</button>
@@ -861,6 +862,120 @@
                         <aside class="analysis-split-detail">
                             <div id="analysis-player-detail"></div>
                         </aside>
+                    </div>
+                </div>
+                <div class="analysis-panel" id="analysis-panel-positioning" data-analysis-panel="positioning" role="tabpanel" aria-labelledby="analysis-tab-positioning" hidden>
+                    <p class="workspace-note analysis-panel-note">In-position rates are weighted by eligible replay samples. Select a Guild Wars ID to compare that player with the squad over the current Analysis scope.</p>
+                    <div class="analysis-enemies-view-toggle analysis-positioning-view-toggle" role="group" aria-label="Positioning view">
+                        <button class="analysis-enemies-view-button is-active" type="button" data-analysis-positioning-view="players" aria-pressed="true">Players</button>
+                        <button class="analysis-enemies-view-button" type="button" data-analysis-positioning-view="commanders" aria-pressed="false">Commanders</button>
+                    </div>
+                    <div id="analysis-positioning-players-view">
+                        <div class="analysis-positioning-layout">
+                        <div class="analysis-positioning-list">
+                            <div class="browser-controls analysis-player-toolbar">
+                                <label class="browser-field browser-field-wide">
+                                    <span>Filter by GW2 ID</span>
+                                    <input id="analysis-positioning-search" type="search" placeholder="Account.1234">
+                                </label>
+                            </div>
+                            <p class="workspace-note analysis-panel-note" id="analysis-positioning-summary"></p>
+                            <div class="table-shell table-shell-scroll table-shell-analysis-positioning">
+                                <table class="data-table data-table-compact analysis-positioning-table">
+                                    <thead>
+                                        <tr>
+                                            <th><button class="sort-header" type="button" data-analysis-positioning-sort="account">GW2 ID</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-positioning-sort="average">Avg. in position</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-positioning-sort="fights">Fights</button></th>
+                                            <th><button class="sort-header" type="button" data-analysis-positioning-sort="samples">Samples</button></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analysis-positioning-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <aside class="analysis-positioning-detail">
+                            <section class="analysis-card analysis-positioning-card">
+                                <div class="section-heading">
+                                    <div>
+                                        <h3 id="analysis-positioning-chart-title">Positioning over time</h3>
+                                        <p id="analysis-positioning-chart-summary"></p>
+                                    </div>
+                                    <div class="analysis-positioning-legend" aria-label="Positioning chart legend">
+                                        <span><i class="analysis-positioning-swatch analysis-positioning-swatch-player"></i>Player</span>
+                                        <label class="analysis-positioning-team-toggle is-active">
+                                            <input id="analysis-positioning-squad-average" type="checkbox" checked>
+                                            <i class="analysis-positioning-swatch analysis-positioning-swatch-team"></i>
+                                            Squad average
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="analysis-boon-trend-chart-wrap analysis-positioning-chart-wrap" id="analysis-positioning-chart"></div>
+                            </section>
+                        </aside>
+                        </div>
+                    </div>
+                    <div id="analysis-positioning-commanders-view" hidden>
+                        <div class="analysis-enemies-view-toggle analysis-positioning-commander-view-toggle" role="group" aria-label="Commander positioning view">
+                            <button class="analysis-enemies-view-button is-active" type="button" data-analysis-positioning-commander-view="overview" aria-pressed="true">Overview</button>
+                            <button class="analysis-enemies-view-button" type="button" data-analysis-positioning-commander-view="accounts" aria-pressed="false">By GW2 ID</button>
+                        </div>
+                        <div id="analysis-positioning-commanders-overview">
+                            <section class="analysis-card analysis-positioning-commander-card">
+                                <div class="section-heading">
+                                    <div>
+                                        <h3>Squad positioning by commander</h3>
+                                        <p id="analysis-positioning-commander-summary"></p>
+                                    </div>
+                                    <div class="analysis-positioning-commander-legend">
+                                        <span><i class="analysis-positioning-commander-swatch"></i>Squad average</span>
+                                        <span><i class="analysis-positioning-overall-swatch"></i>All filtered fights</span>
+                                    </div>
+                                </div>
+                                <div class="analysis-positioning-commander-chart-wrap" id="analysis-positioning-commander-chart"></div>
+                            </section>
+                        </div>
+                        <div id="analysis-positioning-commanders-accounts" hidden>
+                            <div class="analysis-positioning-layout analysis-positioning-commander-detail-layout">
+                                <div class="analysis-positioning-list">
+                                    <div class="browser-controls analysis-player-toolbar">
+                                        <label class="browser-field browser-field-wide">
+                                            <span>Filter by commander GW2 ID</span>
+                                            <input id="analysis-positioning-commander-search" type="search" placeholder="Account.1234">
+                                        </label>
+                                    </div>
+                                    <p class="workspace-note analysis-panel-note" id="analysis-positioning-commander-account-summary"></p>
+                                    <div class="table-shell table-shell-scroll table-shell-analysis-positioning">
+                                        <table class="data-table data-table-compact analysis-positioning-table analysis-positioning-commander-account-table">
+                                            <thead>
+                                                <tr>
+                                                    <th><button class="sort-header" type="button" data-analysis-positioning-commander-sort="account">GW2 ID</button></th>
+                                                    <th><button class="sort-header" type="button" data-analysis-positioning-commander-sort="fights">Fights</button></th>
+                                                    <th><button class="sort-header" type="button" data-analysis-positioning-commander-sort="record">Record</button></th>
+                                                    <th><button class="sort-header" type="button" data-analysis-positioning-commander-sort="average">Avg. position</button></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="analysis-positioning-commander-account-body"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <aside class="analysis-positioning-detail">
+                                    <section class="analysis-card analysis-positioning-card">
+                                        <div class="section-heading">
+                                            <div>
+                                                <h3 id="analysis-positioning-commander-detail-title">Commander positioning over time</h3>
+                                                <p id="analysis-positioning-commander-detail-summary"></p>
+                                            </div>
+                                            <div class="analysis-positioning-commander-legend">
+                                                <span><i class="analysis-positioning-overall-swatch"></i>All commanders</span>
+                                            </div>
+                                        </div>
+                                        <div class="analysis-boon-trend-legend analysis-positioning-commander-character-legend" id="analysis-positioning-commander-character-legend"></div>
+                                        <div class="analysis-boon-trend-chart-wrap analysis-positioning-chart-wrap" id="analysis-positioning-commander-detail-chart"></div>
+                                    </section>
+                                </aside>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="analysis-panel" id="analysis-panel-classes" data-analysis-panel="classes" role="tabpanel" aria-labelledby="analysis-tab-classes" hidden>
@@ -1233,6 +1348,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260731burstpreview1" defer></script>
+    <script src="/app.js?v=20260814positioningcommander2" defer></script>
 </body>
 </html>
