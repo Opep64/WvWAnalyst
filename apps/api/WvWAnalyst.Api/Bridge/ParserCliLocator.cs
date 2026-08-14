@@ -4,8 +4,8 @@ public sealed class ParserCliLocator
 {
     private static readonly string[] CandidateRelativePaths =
     [
-        Path.Combine("GW2EI.bin", "Debug", "CLI", "GuildWars2EliteInsights-CLI.exe"),
-        Path.Combine("GW2EI.bin", "Release", "CLI", "GuildWars2EliteInsights-CLI.exe")
+        Path.Combine("GW2EI.bin", "Release", "CLI", "GuildWars2EliteInsights-CLI.exe"),
+        Path.Combine("GW2EI.bin", "Debug", "CLI", "GuildWars2EliteInsights-CLI.exe")
     ];
 
     public ParserCliProbeResult Probe(string parserPath, string? configuredCliPath)

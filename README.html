@@ -189,8 +189,8 @@ git clone https://github.com/Opep64/WvWAnalyst.git</code></pre>
     <section id="build-ei">
         <h2>Build Elite Insights</h2>
         <p>Default EI CLI path:</p>
-        <pre><code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe</code></pre>
-        <pre><code>dotnet build (Join-Path $EiRoot 'GW2EIParserCLI\GW2EIParserCLI.csproj') -c Debug</code></pre>
+        <pre><code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Release\CLI\GuildWars2EliteInsights-CLI.exe</code></pre>
+        <pre><code>dotnet build (Join-Path $EiRoot 'GW2EIParserCLI\GW2EIParserCLI.csproj') -c Release</code></pre>
         <p>If EI is elsewhere, update <code>Workspace:ParserCliPath</code> in <code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api\appsettings.json</code>.</p>
     </section>
 
@@ -238,7 +238,7 @@ dotnet build (Join-Path $WvWAnalystRoot 'apps\api\WvWAnalyst.Api\WvWAnalyst.Api.
         <p>Relative paths in <code>appsettings.json</code> are resolved from <code>&lt;root&gt;\WvWAnalyst\apps\api\WvWAnalyst.Api</code>. Therefore <code>..\..\..\storage</code> resolves to <code>&lt;root&gt;\WvWAnalyst\storage</code>.</p>
         <pre><code>"Workspace": {
   "ParserPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser",
-  "ParserCliPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser\\GW2EI.bin\\Debug\\CLI\\GuildWars2EliteInsights-CLI.exe",
+  "ParserCliPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser\\GW2EI.bin\\Release\\CLI\\GuildWars2EliteInsights-CLI.exe",
   "PendingDirectoryPath": "..\\..\\..\\storage\\incoming",
   "ArchiveLogDirectoryPath": "..\\..\\..\\storage\\logs"
 }</code></pre>
@@ -300,7 +300,7 @@ dotnet $ApiDll users remove creig</code></pre>
 
 Get-Content (Join-Path $WvWAnalystRoot 'storage\cache\wvw-analyst.log') -Tail 80
 Get-Content (Join-Path $WvWAnalystRoot 'storage\cache\wvw-analyst.error.log') -Tail 80</code></pre>
-        <p>If WvWAnalyst cannot find EI, rebuild EI and verify <code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe</code>.</p>
+        <p>If WvWAnalyst cannot find EI, rebuild EI and verify <code>&lt;root&gt;\GW2-Elite-Insights-Parser\GW2EI.bin\Release\CLI\GuildWars2EliteInsights-CLI.exe</code>.</p>
         <p>If auth is enabled and you cannot log in, run <code>dotnet $ApiDll users reset-password creig</code>.</p>
     </section>
 

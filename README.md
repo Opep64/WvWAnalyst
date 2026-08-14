@@ -94,13 +94,13 @@ The EI fork should have `GW2EIBuilders\WvWAnalystBuilder.cs` and the `SaveOutAna
 WvWAnalyst runs the EI CLI at this default relative path:
 
 ```text
-<root>\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe
+<root>\GW2-Elite-Insights-Parser\GW2EI.bin\Release\CLI\GuildWars2EliteInsights-CLI.exe
 ```
 
 Build the EI CLI:
 
 ```powershell
-dotnet build (Join-Path $EiRoot 'GW2EIParserCLI\GW2EIParserCLI.csproj') -c Debug
+dotnet build (Join-Path $EiRoot 'GW2EIParserCLI\GW2EIParserCLI.csproj') -c Release
 ```
 
 If you build EI in another configuration or location, update `Workspace:ParserCliPath` in:
@@ -207,7 +207,7 @@ Default workspace configuration:
 ```json
 "Workspace": {
   "ParserPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser",
-  "ParserCliPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser\\GW2EI.bin\\Debug\\CLI\\GuildWars2EliteInsights-CLI.exe",
+  "ParserCliPath": "..\\..\\..\\..\\GW2-Elite-Insights-Parser\\GW2EI.bin\\Release\\CLI\\GuildWars2EliteInsights-CLI.exe",
   "PendingDirectoryPath": "..\\..\\..\\storage\\incoming",
   "ArchiveLogDirectoryPath": "..\\..\\..\\storage\\logs"
 }
@@ -423,7 +423,7 @@ Get-Content (Join-Path $WvWAnalystRoot 'storage\cache\wvw-analyst.error.log') -T
 If the app cannot find EI, rebuild EI and verify:
 
 ```text
-<root>\GW2-Elite-Insights-Parser\GW2EI.bin\Debug\CLI\GuildWars2EliteInsights-CLI.exe
+<root>\GW2-Elite-Insights-Parser\GW2EI.bin\Release\CLI\GuildWars2EliteInsights-CLI.exe
 ```
 
 If imported data looks stale after parser payload changes, run `Process all and rebuild catalog`.
