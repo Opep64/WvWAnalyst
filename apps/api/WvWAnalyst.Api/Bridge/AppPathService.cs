@@ -27,6 +27,8 @@ public sealed class AppPathService
 
     public string FightsPath => ResolveConfiguredPath(_storageOptions.FightsPath);
 
+    public string OneTimeFightsPath => Path.Combine(StorageRootPath, "one-time-fights");
+
     public string CachePath => ResolveConfiguredPath(_storageOptions.CachePath);
 
     public string ParserWorkspacePath => ResolveConfiguredPath(_workspaceOptions.ParserPath);
@@ -63,6 +65,7 @@ public sealed class AppPathService
         Directory.CreateDirectory(StorageRootPath);
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         Directory.CreateDirectory(FightsPath);
+        Directory.CreateDirectory(OneTimeFightsPath);
         Directory.CreateDirectory(CachePath);
         if (ConfiguredPendingDirectoryPath is { } configuredPendingDirectoryPath)
         {

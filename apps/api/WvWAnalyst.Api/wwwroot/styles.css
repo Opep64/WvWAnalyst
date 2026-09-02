@@ -1042,6 +1042,23 @@ h1 {
     transform: none;
 }
 
+.one-time-parse-form {
+    display: grid;
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.one-time-parse-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+#one-time-parse-status {
+    margin-top: 14px;
+}
+
 .upload-item-list {
     list-style: none;
     display: grid;

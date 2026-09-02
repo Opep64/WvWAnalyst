@@ -43,6 +43,10 @@ let nightOverviewCalendarMonth = "";
 let nightOverviewSelectedDate = "";
 let currentNightOverviewCatalog = null;
 let nightOverviewRequestVersion = 0;
+let currentOneTimeParseSnapshot = null;
+let oneTimeParseRequestVersion = 0;
+let oneTimeParseBusy = false;
+let oneTimeParseSelectedFiles = [];
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "performance", direction: "desc" };
@@ -1929,6 +1933,8 @@ function normalizeAppTab(value) {
     switch (String(value ?? "").trim().toLowerCase()) {
         case "night-overview":
             return "night-overview";
+        case "one-time-parses":
+            return "one-time-parses";
         case "fight-browser":
             return "fight-browser";
         case "analysis":
@@ -2105,6 +2111,8 @@ function setActiveAppTab(tabKey, options = {}) {
 
     if (normalizedTab === "night-overview") {
         void ensureNightOverviewLoaded();
+    } else if (normalizedTab === "one-time-parses") {
+        void ensureOneTimeParsesLoaded();
     } else if (!currentDashboardSnapshot) {
         void main();
     } else if (normalizedTab === "analysis") {
@@ -2304,6 +2312,15 @@ async function loadNightOverviewDate(dateValue) {
     const response = await fetch(`/api/night-overview?${params}`);
     if (!response.ok) {
         await throwApiError(response, `Night Overview request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadOneTimeParses() {
+    const response = await fetch("/api/one-time-parses");
+    if (!response.ok) {
+        await throwApiError(response, `One-Time Parses request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -11801,9 +11818,12 @@ function buildNightOverviewVisualMetric(label, value) {
     `;
 }
 
-function buildNightOverviewVisualCard(fight, index) {
+function buildNightOverviewVisualCard(fight, index, options = {}) {
     const fightIndex = fight?.fightIndex;
-    const fightTime = formatNightOverviewVisualTime(fight);
+    const rawFightTime = fightIndex?.timeStartStandard ?? fightIndex?.timeStart ?? null;
+    const fightTime = options.includeDate
+        ? (formatDate(rawFightTime) || "Fight date unavailable")
+        : formatNightOverviewVisualTime(fight);
     const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "Commander unavailable";
     const duration = fightIndex?.duration ?? "-";
     const squadCount = String(fightIndex?.squadPlayerCount ?? "-");
@@ -11978,6 +11998,284 @@ async function ensureNightOverviewLoaded() {
         if (dateTrigger) {
             dateTrigger.disabled = !currentNightOverviewCatalog;
         }
+    }
+}
+
+function setOneTimeParsesSummary(message, loading = false) {
+    const summary = document.querySelector("#one-time-parses-summary");
+    if (!summary) {
+        return;
+    }
+
+    summary.textContent = message;
+    summary.classList.toggle("is-loading", loading);
+}
+
+function buildOneTimeParseRow(fight, index) {
+    const fightIndex = fight?.fightIndex;
+    const parsedAt = formatDate(fight?.importedAtUtc);
+    const fightTime = fightIndex
+        ? formatDate(fightIndex.timeStartStandard ?? fightIndex.timeStart)
+        : "-";
+    const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "-";
+    const duration = fightIndex?.duration ?? "-";
+    const squadCount = fightIndex?.squadPlayerCount ?? "-";
+    const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
+    const pressurePreviewButton = buildFightPressurePreviewButton(fight, fightTime, commander);
+    const attributes = getNightOverviewAttributes(fight);
+
+    return `
+        <tr data-one-time-fight-id="${escapeHtml(fight.fightId)}">
+            <td><strong>${index + 1}</strong></td>
+            <td>${escapeHtml(parsedAt || "-")}</td>
+            <td><span class="table-title" title="${escapeHtml(fight.sourceFileName ?? "")}">${escapeHtml(fight.sourceFileName ?? "-")}</span></td>
+            <td>${escapeHtml(fightTime || "-")}</td>
+            <td>${escapeHtml(commander)}</td>
+            <td>${escapeHtml(duration)}</td>
+            <td>${escapeHtml(getOutcomeDisplayLabel(fight))}</td>
+            <td>${escapeHtml(getExecutionScoreLabel(fight))}</td>
+            <td>${escapeHtml(String(squadCount))}</td>
+            <td>${escapeHtml(String(enemyCount))}</td>
+            <td>${buildAttributePills(attributes, NIGHT_OVERVIEW_ATTRIBUTE_KEYS.size)}</td>
+            <td>
+                <div class="table-actions">
+                    ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
+                    ${pressurePreviewButton}
+                </div>
+            </td>
+        </tr>
+    `;
+}
+
+function renderOneTimeParses(snapshot) {
+    const fights = Array.isArray(snapshot?.fights)
+        ? [...snapshot.fights].sort((left, right) => parseDateValue(right?.importedAtUtc) - parseDateValue(left?.importedAtUtc))
+        : [];
+    const maxRetained = Number(snapshot?.maxRetained ?? 25);
+    const empty = document.querySelector("#one-time-parses-empty");
+    const results = document.querySelector("#one-time-parses-results");
+    const tableSummary = document.querySelector("#one-time-parses-table-summary");
+    const body = document.querySelector("#one-time-parses-body");
+    const visualSummary = document.querySelector("#one-time-parses-visual-summary");
+    const visualGrid = document.querySelector("#one-time-parses-visual-grid");
+    if (!empty || !results || !tableSummary || !body || !visualSummary || !visualGrid) {
+        return;
+    }
+
+    setOneTimeParsesSummary(`${formatNumber(fights.length)} of ${formatNumber(maxRetained)} parse slots used.`);
+    if (fights.length === 0) {
+        empty.hidden = false;
+        results.hidden = true;
+        body.innerHTML = "";
+        visualGrid.innerHTML = "";
+        return;
+    }
+
+    tableSummary.textContent = `${formatNumber(fights.length)} retained parse${fights.length === 1 ? "" : "s"}, newest first.`;
+    body.innerHTML = fights.map(buildOneTimeParseRow).join("");
+    visualSummary.textContent = `${formatNumber(fights.length)} retained parse${fights.length === 1 ? "" : "s"}.`;
+    visualGrid.innerHTML = fights
+        .map((fight, index) => buildNightOverviewVisualCard(fight, index, { includeDate: true }))
+        .join("");
+    empty.hidden = true;
+    results.hidden = false;
+}
+
+async function ensureOneTimeParsesLoaded(options = {}) {
+    const { force = false } = options;
+    if (currentOneTimeParseSnapshot && !force) {
+        renderOneTimeParses(currentOneTimeParseSnapshot);
+        return;
+    }
+
+    const requestVersion = ++oneTimeParseRequestVersion;
+    setOneTimeParsesSummary("Loading one-time parses…", true);
+    try {
+        const snapshot = await loadOneTimeParses();
+        if (requestVersion !== oneTimeParseRequestVersion) {
+            return;
+        }
+
+        currentOneTimeParseSnapshot = snapshot;
+        renderOneTimeParses(snapshot);
+    } catch (error) {
+        if (requestVersion !== oneTimeParseRequestVersion) {
+            return;
+        }
+
+        if (error?.status === 401) {
+            renderAuthState({ enabled: true, authenticated: false, username: null });
+            return;
+        }
+
+        setOneTimeParsesSummary("One-time parses could not be loaded.");
+        const status = document.querySelector("#one-time-parse-status");
+        if (status) {
+            status.textContent = error instanceof Error ? error.message : String(error);
+        }
+    }
+}
+
+function syncOneTimeParseControls() {
+    const input = document.querySelector("#one-time-parse-input");
+    const selectButton = document.querySelector("#one-time-parse-select-button");
+    const parseButton = document.querySelector("#one-time-parse-button");
+    const dropzone = document.querySelector("#one-time-parse-dropzone");
+    if (input) {
+        input.disabled = oneTimeParseBusy;
+    }
+    if (selectButton) {
+        selectButton.disabled = oneTimeParseBusy;
+    }
+    if (parseButton) {
+        parseButton.disabled = oneTimeParseBusy || oneTimeParseSelectedFiles.length === 0;
+        parseButton.textContent = oneTimeParseBusy ? "Parsing…" : "Parse selected logs";
+    }
+    if (dropzone) {
+        dropzone.classList.toggle("is-disabled", oneTimeParseBusy);
+        dropzone.setAttribute("aria-disabled", oneTimeParseBusy ? "true" : "false");
+    }
+}
+
+function setOneTimeParseFiles(fileList) {
+    const selected = Array.from(fileList ?? []).filter(file => /\.(evtc|zevtc|zip)$/i.test(file?.name ?? ""));
+    oneTimeParseSelectedFiles = selected;
+    const summary = document.querySelector("#one-time-parse-selection-summary");
+    if (summary) {
+        summary.textContent = selected.length === 0
+            ? "No supported files selected."
+            : `${formatNumber(selected.length)} log${selected.length === 1 ? "" : "s"} ready to parse.`;
+    }
+    syncOneTimeParseControls();
+}
+
+function renderOneTimeParseResult(result) {
+    const status = document.querySelector("#one-time-parse-status");
+    if (!status) {
+        return;
+    }
+
+    const items = Array.isArray(result?.items) ? result.items : [];
+    const itemMarkup = items.length === 0
+        ? ""
+        : `
+            <ul class="upload-item-list">
+                ${items.map(item => `
+                    <li>
+                        <strong>${escapeHtml(item.sourceFileName ?? "Log")}</strong>
+                        <span class="pill">${escapeHtml(item.action ?? "unknown")}</span>
+                        <span>${escapeHtml(item.message ?? "")}</span>
+                    </li>
+                `).join("")}
+            </ul>
+        `;
+    status.innerHTML = `
+        <div class="batch-status-heading">
+            <strong>${escapeHtml(result?.message ?? "One-time parsing finished.")}</strong>
+            <div class="batch-status-pills">
+                <span class="pill">${escapeHtml(`${result?.importedCount ?? 0} retained`)}</span>
+                <span class="pill">${escapeHtml(`${result?.failedCount ?? 0} failed`)}</span>
+            </div>
+        </div>
+        ${itemMarkup}
+    `;
+}
+
+async function handleOneTimeParseSubmit(event) {
+    event.preventDefault();
+    if (oneTimeParseBusy || oneTimeParseSelectedFiles.length === 0) {
+        return;
+    }
+
+    const files = [...oneTimeParseSelectedFiles];
+    const aggregateResult = {
+        success: true,
+        uploadedCount: files.length,
+        importedCount: 0,
+        failedCount: 0,
+        items: [],
+        snapshot: currentOneTimeParseSnapshot
+    };
+    let completedCount = 0;
+    oneTimeParseBusy = true;
+    syncOneTimeParseControls();
+    setOneTimeParsesSummary(`Parsing 0 of ${formatNumber(files.length)} logs · ${formatNumber(files.length)} remaining…`, true);
+    const status = document.querySelector("#one-time-parse-status");
+    if (status) {
+        status.textContent = `Preparing the first of ${formatNumber(files.length)} selected logs.`;
+    }
+
+    try {
+        for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+            const file = files[fileIndex];
+            const remainingBeforeParse = files.length - completedCount;
+            setOneTimeParsesSummary(
+                `Parsing ${formatNumber(fileIndex + 1)} of ${formatNumber(files.length)} · ${formatNumber(remainingBeforeParse)} remaining…`,
+                true);
+            if (status) {
+                status.textContent = `Uploading and parsing log ${formatNumber(fileIndex + 1)} of ${formatNumber(files.length)}: ${file.name}`;
+            }
+
+            const formData = new FormData();
+            formData.append("files", file, file.name);
+            const response = await fetch("/api/one-time-parses", {
+                method: "POST",
+                body: formData
+            });
+            const result = await readApiPayload(response);
+            if (!response.ok) {
+                throw new Error(result?.message ?? `One-time parsing failed with status ${response.status}`);
+            }
+
+            completedCount += 1;
+            aggregateResult.importedCount += Number(result?.importedCount ?? 0);
+            aggregateResult.failedCount += Number(result?.failedCount ?? 0);
+            aggregateResult.items.push(...(Array.isArray(result?.items) ? result.items : []));
+            aggregateResult.snapshot = result?.snapshot ?? aggregateResult.snapshot;
+            if (aggregateResult.snapshot) {
+                currentOneTimeParseSnapshot = aggregateResult.snapshot;
+                renderOneTimeParses(aggregateResult.snapshot);
+            }
+
+            const remainingCount = files.length - completedCount;
+            setOneTimeParsesSummary(
+                remainingCount > 0
+                    ? `Parsed ${formatNumber(completedCount)} of ${formatNumber(files.length)} logs · ${formatNumber(remainingCount)} remaining…`
+                    : `Parsed all ${formatNumber(files.length)} selected logs.`,
+                remainingCount > 0);
+            if (status) {
+                status.textContent = `${formatNumber(completedCount)} of ${formatNumber(files.length)} logs complete · ${formatNumber(remainingCount)} remaining · ${formatNumber(aggregateResult.importedCount)} retained · ${formatNumber(aggregateResult.failedCount)} failed.`;
+            }
+        }
+
+        aggregateResult.success = aggregateResult.failedCount === 0;
+        aggregateResult.message = `Processed ${formatNumber(files.length)} selected log${files.length === 1 ? "" : "s"}: ${formatNumber(aggregateResult.importedCount)} retained, ${formatNumber(aggregateResult.failedCount)} failed. The one-time workspace keeps the newest 25 parses.`;
+        renderOneTimeParseResult(aggregateResult);
+        oneTimeParseSelectedFiles = [];
+        const input = document.querySelector("#one-time-parse-input");
+        if (input) {
+            input.value = "";
+        }
+        const selectionSummary = document.querySelector("#one-time-parse-selection-summary");
+        if (selectionSummary) {
+            selectionSummary.textContent = "No files selected.";
+        }
+    } catch (error) {
+        const remainingCount = files.length - completedCount;
+        oneTimeParseSelectedFiles = files.slice(completedCount);
+        setOneTimeParsesSummary(`Parsing stopped after ${formatNumber(completedCount)} of ${formatNumber(files.length)} logs.`);
+        if (status) {
+            status.textContent = `${error instanceof Error ? error.message : String(error)} ${formatNumber(remainingCount)} log${remainingCount === 1 ? " remains" : "s remain"} selected for retry.`;
+        }
+        const selectionSummary = document.querySelector("#one-time-parse-selection-summary");
+        if (selectionSummary) {
+            selectionSummary.textContent = remainingCount === 0
+                ? "No files selected."
+                : `${formatNumber(remainingCount)} log${remainingCount === 1 ? "" : "s"} ready to retry.`;
+        }
+    } finally {
+        oneTimeParseBusy = false;
+        syncOneTimeParseControls();
     }
 }
 
@@ -14224,9 +14522,14 @@ async function runMain() {
 }
 
 function loadActiveAppView() {
-    return activeAppTab === "night-overview" && !getSelectedFightId()
-        ? ensureNightOverviewLoaded()
-        : main();
+    if (activeAppTab === "night-overview" && !getSelectedFightId()) {
+        return ensureNightOverviewLoaded();
+    }
+    if (activeAppTab === "one-time-parses" && !getSelectedFightId()) {
+        return ensureOneTimeParsesLoaded();
+    }
+
+    return main();
 }
 
 async function initializeApp() {
@@ -14409,6 +14712,11 @@ document.querySelector("#night-overview-body").addEventListener("pointerout", hi
 document.querySelector("#night-overview-body").addEventListener("pointermove", moveFightPressurePreview);
 document.querySelector("#night-overview-body").addEventListener("focusin", showFightPressurePreview);
 document.querySelector("#night-overview-body").addEventListener("focusout", hideFightPressurePreview);
+document.querySelector("#one-time-parses-body").addEventListener("pointerover", showFightPressurePreview);
+document.querySelector("#one-time-parses-body").addEventListener("pointerout", hideFightPressurePreview);
+document.querySelector("#one-time-parses-body").addEventListener("pointermove", moveFightPressurePreview);
+document.querySelector("#one-time-parses-body").addEventListener("focusin", showFightPressurePreview);
+document.querySelector("#one-time-parses-body").addEventListener("focusout", hideFightPressurePreview);
 document.querySelector("#app-main").addEventListener("click", event => {
     const summaryLink = event.target.closest("[data-fight-summary-id]");
     if (!summaryLink
@@ -14770,6 +15078,47 @@ document.querySelector("#analysis-clear-filters-button").addEventListener("click
 document.querySelector("#analysis-top-five-export-button").addEventListener("click", () => void handleAnalysisTopFiveExport());
 document.querySelectorAll("[data-app-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
+});
+document.querySelector("#one-time-parse-form").addEventListener("submit", event => {
+    void handleOneTimeParseSubmit(event);
+});
+document.querySelector("#one-time-parse-select-button").addEventListener("click", () => {
+    if (!oneTimeParseBusy) {
+        document.querySelector("#one-time-parse-input").click();
+    }
+});
+document.querySelector("#one-time-parse-input").addEventListener("change", event => {
+    setOneTimeParseFiles(event.target.files);
+});
+document.querySelector("#one-time-parse-dropzone").addEventListener("click", event => {
+    if (!oneTimeParseBusy && !event.target.closest("#one-time-parse-select-button")) {
+        document.querySelector("#one-time-parse-input").click();
+    }
+});
+document.querySelector("#one-time-parse-dropzone").addEventListener("keydown", event => {
+    if (!oneTimeParseBusy && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        document.querySelector("#one-time-parse-input").click();
+    }
+});
+["dragenter", "dragover"].forEach(eventName => {
+    document.querySelector("#one-time-parse-dropzone").addEventListener(eventName, event => {
+        event.preventDefault();
+        if (!oneTimeParseBusy) {
+            event.currentTarget.classList.add("is-dragging");
+        }
+    });
+});
+["dragleave", "dragend", "drop"].forEach(eventName => {
+    document.querySelector("#one-time-parse-dropzone").addEventListener(eventName, event => {
+        event.preventDefault();
+        event.currentTarget.classList.remove("is-dragging");
+    });
+});
+document.querySelector("#one-time-parse-dropzone").addEventListener("drop", event => {
+    if (!oneTimeParseBusy) {
+        setOneTimeParseFiles(event.dataTransfer?.files);
+    }
 });
 document.querySelector("#night-overview-date-trigger").addEventListener("click", () => {
     const trigger = document.querySelector("#night-overview-date-trigger");

@@ -68,6 +68,7 @@ builder.Services.AddSingleton<FightCatalogService>();
 builder.Services.AddSingleton<ParserImportService>();
 builder.Services.AddSingleton<DirectoryImportJobService>();
 builder.Services.AddSingleton<ConfiguredLogDirectoryUploadService>();
+builder.Services.AddSingleton<OneTimeParseService>();
 builder.Services.AddSingleton<WorkspaceResetService>();
 builder.Services.AddSingleton<CommanderFightManagementService>();
 builder.Services.AddSingleton<PatchMetadataService>();
@@ -270,6 +271,24 @@ app.MapGet("/api/night-overview", (string? date, FightCatalogService catalog) =>
 
     return Results.Ok(catalog.GetNightOverview(parsedDate));
 });
+app.MapGet("/api/one-time-parses", (OneTimeParseService service) => Results.Ok(service.GetSnapshot()));
+app.MapPost("/api/one-time-parses", async (
+    HttpContext httpContext,
+    OneTimeParseService service,
+    AuditLogService audit,
+    CancellationToken cancellationToken) =>
+{
+    var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+    var result = await service.ParseAsync(form.Files.ToArray(), cancellationToken);
+    audit.Write(httpContext, "one-time-parse", result.ImportedCount > 0 ? "success" : "failure", new
+    {
+        result.UploadedCount,
+        result.ImportedCount,
+        result.FailedCount,
+        RetainedCount = result.Snapshot.Count
+    });
+    return Results.Ok(result);
+}).DisableAntiforgery();
 app.MapGet("/api/audit/events", (int? limit, AuditLogService audit) =>
 {
     var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
@@ -740,6 +759,20 @@ app.MapGet("/api/fights/{fightId}/artifacts/parser-log", (string fightId, FightC
 app.MapGet("/api/fights/{fightId}/artifacts/raw", (string fightId, FightCatalogService catalog) =>
     catalog.TryGetArtifact(fightId, FightArtifactKind.RawLog, out var artifactPath, out var contentType)
         ? Results.File(artifactPath, contentType, fileDownloadName: Path.GetFileName(artifactPath))
+        : Results.NotFound());
+app.MapGet("/api/one-time-parses/{fightId}/artifacts/html", (string fightId, HttpContext httpContext, OneTimeParseService service) =>
+{
+    if (!service.TryGetArtifact(fightId, OneTimeParseArtifactKind.Html, out var artifactPath, out var contentType))
+    {
+        return Results.NotFound();
+    }
+
+    httpContext.Response.Headers["Referrer-Policy"] = "no-referrer";
+    return Results.File(artifactPath, contentType);
+});
+app.MapGet("/api/one-time-parses/{fightId}/artifacts/pressure-preview", (string fightId, OneTimeParseService service) =>
+    service.TryGetArtifact(fightId, OneTimeParseArtifactKind.PressurePreview, out var artifactPath, out var contentType)
+        ? Results.File(artifactPath, contentType)
         : Results.NotFound());
 
 app.MapFallbackToFile("index.html", new StaticFileOptions

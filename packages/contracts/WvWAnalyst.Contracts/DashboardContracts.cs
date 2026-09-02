@@ -112,6 +112,36 @@ public sealed record NightOverviewExecutionDto(
     int? OverallScore,
     string? Grade);
 
+public sealed record OneTimeParseSnapshotDto(
+    int MaxRetained,
+    int Count,
+    IReadOnlyList<OneTimeParseFightDto> Fights);
+
+public sealed record OneTimeParseFightDto(
+    string FightId,
+    string SourceFileName,
+    string ImportedAtUtc,
+    string? PressurePreviewUrl,
+    string? HtmlReportUrl,
+    IReadOnlyList<FightAttributeDto> Attributes,
+    NightOverviewFightIndexDto? FightIndex);
+
+public sealed record OneTimeParseBatchResultDto(
+    bool Success,
+    string Message,
+    int UploadedCount,
+    int ImportedCount,
+    int FailedCount,
+    IReadOnlyList<OneTimeParseItemResultDto> Items,
+    OneTimeParseSnapshotDto Snapshot);
+
+public sealed record OneTimeParseItemResultDto(
+    string SourceFileName,
+    string Action,
+    string Message,
+    string? FightId,
+    long? ParserElapsedMilliseconds);
+
 public sealed record FightImportResultDto(
     bool Success,
     string Action,

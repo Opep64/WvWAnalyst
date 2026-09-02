@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260901nightoverview7">
+    <link rel="stylesheet" href="/styles.css?v=20260901onetime3">
 </head>
 <body>
     <div class="page-shell">
@@ -25,6 +25,7 @@
                 <nav class="app-tabs" role="tablist" aria-label="Primary sections">
                     <button class="app-tab is-active" id="app-tab-manage" type="button" data-app-tab="manage" role="tab" aria-selected="true">Manage</button>
                     <button class="app-tab" id="app-tab-night-overview" type="button" data-app-tab="night-overview" role="tab" aria-selected="false">Night Overview</button>
+                    <button class="app-tab" id="app-tab-one-time-parses" type="button" data-app-tab="one-time-parses" role="tab" aria-selected="false">One-Time Parses</button>
                     <button class="app-tab" id="app-tab-fight-browser" type="button" data-app-tab="fight-browser" role="tab" aria-selected="false">Fight Browser</button>
                     <button class="app-tab" id="app-tab-analysis" type="button" data-app-tab="analysis" role="tab" aria-selected="false">Analysis</button>
                 </nav>
@@ -494,6 +495,75 @@
                             <p class="workspace-note" id="night-overview-visual-scan-summary"></p>
                         </div>
                         <div class="night-overview-visual-grid" id="night-overview-visual-grid"></div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="panel panel-wide" id="one-time-parses-panel" data-app-panel="one-time-parses">
+                <div class="section-heading">
+                    <div>
+                        <h2>One-Time Parses</h2>
+                        <p>Parse logs in an isolated workspace without adding them to the Fight Browser, Night Overview, or Analysis.</p>
+                    </div>
+                    <p class="workspace-note night-overview-catalog-status is-loading" id="one-time-parses-summary" role="status" aria-live="polite">Loading one-time parses…</p>
+                </div>
+                <form class="one-time-parse-form" id="one-time-parse-form">
+                    <input id="one-time-parse-input" type="file" multiple accept=".evtc,.zevtc,.zip" hidden>
+                    <div class="log-dropzone" id="one-time-parse-dropzone" tabindex="0" role="button" aria-controls="one-time-parse-input">
+                        <strong>Drop logs here or select multiple files</strong>
+                        <p class="workspace-note">Every log that Elite Insights can parse is accepted. Uploaded logs are removed after parsing, and only the newest 25 parses are retained.</p>
+                        <div class="log-dropzone-actions">
+                            <button class="action-link action-link-button" id="one-time-parse-select-button" type="button">Select files</button>
+                            <span class="workspace-note" id="one-time-parse-selection-summary">No files selected.</span>
+                        </div>
+                    </div>
+                    <div class="one-time-parse-actions">
+                        <button class="primary-button" id="one-time-parse-button" type="submit" disabled>Parse selected logs</button>
+                        <span class="workspace-note">These parses never enter the normal fight catalog.</span>
+                    </div>
+                </form>
+                <div class="import-status import-status-scrollable" id="one-time-parse-status">Select one or more logs, then start parsing.</div>
+                <div class="night-overview-empty" id="one-time-parses-empty">
+                    <h3>No one-time parses yet</h3>
+                    <p>Drop logs above to create temporary fight reports.</p>
+                </div>
+                <div id="one-time-parses-results" hidden>
+                    <div class="section-heading night-overview-heading">
+                        <div>
+                            <h3>Retained Parses</h3>
+                            <p id="one-time-parses-table-summary"></p>
+                        </div>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-night-overview">
+                        <table class="data-table night-overview-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Parsed</th>
+                                    <th>Source log</th>
+                                    <th>Fight date &amp; time</th>
+                                    <th>Commander</th>
+                                    <th>Duration</th>
+                                    <th>Outcome</th>
+                                    <th>Score</th>
+                                    <th>Squad</th>
+                                    <th>Enemy</th>
+                                    <th>Attributes</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="one-time-parses-body"></tbody>
+                        </table>
+                    </div>
+                    <section class="night-overview-visual-scan" aria-labelledby="one-time-parses-visual-title">
+                        <div class="section-heading">
+                            <div>
+                                <h3 id="one-time-parses-visual-title">Parse Visual Scan</h3>
+                                <p>Pressure graphs ordered by newest parse first. Logs without WvWAnalyst graph data still retain their HTML report.</p>
+                            </div>
+                            <p class="workspace-note" id="one-time-parses-visual-summary"></p>
+                        </div>
+                        <div class="night-overview-visual-grid" id="one-time-parses-visual-grid"></div>
                     </section>
                 </div>
             </section>
@@ -1441,6 +1511,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260901nightoverview7" defer></script>
+    <script src="/app.js?v=20260901onetime3" defer></script>
 </body>
 </html>

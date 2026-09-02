@@ -52,6 +52,121 @@ public sealed class ParserImportService
         _logger = logger;
     }
 
+    public async Task<OneTimeParserResult> ParseOneTimeLogAsync(
+        string logFilePath,
+        string fightDirectoryPath,
+        CancellationToken cancellationToken)
+    {
+        var sourceFileName = Path.GetFileName(logFilePath);
+        var parserProbe = _parserCliLocator.Probe(_paths.ParserWorkspacePath, _paths.ConfiguredParserCliPath);
+        if (!parserProbe.ParserCliDetected || parserProbe.ParserCliPath is null)
+        {
+            return new OneTimeParserResult(
+                Success: false,
+                Message: parserProbe.Notes,
+                ParserStatus: parserProbe.Notes,
+                ParserElapsedMilliseconds: null,
+                FightIndex: null,
+                HtmlArtifactRelativePath: null,
+                PressurePreviewArtifactRelativePath: null,
+                OutputExcerpt: []);
+        }
+
+        var operationId = $"{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}";
+        var importCacheDirectoryPath = Path.Combine(_paths.CachePath, "one-time-imports", operationId);
+        var stagedParserOutputDirectoryPath = Path.Combine(importCacheDirectoryPath, "parser");
+        var stagedParserConfigPath = Path.Combine(stagedParserOutputDirectoryPath, "parser-import.conf");
+        var stagedParserConsoleLogPath = Path.Combine(stagedParserOutputDirectoryPath, "parser-output.log");
+        Directory.CreateDirectory(stagedParserOutputDirectoryPath);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                stagedParserConfigPath,
+                BuildParserConfig(stagedParserOutputDirectoryPath),
+                Encoding.UTF8,
+                cancellationToken);
+
+            var parserRun = await RunParserAsync(
+                parserProbe.ParserCliPath,
+                stagedParserConfigPath,
+                logFilePath,
+                stagedParserConsoleLogPath,
+                cancellationToken);
+            var stagedAnalysisArtifactPath = FindArtifactPathByEnding(
+                stagedParserOutputDirectoryPath,
+                ".analysis.json",
+                ".analysis.json.gz");
+            var fightIndex = string.IsNullOrWhiteSpace(stagedAnalysisArtifactPath)
+                ? null
+                : _fightIndexer.TryIndexFight(stagedAnalysisArtifactPath, eliteInsightsJsonPath: null);
+            var parseSucceeded = parserRun.ConsoleResult?.Parsed == true && parserRun.ExitCode == 0;
+            var parserStatus = BuildParserStatus(parserRun, parseSucceeded, stagedAnalysisArtifactPath, exclusionDecision: null);
+
+            if (!parseSucceeded)
+            {
+                return new OneTimeParserResult(
+                    Success: false,
+                    Message: $"Elite Insights could not parse {sourceFileName}. {parserStatus}",
+                    ParserStatus: parserStatus,
+                    ParserElapsedMilliseconds: parserRun.ConsoleResult?.Elapsed ?? parserRun.DurationMilliseconds,
+                    FightIndex: null,
+                    HtmlArtifactRelativePath: null,
+                    PressurePreviewArtifactRelativePath: null,
+                    OutputExcerpt: parserRun.OutputLines.TakeLast(OutputExcerptLineCount).ToArray());
+            }
+
+            if (!string.IsNullOrWhiteSpace(stagedAnalysisArtifactPath) && File.Exists(stagedAnalysisArtifactPath))
+            {
+                File.Delete(stagedAnalysisArtifactPath);
+            }
+            if (File.Exists(stagedParserConsoleLogPath))
+            {
+                File.Delete(stagedParserConsoleLogPath);
+            }
+
+            var finalParserOutputDirectoryPath = Path.Combine(fightDirectoryPath, "parser");
+            Directory.CreateDirectory(fightDirectoryPath);
+            ReplaceDirectory(stagedParserOutputDirectoryPath, finalParserOutputDirectoryPath);
+
+            var htmlArtifactPath = FindArtifactPathByEnding(finalParserOutputDirectoryPath, ".html");
+            var pressurePreviewArtifactPath = FindArtifactPathByEnding(finalParserOutputDirectoryPath, ".analysis-strips.svg");
+            return new OneTimeParserResult(
+                Success: true,
+                Message: $"Parsed {sourceFileName} for the one-time workspace.",
+                ParserStatus: parserStatus,
+                ParserElapsedMilliseconds: parserRun.ConsoleResult?.Elapsed ?? parserRun.DurationMilliseconds,
+                FightIndex: fightIndex,
+                HtmlArtifactRelativePath: string.IsNullOrWhiteSpace(htmlArtifactPath)
+                    ? null
+                    : Path.GetRelativePath(fightDirectoryPath, htmlArtifactPath),
+                PressurePreviewArtifactRelativePath: string.IsNullOrWhiteSpace(pressurePreviewArtifactPath)
+                    ? null
+                    : Path.GetRelativePath(fightDirectoryPath, pressurePreviewArtifactPath),
+                OutputExcerpt: parserRun.OutputLines.TakeLast(OutputExcerptLineCount).ToArray());
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "One-time parser import failed for {SourceFileName}", sourceFileName);
+            var outputExcerpt = File.Exists(stagedParserConsoleLogPath)
+                ? (await File.ReadAllLinesAsync(stagedParserConsoleLogPath, cancellationToken)).TakeLast(OutputExcerptLineCount).ToArray()
+                : [];
+            return new OneTimeParserResult(
+                Success: false,
+                Message: exception.Message,
+                ParserStatus: "One-time parse failed before parser completion.",
+                ParserElapsedMilliseconds: null,
+                FightIndex: null,
+                HtmlArtifactRelativePath: null,
+                PressurePreviewArtifactRelativePath: null,
+                OutputExcerpt: outputExcerpt);
+        }
+        finally
+        {
+            TryDeleteDirectory(importCacheDirectoryPath);
+        }
+    }
+
     public async Task<DirectoryImportResultDto> ImportDirectoryAsync(DirectoryImportRequestDto request, CancellationToken cancellationToken)
     {
         return await ImportDirectoryAsync(request, reportProgress: null, cancellationToken);
@@ -1203,6 +1318,16 @@ public sealed class ParserImportService
         int Index,
         string Path);
 }
+
+public sealed record OneTimeParserResult(
+    bool Success,
+    string Message,
+    string ParserStatus,
+    long? ParserElapsedMilliseconds,
+    FightIndexDto? FightIndex,
+    string? HtmlArtifactRelativePath,
+    string? PressurePreviewArtifactRelativePath,
+    IReadOnlyList<string> OutputExcerpt);
 
 public sealed record DirectoryImportProgressUpdate(
     string Message,
