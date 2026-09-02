@@ -9,6 +9,7 @@ const ANALYSIS_ENEMY_TREND_COLORS_KEY = "wvw-analyst.analysis-enemy-trend-colors
 const ANALYSIS_ENEMY_TREND_METRIC_KEY = "wvw-analyst.analysis-enemy-trend-metric";
 const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay";
 const ANALYSIS_POSITIONING_SQUAD_AVERAGE_KEY = "wvw-analyst.analysis-positioning-squad-average";
+const NIGHT_OVERVIEW_ATTRIBUTE_KEYS = new Set(["three-way", "organized-enemy", "cloudy-fight"]);
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
@@ -36,6 +37,12 @@ let manageDateRangeDeleteBusy = false;
 let activityLogBusy = false;
 let fightDossierRequestVersion = 0;
 let activeAppTab = "manage";
+let nightOverviewAvailableDates = [];
+let nightOverviewAvailableMonths = [];
+let nightOverviewCalendarMonth = "";
+let nightOverviewSelectedDate = "";
+let currentNightOverviewCatalog = null;
+let nightOverviewRequestVersion = 0;
 let activeAnalysisTab = "overview";
 let fightBrowserSortState = { key: "fightTime", direction: "desc" };
 let analysisPlayerSortState = { key: "performance", direction: "desc" };
@@ -445,7 +452,7 @@ async function handleAuthLogin(event) {
             passwordInput.value = "";
         }
         renderAuthState(state);
-        await main();
+        await loadActiveAppView();
     } catch (error) {
         if (message) {
             message.textContent = error instanceof Error ? error.message : String(error);
@@ -1920,6 +1927,8 @@ function isBatchDirectoryAvailable(mode) {
 
 function normalizeAppTab(value) {
     switch (String(value ?? "").trim().toLowerCase()) {
+        case "night-overview":
+            return "night-overview";
         case "fight-browser":
             return "fight-browser";
         case "analysis":
@@ -1929,9 +1938,33 @@ function normalizeAppTab(value) {
     }
 }
 
+function normalizeNightOverviewDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? "").trim());
+    if (!match) {
+        return null;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+    return parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day
+        ? `${match[1]}-${match[2]}-${match[3]}`
+        : null;
+}
+
+function getRequestedNightOverviewDate() {
+    return normalizeNightOverviewDate(new URL(window.location.href).searchParams.get("date"));
+}
+
 function getRequestedAppTab() {
-    const requested = new URL(window.location.href).searchParams.get("tab");
-    return requested ? normalizeAppTab(requested) : null;
+    const params = new URL(window.location.href).searchParams;
+    const requested = params.get("view") ?? params.get("tab");
+    if (requested) {
+        return normalizeAppTab(requested);
+    }
+
+    return getRequestedNightOverviewDate() ? "night-overview" : null;
 }
 
 function getDashboardUrl(tabKey = null) {
@@ -1950,6 +1983,45 @@ function buildFightDossierUrl(fightId) {
     params.set("tab", "fight-browser");
     params.set("fightId", fightId);
     return `/?${params.toString()}`;
+}
+
+function updateNightOverviewHistory(dateValue, options = {}) {
+    const { replace = false } = options;
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "night-overview");
+    url.searchParams.delete("tab");
+    url.searchParams.delete("fightId");
+    if (dateValue) {
+        url.searchParams.set("date", dateValue);
+    } else {
+        url.searchParams.delete("date");
+    }
+
+    const historyMethod = replace ? "replaceState" : "pushState";
+    window.history[historyMethod]({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function applyNightOverviewUrlState(options = {}) {
+    const { render = false } = options;
+    const dateInput = document.querySelector("#night-overview-date");
+    const dateValue = document.querySelector("#night-overview-date-value");
+    if (!dateInput || !dateValue) {
+        return;
+    }
+
+    const requestedDate = getRequestedNightOverviewDate() ?? "";
+    nightOverviewSelectedDate = requestedDate;
+    dateInput.value = requestedDate;
+    if (requestedDate) {
+        nightOverviewCalendarMonth = requestedDate.slice(0, 7);
+        dateValue.textContent = new Date(`${requestedDate}T00:00:00`).toLocaleDateString();
+    } else {
+        dateValue.textContent = "mm/dd/yyyy";
+    }
+
+    if (render) {
+        void ensureNightOverviewLoaded();
+    }
 }
 
 function placeFightDossierAfterFightBrowser() {
@@ -2027,7 +2099,15 @@ function setActiveAppTab(tabKey, options = {}) {
         localStorage.setItem(ACTIVE_APP_TAB_KEY, normalizedTab);
     }
 
-    if (loadAnalysis && normalizedTab === "analysis") {
+    if (!loadAnalysis) {
+        return;
+    }
+
+    if (normalizedTab === "night-overview") {
+        void ensureNightOverviewLoaded();
+    } else if (!currentDashboardSnapshot) {
+        void main();
+    } else if (normalizedTab === "analysis") {
         void ensureAnalysisLoaded();
     }
 }
@@ -2204,6 +2284,26 @@ async function loadAnalysis(filters = {}) {
     const response = await fetch(`/api/analysis${query ? `?${query}` : ""}`);
     if (!response.ok) {
         throw new Error(`Analysis request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadNightOverviewCatalog() {
+    const response = await fetch("/api/night-overview/catalog");
+    if (!response.ok) {
+        await throwApiError(response, `Night Overview calendar request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function loadNightOverviewDate(dateValue) {
+    const params = new URLSearchParams();
+    params.set("date", dateValue);
+    const response = await fetch(`/api/night-overview?${params}`);
+    if (!response.ok) {
+        await throwApiError(response, `Night Overview request failed with status ${response.status}`);
     }
 
     return response.json();
@@ -11438,19 +11538,9 @@ function applyFightBrowserFilters(snapshot) {
     return sortFights(fights);
 }
 
-function buildFightBrowserRow(fight, selectedFightId) {
-    const fightIndex = fight.fightIndex;
-    const rowClasses = [];
-    if (fight.fightId === selectedFightId) {
-        rowClasses.push("is-selected");
-    }
-    const fightTime = formatDate(fightIndex?.timeStartStandard ?? fightIndex?.timeStart);
-    const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "-";
-    const duration = fightIndex?.duration ?? "-";
-    const squadCount = fightIndex?.squadPlayerCount ?? "-";
-    const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
+function buildFightPressurePreviewButton(fight, fightTime, commander) {
     const pressurePreviewLabel = `${fightTime || "Fight"} - ${commander}`;
-    const pressurePreviewButton = fight.pressurePreviewUrl
+    return fight.pressurePreviewUrl
         ? `
             <button
                 class="fight-pressure-preview-trigger"
@@ -11464,6 +11554,20 @@ function buildFightBrowserRow(fight, selectedFightId) {
                 </svg>
             </button>`
         : "";
+}
+
+function buildFightBrowserRow(fight, selectedFightId) {
+    const fightIndex = fight.fightIndex;
+    const rowClasses = [];
+    if (fight.fightId === selectedFightId) {
+        rowClasses.push("is-selected");
+    }
+    const fightTime = formatDate(fightIndex?.timeStartStandard ?? fightIndex?.timeStart);
+    const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "-";
+    const duration = fightIndex?.duration ?? "-";
+    const squadCount = fightIndex?.squadPlayerCount ?? "-";
+    const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
+    const pressurePreviewButton = buildFightPressurePreviewButton(fight, fightTime, commander);
 
     return `
         <tr class="${rowClasses.join(" ")}" data-fight-id="${escapeHtml(fight.fightId)}">
@@ -11486,6 +11590,395 @@ function buildFightBrowserRow(fight, selectedFightId) {
             </td>
         </tr>
     `;
+}
+
+function formatNightOverviewDateLabel(dateValue) {
+    const parts = String(dateValue ?? "").split("-").map(Number);
+    if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) {
+        return String(dateValue ?? "");
+    }
+
+    const [year, month, day] = parts;
+    const parsed = new Date(year, month - 1, day);
+    return parsed.toLocaleDateString(undefined, {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+    });
+}
+
+function formatNightOverviewMonthLabel(monthValue) {
+    const parts = String(monthValue ?? "").split("-").map(Number);
+    if (parts.length !== 2 || parts.some(part => !Number.isFinite(part))) {
+        return String(monthValue ?? "");
+    }
+
+    const [year, month] = parts;
+    return new Date(year, month - 1, 1).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long"
+    });
+}
+
+function setNightOverviewCalendarOpen(open) {
+    const calendar = document.querySelector("#night-overview-calendar");
+    const trigger = document.querySelector("#night-overview-date-trigger");
+    const shouldOpen = Boolean(open && !trigger?.disabled && nightOverviewAvailableMonths.length > 0);
+    if (calendar) {
+        calendar.hidden = !shouldOpen;
+    }
+    if (trigger) {
+        trigger.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    }
+}
+
+function renderNightOverviewCalendar() {
+    const dateInput = document.querySelector("#night-overview-date");
+    const monthSelect = document.querySelector("#night-overview-calendar-month");
+    const previousButton = document.querySelector("#night-overview-calendar-previous");
+    const nextButton = document.querySelector("#night-overview-calendar-next");
+    const days = document.querySelector("#night-overview-calendar-days");
+    if (!dateInput || !monthSelect || !previousButton || !nextButton || !days) {
+        return;
+    }
+
+    if (!nightOverviewAvailableMonths.includes(nightOverviewCalendarMonth)) {
+        nightOverviewCalendarMonth = nightOverviewSelectedDate.slice(0, 7);
+    }
+    if (!nightOverviewAvailableMonths.includes(nightOverviewCalendarMonth)) {
+        nightOverviewCalendarMonth = nightOverviewAvailableMonths[nightOverviewAvailableMonths.length - 1] ?? "";
+    }
+
+    monthSelect.innerHTML = nightOverviewAvailableMonths
+        .map(month => `<option value="${escapeHtml(month)}">${escapeHtml(formatNightOverviewMonthLabel(month))}</option>`)
+        .join("");
+    monthSelect.value = nightOverviewCalendarMonth;
+    monthSelect.disabled = nightOverviewAvailableMonths.length === 0;
+
+    const currentMonthIndex = nightOverviewAvailableMonths.indexOf(nightOverviewCalendarMonth);
+    previousButton.disabled = currentMonthIndex <= 0;
+    nextButton.disabled = currentMonthIndex < 0 || currentMonthIndex >= nightOverviewAvailableMonths.length - 1;
+
+    if (!nightOverviewCalendarMonth) {
+        days.innerHTML = "";
+        return;
+    }
+
+    const [year, month] = nightOverviewCalendarMonth.split("-").map(Number);
+    const firstOfMonth = new Date(year, month - 1, 1);
+    const gridStart = new Date(year, month - 1, 1 - firstOfMonth.getDay());
+    const availableDates = new Set(nightOverviewAvailableDates);
+    const today = formatDateInputValue(new Date());
+
+    days.innerHTML = Array.from({ length: 42 }, (_, index) => {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + index);
+        const dateValue = formatDateInputValue(cellDate);
+        const isCurrentMonth = cellDate.getFullYear() === year && cellDate.getMonth() === month - 1;
+        const isAvailable = isCurrentMonth && availableDates.has(dateValue);
+        const isSelected = dateValue === nightOverviewSelectedDate;
+        const classes = [
+            "night-overview-calendar-day",
+            isAvailable ? "is-available" : "",
+            isSelected ? "is-selected" : "",
+            dateValue === today ? "is-today" : ""
+        ].filter(Boolean).join(" ");
+        const accessibleLabel = isAvailable
+            ? formatNightOverviewDateLabel(dateValue)
+            : `${formatNightOverviewDateLabel(dateValue)}, no fights available`;
+
+        return `
+            <button
+                class="${classes}"
+                type="button"
+                data-night-overview-date="${escapeHtml(dateValue)}"
+                aria-label="${escapeHtml(accessibleLabel)}"
+                ${isSelected ? 'aria-pressed="true"' : ""}
+                ${isAvailable ? "" : "disabled"}>
+                ${cellDate.getDate()}
+            </button>
+        `;
+    }).join("");
+}
+
+function changeNightOverviewCalendarMonth(offset) {
+    const currentIndex = nightOverviewAvailableMonths.indexOf(nightOverviewCalendarMonth);
+    const nextIndex = currentIndex + offset;
+    if (nextIndex < 0 || nextIndex >= nightOverviewAvailableMonths.length) {
+        return;
+    }
+
+    nightOverviewCalendarMonth = nightOverviewAvailableMonths[nextIndex];
+    renderNightOverviewCalendar();
+}
+
+function selectNightOverviewDate(dateValue, options = {}) {
+    const { updateHistory = true } = options;
+    const dateInput = document.querySelector("#night-overview-date");
+    if (!dateInput || (dateValue && !nightOverviewAvailableDates.includes(dateValue))) {
+        return;
+    }
+
+    dateInput.value = dateValue;
+    nightOverviewSelectedDate = dateValue;
+    if (dateValue) {
+        nightOverviewCalendarMonth = dateValue.slice(0, 7);
+    }
+    if (updateHistory) {
+        updateNightOverviewHistory(dateValue);
+    }
+    setNightOverviewCalendarOpen(false);
+    renderNightOverviewCalendar();
+    void ensureNightOverviewLoaded();
+}
+
+function setNightOverviewCatalogStatus(message, loading = false) {
+    const status = document.querySelector("#night-overview-catalog-summary");
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.classList.toggle("is-loading", loading);
+}
+
+function getNightOverviewAttributes(fight) {
+    return (fight?.attributes ?? [])
+        .filter(attribute => NIGHT_OVERVIEW_ATTRIBUTE_KEYS.has(String(attribute?.key ?? "").toLowerCase()));
+}
+
+function buildNightOverviewRow(fight) {
+    const fightIndex = fight?.fightIndex;
+    const fightTime = formatDate(fightIndex?.timeStartStandard ?? fightIndex?.timeStart);
+    const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "-";
+    const duration = fightIndex?.duration ?? "-";
+    const squadCount = fightIndex?.squadPlayerCount ?? "-";
+    const enemyCount = fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-";
+    const pressurePreviewButton = buildFightPressurePreviewButton(fight, fightTime, commander);
+    const attributes = getNightOverviewAttributes(fight);
+
+    return `
+        <tr data-fight-id="${escapeHtml(fight.fightId)}">
+            <td>${escapeHtml(fightTime || "-")}</td>
+            <td>${escapeHtml(commander)}</td>
+            <td>${escapeHtml(duration)}</td>
+            <td>${escapeHtml(getOutcomeDisplayLabel(fight))}</td>
+            <td>${escapeHtml(getExecutionScoreLabel(fight))}</td>
+            <td data-fight-shape-diagnostics ${showFightShapeDiagnostics ? "" : "hidden"}>${buildFightShapeBrowserCell(fightIndex?.fightShape)}</td>
+            <td>${escapeHtml(String(squadCount))}</td>
+            <td>${escapeHtml(String(enemyCount))}</td>
+            <td>${buildAttributePills(attributes, NIGHT_OVERVIEW_ATTRIBUTE_KEYS.size)}</td>
+            <td>
+                <div class="table-actions">
+                    ${fight.htmlReportUrl ? `<a href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML</a>` : ""}
+                    ${fight.parserConsoleLogUrl ? `<a href="${escapeHtml(fight.parserConsoleLogUrl)}" target="_blank" rel="noopener">Parser log</a>` : ""}
+                    ${pressurePreviewButton}
+                </div>
+            </td>
+        </tr>
+    `;
+}
+
+function formatNightOverviewVisualTime(fight) {
+    const rawValue = fight?.fightIndex?.timeStartStandard ?? fight?.fightIndex?.timeStart ?? null;
+    if (!rawValue) {
+        return "Fight";
+    }
+
+    const parsed = new Date(rawValue);
+    return Number.isNaN(parsed.getTime())
+        ? String(rawValue)
+        : parsed.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function buildNightOverviewVisualMetric(label, value) {
+    return `
+        <div class="night-overview-visual-metric">
+            <span>${escapeHtml(label)}</span>
+            <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
+        </div>
+    `;
+}
+
+function buildNightOverviewVisualCard(fight, index) {
+    const fightIndex = fight?.fightIndex;
+    const fightTime = formatNightOverviewVisualTime(fight);
+    const commander = fightIndex?.commanderDisplayNames?.join(", ") ?? "Commander unavailable";
+    const duration = fightIndex?.duration ?? "-";
+    const squadCount = String(fightIndex?.squadPlayerCount ?? "-");
+    const enemyCount = String(fightIndex?.enemyPlayerCount ?? fightIndex?.enemyTargetCount ?? "-");
+    const outcome = getOutcomeDisplayLabel(fight);
+    const score = getExecutionScoreLabel(fight);
+    const attributes = getNightOverviewAttributes(fight);
+    const graphAlt = `Pressure graph with optional squad positioning for fight ${index + 1} at ${fightTime}`;
+    const graphImage = fight?.pressurePreviewUrl
+        ? `<img class="night-overview-visual-graph" src="${escapeHtml(fight.pressurePreviewUrl)}" alt="${escapeHtml(graphAlt)}" loading="lazy" decoding="async">`
+        : `<div class="night-overview-visual-graph-missing">Pressure preview unavailable</div>`;
+    const graph = fight?.htmlReportUrl && fight?.pressurePreviewUrl
+        ? `<a class="night-overview-visual-graph-link" href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener" aria-label="Open HTML report for fight ${index + 1}">${graphImage}</a>`
+        : graphImage;
+
+    return `
+        <article class="night-overview-visual-card">
+            <div class="night-overview-visual-card-header">
+                <div class="night-overview-visual-card-heading">
+                    <strong>Fight ${index + 1} · ${escapeHtml(fightTime)}</strong>
+                    <span title="${escapeHtml(commander)}">${escapeHtml(commander)}</span>
+                </div>
+                <span class="night-overview-visual-duration">${escapeHtml(duration)}</span>
+            </div>
+            ${graph}
+            <div class="night-overview-visual-card-body">
+                <div class="night-overview-visual-metrics">
+                    ${buildNightOverviewVisualMetric("Outcome", outcome)}
+                    ${buildNightOverviewVisualMetric("Score", score)}
+                    ${buildNightOverviewVisualMetric("Squad", squadCount)}
+                    ${buildNightOverviewVisualMetric("Enemy", enemyCount)}
+                </div>
+                <div class="night-overview-visual-card-footer">
+                    ${buildAttributePills(attributes, NIGHT_OVERVIEW_ATTRIBUTE_KEYS.size)}
+                    ${fight?.htmlReportUrl ? `<a class="night-overview-visual-report-link" href="${escapeHtml(fight.htmlReportUrl)}" target="_blank" rel="noopener">HTML report</a>` : ""}
+                </div>
+            </div>
+        </article>
+    `;
+}
+
+function setNightOverviewEmptyState(titleText, messageText) {
+    const emptyState = document.querySelector("#night-overview-empty");
+    const heading = emptyState?.querySelector("h3");
+    const message = emptyState?.querySelector("p");
+    if (heading) {
+        heading.textContent = titleText;
+    }
+    if (message) {
+        message.textContent = messageText;
+    }
+}
+
+function renderNightOverview(catalog, nightSnapshot = null) {
+    const dateInput = document.querySelector("#night-overview-date");
+    const dateTrigger = document.querySelector("#night-overview-date-trigger");
+    const dateValue = document.querySelector("#night-overview-date-value");
+    const catalogSummary = document.querySelector("#night-overview-catalog-summary");
+    const emptyState = document.querySelector("#night-overview-empty");
+    const results = document.querySelector("#night-overview-results");
+    const title = document.querySelector("#night-overview-title");
+    const summary = document.querySelector("#night-overview-summary");
+    const body = document.querySelector("#night-overview-body");
+    const visualSummary = document.querySelector("#night-overview-visual-scan-summary");
+    const visualGrid = document.querySelector("#night-overview-visual-grid");
+    if (!dateInput || !dateTrigger || !dateValue || !catalogSummary || !emptyState || !results || !title || !summary || !body || !visualSummary || !visualGrid) {
+        return;
+    }
+
+    const catalogDates = Array.isArray(catalog?.dates) ? catalog.dates : [];
+    const fightDates = catalogDates
+        .map(item => normalizeNightOverviewDate(item?.date))
+        .filter(Boolean)
+        .sort((left, right) => right.localeCompare(left));
+    const previousDate = nightOverviewSelectedDate || dateInput.value;
+    nightOverviewAvailableDates = [...fightDates].sort((left, right) => left.localeCompare(right));
+    nightOverviewAvailableMonths = [...new Set(nightOverviewAvailableDates.map(date => date.slice(0, 7)))];
+    dateInput.value = fightDates.includes(previousDate) ? previousDate : "";
+    nightOverviewSelectedDate = dateInput.value;
+    dateTrigger.disabled = fightDates.length === 0;
+    dateValue.textContent = nightOverviewSelectedDate
+        ? new Date(`${nightOverviewSelectedDate}T00:00:00`).toLocaleDateString()
+        : "mm/dd/yyyy";
+    renderNightOverviewCalendar();
+
+    if (fightDates.length === 0) {
+        setNightOverviewCatalogStatus("No dated fights are available in the catalog.");
+    } else {
+        const oldestDate = catalog?.oldestDate ?? fightDates[fightDates.length - 1];
+        const newestDate = catalog?.newestDate ?? fightDates[0];
+        setNightOverviewCatalogStatus(`${formatNumber(catalog?.fightCount ?? 0)} fights across ${formatNumber(catalog?.dateCount ?? fightDates.length)} dates, ${oldestDate} through ${newestDate}.`);
+    }
+
+    const selectedDate = nightOverviewSelectedDate;
+    if (!selectedDate) {
+        setNightOverviewEmptyState("Select a fight date", "The overview will remain empty until you choose a date from the catalog.");
+        emptyState.hidden = false;
+        results.hidden = true;
+        body.innerHTML = "";
+        visualSummary.textContent = "";
+        visualGrid.innerHTML = "";
+        return;
+    }
+
+    const selectedFights = (nightSnapshot?.date === selectedDate && Array.isArray(nightSnapshot?.fights)
+        ? nightSnapshot.fights
+        : [])
+        .sort((left, right) => {
+            const leftTime = left?.fightIndex?.timeStartStandard ?? left?.fightIndex?.timeStart;
+            const rightTime = right?.fightIndex?.timeStartStandard ?? right?.fightIndex?.timeStart;
+            return parseDateValue(leftTime) - parseDateValue(rightTime);
+        });
+
+    title.textContent = formatNightOverviewDateLabel(selectedDate);
+    summary.textContent = `${formatNumber(selectedFights.length)} fight${selectedFights.length === 1 ? "" : "s"} in chronological order.`;
+    body.innerHTML = selectedFights.map(buildNightOverviewRow).join("");
+    visualSummary.textContent = `${formatNumber(selectedFights.length)} pressure graph${selectedFights.length === 1 ? "" : "s"}.`;
+    visualGrid.innerHTML = selectedFights.map(buildNightOverviewVisualCard).join("");
+    emptyState.hidden = true;
+    results.hidden = false;
+}
+
+async function ensureNightOverviewLoaded() {
+    const requestVersion = ++nightOverviewRequestVersion;
+    const selectedDate = nightOverviewSelectedDate;
+    const dateTrigger = document.querySelector("#night-overview-date-trigger");
+    if (dateTrigger && !currentNightOverviewCatalog) {
+        dateTrigger.disabled = true;
+    }
+
+    setNightOverviewCatalogStatus(
+        selectedDate
+            ? `Loading fights for ${formatNightOverviewDateLabel(selectedDate)}…`
+            : "Loading available fight dates…",
+        true);
+
+    try {
+        const catalogPromise = currentNightOverviewCatalog
+            ? Promise.resolve(currentNightOverviewCatalog)
+            : loadNightOverviewCatalog();
+        const nightPromise = selectedDate
+            ? loadNightOverviewDate(selectedDate)
+            : Promise.resolve(null);
+        const [catalog, nightSnapshot] = await Promise.all([catalogPromise, nightPromise]);
+        if (requestVersion !== nightOverviewRequestVersion) {
+            return;
+        }
+
+        currentNightOverviewCatalog = catalog;
+        renderNightOverview(catalog, nightSnapshot);
+    } catch (error) {
+        if (requestVersion !== nightOverviewRequestVersion) {
+            return;
+        }
+
+        if (error?.status === 401) {
+            renderAuthState({ enabled: true, authenticated: false, username: null });
+            return;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        setNightOverviewCatalogStatus("Night Overview could not be loaded.");
+        setNightOverviewEmptyState("Unable to load Night Overview", message);
+        const emptyState = document.querySelector("#night-overview-empty");
+        const results = document.querySelector("#night-overview-results");
+        if (emptyState) {
+            emptyState.hidden = false;
+        }
+        if (results) {
+            results.hidden = true;
+        }
+        if (dateTrigger) {
+            dateTrigger.disabled = !currentNightOverviewCatalog;
+        }
+    }
 }
 
 function positionFightPressurePreview(event, trigger) {
@@ -12356,7 +12849,17 @@ function closeFightDossier(options = {}) {
 
 function handleFightDossierHistoryChange() {
     const requestedTab = getRequestedAppTab() ?? "manage";
+    if (requestedTab === "night-overview") {
+        setActiveAppTab(requestedTab, { loadAnalysis: false });
+        fightDossierRequestVersion += 1;
+        clearFightDossier();
+        updateSelectedFightRows(null);
+        applyNightOverviewUrlState({ render: true });
+        return;
+    }
+
     setActiveAppTab(requestedTab);
+
     const fightId = getSelectedFightId();
     if (fightId) {
         void showFightDossier(fightId, { updateHistory: false });
@@ -13673,6 +14176,7 @@ async function runMain() {
             loadCompHelperConfig()
         ]);
         currentDashboardSnapshot = snapshot;
+        currentNightOverviewCatalog = null;
         applyCompHelperConfig(compHelperConfig);
 
         renderWorkspace(snapshot);
@@ -13719,12 +14223,18 @@ async function runMain() {
     }
 }
 
+function loadActiveAppView() {
+    return activeAppTab === "night-overview" && !getSelectedFightId()
+        ? ensureNightOverviewLoaded()
+        : main();
+}
+
 async function initializeApp() {
     try {
         const state = await loadAuthState();
         renderAuthState(state);
         if (!currentAuthState.enabled || currentAuthState.authenticated) {
-            await main();
+            await loadActiveAppView();
         }
     } catch (error) {
         document.body.innerHTML = `
@@ -13894,6 +14404,11 @@ document.querySelector("#fight-browser-body").addEventListener("pointerout", hid
 document.querySelector("#fight-browser-body").addEventListener("pointermove", moveFightPressurePreview);
 document.querySelector("#fight-browser-body").addEventListener("focusin", showFightPressurePreview);
 document.querySelector("#fight-browser-body").addEventListener("focusout", hideFightPressurePreview);
+document.querySelector("#night-overview-body").addEventListener("pointerover", showFightPressurePreview);
+document.querySelector("#night-overview-body").addEventListener("pointerout", hideFightPressurePreview);
+document.querySelector("#night-overview-body").addEventListener("pointermove", moveFightPressurePreview);
+document.querySelector("#night-overview-body").addEventListener("focusin", showFightPressurePreview);
+document.querySelector("#night-overview-body").addEventListener("focusout", hideFightPressurePreview);
 document.querySelector("#app-main").addEventListener("click", event => {
     const summaryLink = event.target.closest("[data-fight-summary-id]");
     if (!summaryLink
@@ -14256,6 +14771,39 @@ document.querySelector("#analysis-top-five-export-button").addEventListener("cli
 document.querySelectorAll("[data-app-tab]").forEach(button => {
     button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
 });
+document.querySelector("#night-overview-date-trigger").addEventListener("click", () => {
+    const trigger = document.querySelector("#night-overview-date-trigger");
+    setNightOverviewCalendarOpen(trigger?.getAttribute("aria-expanded") !== "true");
+});
+document.querySelector("#night-overview-calendar-month").addEventListener("change", event => {
+    nightOverviewCalendarMonth = event.target.value;
+    renderNightOverviewCalendar();
+});
+document.querySelector("#night-overview-calendar-previous").addEventListener("click", () => {
+    changeNightOverviewCalendarMonth(-1);
+});
+document.querySelector("#night-overview-calendar-next").addEventListener("click", () => {
+    changeNightOverviewCalendarMonth(1);
+});
+document.querySelector("#night-overview-calendar-days").addEventListener("click", event => {
+    const dateButton = event.target.closest("[data-night-overview-date]:not(:disabled)");
+    if (dateButton) {
+        selectNightOverviewDate(dateButton.dataset.nightOverviewDate);
+    }
+});
+document.querySelector("#night-overview-calendar-clear").addEventListener("click", () => {
+    selectNightOverviewDate("");
+});
+document.addEventListener("click", event => {
+    if (!event.target.closest("#night-overview-date-picker")) {
+        setNightOverviewCalendarOpen(false);
+    }
+});
+document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+        setNightOverviewCalendarOpen(false);
+    }
+});
 document.querySelectorAll("[data-fight-browser-sort]").forEach(button => {
     button.addEventListener("click", () => setFightBrowserSort(button.dataset.fightBrowserSort));
 });
@@ -14349,6 +14897,7 @@ placeFightDossierAfterFightBrowser();
 hydrateBatchForm();
 hydrateAnalysisTrendControls();
 applyCompHelperProfile("balanced");
+applyNightOverviewUrlState();
 setActiveAppTab(resolveInitialAppTab(), { persist: false, loadAnalysis: false });
 void initializeApp();
 

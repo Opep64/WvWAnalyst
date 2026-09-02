@@ -22,6 +22,7 @@ public sealed class FightCatalogService
     private readonly object _cacheLock = new();
     private IReadOnlyList<FightArtifactSummaryDto>? _cachedCanonicalSummaries;
     private FightBrowserSnapshotDto? _cachedFightBrowserSnapshot;
+    private IReadOnlyList<NightOverviewCatalogItem>? _cachedNightOverviewItems;
     private long _cacheVersion;
 
     public FightCatalogService(
@@ -228,6 +229,183 @@ public sealed class FightCatalogService
                 .Select(BuildDashboardSummary)
                 .ToList()
         };
+    }
+
+    public NightOverviewCatalogDto GetNightOverviewCatalog()
+    {
+        var datedFights = GetNightOverviewItems();
+
+        var dates = datedFights
+            .GroupBy(item => item.Date)
+            .OrderBy(group => group.Key)
+            .Select(group => new NightOverviewDateDto(
+                Date: group.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                FightCount: group.Count()))
+            .ToList();
+
+        return new NightOverviewCatalogDto(
+            FightCount: datedFights.Count,
+            DateCount: dates.Count,
+            OldestDate: dates.FirstOrDefault()?.Date,
+            NewestDate: dates.LastOrDefault()?.Date,
+            Dates: dates);
+    }
+
+    public NightOverviewSnapshotDto GetNightOverview(DateOnly date)
+    {
+        var fights = GetNightOverviewItems()
+            .Where(item => item.Date == date)
+            .OrderBy(item => item.FightStartUtc)
+            .Select(item => TryLoadManifestFromPath(
+                item.Directory.FullName,
+                Path.Combine(item.Directory.FullName, "manifest.json"),
+                hydrateDerivedData: true))
+            .Where(manifest => manifest is { Parsed: true })
+            .Select(manifest => BuildNightOverviewFight(manifest!))
+            .ToList();
+
+        return new NightOverviewSnapshotDto(
+            Date: date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            Fights: fights);
+    }
+
+    private NightOverviewFightDto BuildNightOverviewFight(FightArtifactManifest manifest)
+    {
+        var index = manifest.FightIndex?.Data;
+        var links = BuildArtifactLinks(manifest);
+        return new NightOverviewFightDto(
+            FightId: manifest.FightId,
+            PressurePreviewUrl: links.PressurePreviewUrl,
+            HtmlReportUrl: links.HtmlReportUrl,
+            ParserConsoleLogUrl: links.ParserConsoleLogUrl,
+            Attributes: _fightAttributes.BuildAttributes(index)
+                .Where(attribute => attribute.Key.Equals("three-way", StringComparison.OrdinalIgnoreCase) ||
+                    attribute.Key.Equals("organized-enemy", StringComparison.OrdinalIgnoreCase) ||
+                    attribute.Key.Equals("cloudy-fight", StringComparison.OrdinalIgnoreCase))
+                .ToList(),
+            FightIndex: index is null
+                ? null
+                : new NightOverviewFightIndexDto(
+                    Outcome: index.Outcome,
+                    FightShape: index.FightShape,
+                    Execution: index.Execution is null
+                        ? null
+                        : new NightOverviewExecutionDto(
+                            ScoreAvailable: index.Execution.ScoreAvailable,
+                            OverallScore: index.Execution.OverallScore,
+                            Grade: index.Execution.Grade),
+                    Duration: index.Duration,
+                    TimeStart: index.TimeStart,
+                    TimeStartStandard: index.TimeStartStandard,
+                    SquadPlayerCount: index.SquadPlayerCount,
+                    EnemyTargetCount: index.EnemyTargetCount,
+                    EnemyPlayerCount: index.EnemyPlayerCount,
+                    CommanderDisplayNames: index.CommanderDisplayNames));
+    }
+
+    private IReadOnlyList<NightOverviewCatalogItem> GetNightOverviewItems()
+    {
+        lock (_cacheLock)
+        {
+            if (_cachedNightOverviewItems is not null)
+            {
+                return _cachedNightOverviewItems;
+            }
+
+            _paths.EnsureStorageDirectories();
+            _cachedNightOverviewItems = new DirectoryInfo(_paths.FightsPath)
+                .EnumerateDirectories()
+                .Select(directory => new
+                {
+                    Directory = directory,
+                    Manifest = TryLoadNightOverviewManifest(Path.Combine(directory.FullName, "manifest.json"))
+                })
+                .Where(item => item.Manifest is not null)
+                .GroupBy(item => GetCanonicalKey(item.Directory, item.Manifest!))
+                .Select(group => group
+                    .OrderByDescending(item => item.Manifest!.ImportedAtUtc)
+                    .First())
+                .Where(item => item.Manifest!.Parsed)
+                .Select(item => new NightOverviewCatalogItem(
+                    Directory: item.Directory,
+                    Date: GetFightLocalDate(item.Manifest!) ?? DateOnly.MinValue,
+                    FightStartUtc: GetFightStartUtc(item.Manifest!)))
+                .Where(item => item.Date != DateOnly.MinValue)
+                .ToList();
+
+            return _cachedNightOverviewItems;
+        }
+    }
+
+    private static NightOverviewManifestProjection? TryLoadNightOverviewManifest(string manifestPath)
+    {
+        if (!File.Exists(manifestPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(manifestPath);
+            return JsonSerializer.Deserialize<NightOverviewManifestProjection>(stream, ManifestSerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string GetCanonicalKey(DirectoryInfo directory, NightOverviewManifestProjection manifest)
+    {
+        if (!string.IsNullOrWhiteSpace(manifest.SourceFileSha256))
+        {
+            return $"hash:{manifest.SourceFileSha256}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(manifest.FightFingerprint))
+        {
+            return $"fingerprint:{manifest.FightFingerprint}";
+        }
+
+        return $"fight:{(string.IsNullOrWhiteSpace(manifest.FightId) ? directory.Name : manifest.FightId)}";
+    }
+
+    private static DateOnly? GetFightLocalDate(NightOverviewManifestProjection manifest)
+    {
+        foreach (var timestamp in new[] { manifest.FightIndex?.Data?.TimeStartStandard, manifest.FightIndex?.Data?.TimeStart })
+        {
+            if (!string.IsNullOrWhiteSpace(timestamp) &&
+                DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                return DateOnly.FromDateTime(parsed.ToLocalTime().DateTime);
+            }
+        }
+
+        return manifest.ImportedAtUtc == default
+            ? null
+            : DateOnly.FromDateTime(manifest.ImportedAtUtc.ToLocalTime());
+    }
+
+    private static DateTime GetFightStartUtc(NightOverviewManifestProjection manifest)
+    {
+        foreach (var timestamp in new[] { manifest.FightIndex?.Data?.TimeStartStandard, manifest.FightIndex?.Data?.TimeStart })
+        {
+            if (!string.IsNullOrWhiteSpace(timestamp) &&
+                DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                return parsed.UtcDateTime;
+            }
+        }
+
+        return manifest.ImportedAtUtc == default ? DateTime.MinValue : manifest.ImportedAtUtc.ToUniversalTime();
     }
 
     public IReadOnlyList<FightCatalogManagementItem> GetManagementItems()
@@ -877,7 +1055,6 @@ public sealed class FightCatalogService
             StrongestPillarSummary = null,
             WeakestPillarSummary = null,
             Context = null,
-            Outcome = null,
             Pillars = Array.Empty<FightExecutionPillarIndexDto>()
         };
     }
@@ -911,6 +1088,7 @@ public sealed class FightCatalogService
         {
             _cachedCanonicalSummaries = null;
             _cachedFightBrowserSnapshot = null;
+            _cachedNightOverviewItems = null;
             unchecked
             {
                 _cacheVersion++;
@@ -1000,6 +1178,32 @@ public sealed class FightCatalogService
     private sealed record CatalogItem(
         DirectoryInfo Directory,
         FightArtifactManifest? Manifest);
+
+    private sealed record NightOverviewCatalogItem(
+        DirectoryInfo Directory,
+        DateOnly Date,
+        DateTime FightStartUtc);
+
+    private sealed class NightOverviewManifestProjection
+    {
+        public string? FightId { get; init; }
+        public string? SourceFileSha256 { get; init; }
+        public string? FightFingerprint { get; init; }
+        public DateTime ImportedAtUtc { get; init; }
+        public bool Parsed { get; init; }
+        public NightOverviewFightIndexProjection? FightIndex { get; init; }
+    }
+
+    private sealed class NightOverviewFightIndexProjection
+    {
+        public NightOverviewFightIndexDataProjection? Data { get; init; }
+    }
+
+    private sealed class NightOverviewFightIndexDataProjection
+    {
+        public string? TimeStart { get; init; }
+        public string? TimeStartStandard { get; init; }
+    }
 }
 
 public enum FightArtifactKind

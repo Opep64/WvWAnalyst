@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -259,6 +260,16 @@ app.MapGet("/api/health", () => Results.Ok(new
 }));
 
 app.MapGet("/api/dashboard", (PrototypeDashboardService service) => Results.Ok(service.BuildSnapshot()));
+app.MapGet("/api/night-overview/catalog", (FightCatalogService catalog) => Results.Ok(catalog.GetNightOverviewCatalog()));
+app.MapGet("/api/night-overview", (string? date, FightCatalogService catalog) =>
+{
+    if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+    {
+        return Results.BadRequest(new { message = "A valid date in yyyy-MM-dd format is required." });
+    }
+
+    return Results.Ok(catalog.GetNightOverview(parsedDate));
+});
 app.MapGet("/api/audit/events", (int? limit, AuditLogService audit) =>
 {
     var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);

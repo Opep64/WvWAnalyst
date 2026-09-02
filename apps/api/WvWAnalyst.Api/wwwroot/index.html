@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>WvWAnalyst</title>
-    <link rel="stylesheet" href="/styles.css?v=20260814positioningcommander2">
+    <link rel="stylesheet" href="/styles.css?v=20260901nightoverview7">
 </head>
 <body>
     <div class="page-shell">
@@ -24,6 +24,7 @@
                 <span class="pill pill-muted">Dark theme prototype</span>
                 <nav class="app-tabs" role="tablist" aria-label="Primary sections">
                     <button class="app-tab is-active" id="app-tab-manage" type="button" data-app-tab="manage" role="tab" aria-selected="true">Manage</button>
+                    <button class="app-tab" id="app-tab-night-overview" type="button" data-app-tab="night-overview" role="tab" aria-selected="false">Night Overview</button>
                     <button class="app-tab" id="app-tab-fight-browser" type="button" data-app-tab="fight-browser" role="tab" aria-selected="false">Fight Browser</button>
                     <button class="app-tab" id="app-tab-analysis" type="button" data-app-tab="analysis" role="tab" aria-selected="false">Analysis</button>
                 </nav>
@@ -406,6 +407,97 @@
                 </div>
             </section>
 
+            <section class="panel panel-wide" id="night-overview-panel" data-app-panel="night-overview">
+                <div class="section-heading">
+                    <div>
+                        <h2>Night Overview</h2>
+                        <p>Select a date from the stored fight catalog to build the night's fight summary.</p>
+                    </div>
+                    <p class="workspace-note night-overview-catalog-status is-loading" id="night-overview-catalog-summary" role="status" aria-live="polite">Loading fight catalog…</p>
+                </div>
+                <div class="browser-controls night-overview-controls">
+                    <div class="browser-field night-overview-date-field" id="night-overview-date-picker">
+                        <span id="night-overview-date-label">Fight date</span>
+                        <input id="night-overview-date" type="hidden" value="">
+                        <button
+                            class="night-overview-date-trigger"
+                            id="night-overview-date-trigger"
+                            type="button"
+                            aria-labelledby="night-overview-date-label night-overview-date-value"
+                            aria-haspopup="dialog"
+                            aria-expanded="false">
+                            <span id="night-overview-date-value">mm/dd/yyyy</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"></path>
+                            </svg>
+                        </button>
+                        <div class="night-overview-calendar" id="night-overview-calendar" role="dialog" aria-label="Choose a fight date" hidden>
+                            <div class="night-overview-calendar-header">
+                                <select id="night-overview-calendar-month" aria-label="Available fight month"></select>
+                                <div class="night-overview-calendar-navigation">
+                                    <button id="night-overview-calendar-previous" type="button" aria-label="Previous available month">&#8593;</button>
+                                    <button id="night-overview-calendar-next" type="button" aria-label="Next available month">&#8595;</button>
+                                </div>
+                            </div>
+                            <div class="night-overview-calendar-weekdays" aria-hidden="true">
+                                <span>Su</span>
+                                <span>Mo</span>
+                                <span>Tu</span>
+                                <span>We</span>
+                                <span>Th</span>
+                                <span>Fr</span>
+                                <span>Sa</span>
+                            </div>
+                            <div class="night-overview-calendar-days" id="night-overview-calendar-days"></div>
+                            <div class="night-overview-calendar-footer">
+                                <button class="action-link action-link-button" id="night-overview-calendar-clear" type="button">Clear</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="night-overview-empty" id="night-overview-empty">
+                    <h3>Select a fight date</h3>
+                    <p>The overview will remain empty until you choose a date from the catalog.</p>
+                </div>
+                <div id="night-overview-results" hidden>
+                    <div class="section-heading night-overview-heading">
+                        <div>
+                            <h3 id="night-overview-title">Fight Summary</h3>
+                            <p id="night-overview-summary"></p>
+                        </div>
+                    </div>
+                    <div class="table-shell table-shell-scroll table-shell-night-overview">
+                        <table class="data-table night-overview-table">
+                            <thead>
+                                <tr>
+                                    <th>Fight time</th>
+                                    <th>Commander</th>
+                                    <th>Duration</th>
+                                    <th>Outcome</th>
+                                    <th>Score</th>
+                                    <th data-fight-shape-diagnostics hidden>Temp Shape</th>
+                                    <th>Squad</th>
+                                    <th>Enemy</th>
+                                    <th>Attributes</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="night-overview-body"></tbody>
+                        </table>
+                    </div>
+                    <section class="night-overview-visual-scan" aria-labelledby="night-overview-visual-scan-title">
+                        <div class="section-heading">
+                            <div>
+                                <h3 id="night-overview-visual-scan-title">Fight Visual Scan</h3>
+                                <p>Pressure graphs in fight order for quickly comparing how each engagement developed.</p>
+                            </div>
+                            <p class="workspace-note" id="night-overview-visual-scan-summary"></p>
+                        </div>
+                        <div class="night-overview-visual-grid" id="night-overview-visual-grid"></div>
+                    </section>
+                </div>
+            </section>
+
             <section class="panel panel-wide" id="fight-browser-panel" data-app-panel="fight-browser">
                 <div class="section-heading">
                     <div>
@@ -592,14 +684,15 @@
                         <tbody id="fight-browser-body"></tbody>
                     </table>
                 </div>
-                <div class="fight-pressure-preview" id="fight-pressure-preview" role="tooltip" hidden>
-                    <div class="fight-pressure-preview-heading">
-                        <strong>Team Pressure · Strips</strong>
-                        <span id="fight-pressure-preview-label"></span>
-                    </div>
-                    <img id="fight-pressure-preview-image" alt="Squad and enemy damage, boon strips, downs, and kills across the fight">
-                </div>
             </section>
+
+            <div class="fight-pressure-preview" id="fight-pressure-preview" role="tooltip" hidden>
+                <div class="fight-pressure-preview-heading">
+                    <strong>Team Pressure · Strips</strong>
+                    <span id="fight-pressure-preview-label"></span>
+                </div>
+                <img id="fight-pressure-preview-image" alt="Squad and enemy damage, boon strips, optional squad positioning, downs, and kills across the fight">
+            </div>
 
             <section class="panel panel-wide" data-app-panel="analysis">
                 <div class="section-heading">
@@ -1348,6 +1441,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260814positioningcommander2" defer></script>
+    <script src="/app.js?v=20260901nightoverview7" defer></script>
 </body>
 </html>

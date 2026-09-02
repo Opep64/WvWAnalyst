@@ -72,6 +72,46 @@ public sealed record FightBrowserSnapshotDto(
     int FailedCount,
     IReadOnlyList<FightArtifactSummaryDto> Fights);
 
+public sealed record NightOverviewCatalogDto(
+    int FightCount,
+    int DateCount,
+    string? OldestDate,
+    string? NewestDate,
+    IReadOnlyList<NightOverviewDateDto> Dates);
+
+public sealed record NightOverviewDateDto(
+    string Date,
+    int FightCount);
+
+public sealed record NightOverviewSnapshotDto(
+    string Date,
+    IReadOnlyList<NightOverviewFightDto> Fights);
+
+public sealed record NightOverviewFightDto(
+    string FightId,
+    string? PressurePreviewUrl,
+    string? HtmlReportUrl,
+    string? ParserConsoleLogUrl,
+    IReadOnlyList<FightAttributeDto> Attributes,
+    NightOverviewFightIndexDto? FightIndex);
+
+public sealed record NightOverviewFightIndexDto(
+    FightOutcomeDto Outcome,
+    FightShapeIndexDto? FightShape,
+    NightOverviewExecutionDto? Execution,
+    string Duration,
+    string TimeStart,
+    string? TimeStartStandard,
+    int SquadPlayerCount,
+    int EnemyTargetCount,
+    int EnemyPlayerCount,
+    IReadOnlyList<string> CommanderDisplayNames);
+
+public sealed record NightOverviewExecutionDto(
+    bool ScoreAvailable,
+    int? OverallScore,
+    string? Grade);
+
 public sealed record FightImportResultDto(
     bool Success,
     string Action,
