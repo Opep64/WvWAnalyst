@@ -10,7 +10,8 @@
     <div class="page-shell">
         <header class="hero">
             <div class="auth-status" id="auth-status" hidden>
-                <span>Signed in as <strong id="auth-username"></strong></span>
+                <span id="auth-identity-label">Signed in as <strong id="auth-username"></strong></span>
+                <button class="action-link action-link-button" id="auth-sign-in-button" type="button" hidden>Sign in</button>
                 <button class="action-link action-link-button" id="auth-change-password-toggle" type="button">Change password</button>
                 <button class="action-link action-link-button" id="auth-logout-button" type="button">Logout</button>
             </div>
@@ -36,7 +37,7 @@
             <div class="section-heading">
                 <div>
                     <h2>Sign In</h2>
-                    <p>Enter a WvWAnalyst username and password to open the dashboard.</p>
+                    <p>Sign in for the full dashboard, or continue as a guest for Night Overview and One-Time Parses.</p>
                 </div>
             </div>
             <form class="auth-login-form" id="auth-login-form">
@@ -50,6 +51,7 @@
                 </label>
                 <div class="auth-login-actions">
                     <button class="primary-button" id="auth-login-button" type="submit">Sign in</button>
+                    <button class="action-link action-link-button" id="auth-guest-button" type="button">Continue as Guest</button>
                     <p class="workspace-note" id="auth-login-message"></p>
                 </div>
             </form>
@@ -1511,6 +1513,6 @@
         </main>
     </div>
 
-    <script src="/app.js?v=20260901onetime3" defer></script>
+    <script src="/app.js?v=20260901guest2" defer></script>
 </body>
 </html>

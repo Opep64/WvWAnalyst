@@ -10,10 +10,11 @@ const ANALYSIS_ENEMY_TREND_METRIC_KEY = "wvw-analyst.analysis-enemy-trend-metric
 const ANALYSIS_TEAM_SCORE_OVERLAY_KEY = "wvw-analyst.analysis-team-score-overlay";
 const ANALYSIS_POSITIONING_SQUAD_AVERAGE_KEY = "wvw-analyst.analysis-positioning-squad-average";
 const NIGHT_OVERVIEW_ATTRIBUTE_KEYS = new Set(["three-way", "organized-enemy", "cloudy-fight"]);
+const GUEST_APP_TABS = new Set(["night-overview", "one-time-parses"]);
 const DEFAULT_BATCH_STATUS_MESSAGE = "No batch parse has been run in this browser session yet.";
 let currentDashboardSnapshot = null;
 let currentAnalysisSnapshot = null;
-let currentAuthState = { enabled: false, authenticated: true, username: null };
+let currentAuthState = { enabled: false, authenticated: true, guest: false, username: null };
 let currentAnalysisPlayerDetailsByAccount = new Map();
 let currentAnalysisPlayerDetailPromisesByAccount = new Map();
 let currentAnalysisAllPlayerDetails = null;
@@ -372,19 +373,24 @@ function renderAuthState(state) {
     currentAuthState = {
         enabled: Boolean(state?.enabled),
         authenticated: !state?.enabled || Boolean(state?.authenticated),
+        guest: Boolean(state?.enabled && !state?.authenticated && state?.guest),
         username: state?.username ?? null
     };
 
     const appMain = document.querySelector("#app-main");
     const loginPanel = document.querySelector("#auth-login-panel");
     const authStatus = document.querySelector("#auth-status");
+    const authIdentityLabel = document.querySelector("#auth-identity-label");
     const authUsername = document.querySelector("#auth-username");
+    const signInButton = document.querySelector("#auth-sign-in-button");
+    const changePasswordButton = document.querySelector("#auth-change-password-toggle");
+    const logoutButton = document.querySelector("#auth-logout-button");
     const changePasswordPanel = document.querySelector("#auth-change-password-panel");
     const modePill = document.querySelector("#mode-pill");
     const loginMessage = document.querySelector("#auth-login-message");
     const loginUsername = document.querySelector("#auth-login-username");
 
-    const loginRequired = currentAuthState.enabled && !currentAuthState.authenticated;
+    const loginRequired = currentAuthState.enabled && !currentAuthState.authenticated && !currentAuthState.guest;
     if (appMain) {
         appMain.hidden = loginRequired;
     }
@@ -398,16 +404,45 @@ function renderAuthState(state) {
     }
 
     if (authUsername) {
-        authUsername.textContent = currentAuthState.username ?? "";
+        authUsername.textContent = currentAuthState.guest ? "Guest" : currentAuthState.username ?? "";
     }
 
-    if ((!currentAuthState.enabled || loginRequired) && changePasswordPanel) {
+    if (authIdentityLabel) {
+        authIdentityLabel.firstChild.textContent = currentAuthState.guest ? "Browsing as " : "Signed in as ";
+    }
+
+    if (signInButton) {
+        signInButton.hidden = !currentAuthState.guest;
+    }
+
+    if (changePasswordButton) {
+        changePasswordButton.hidden = currentAuthState.guest;
+    }
+
+    if (logoutButton) {
+        logoutButton.hidden = currentAuthState.guest;
+    }
+
+    if ((!currentAuthState.enabled || loginRequired || currentAuthState.guest) && changePasswordPanel) {
         changePasswordPanel.hidden = true;
         clearChangePasswordForm();
     }
 
-    if (modePill && loginRequired) {
-        modePill.textContent = "Authentication required";
+    if (modePill) {
+        if (loginRequired) {
+            modePill.textContent = "Authentication required";
+        } else if (currentAuthState.guest) {
+            modePill.textContent = "Guest access";
+        }
+    }
+
+    const hasLimitedAccess = currentAuthState.enabled && !currentAuthState.authenticated;
+    document.querySelectorAll("[data-app-tab]").forEach(button => {
+        button.hidden = hasLimitedAccess && !GUEST_APP_TABS.has(button.dataset.appTab);
+    });
+
+    if (hasLimitedAccess && !GUEST_APP_TABS.has(activeAppTab)) {
+        setActiveAppTab("night-overview", { persist: false, loadAnalysis: false });
     }
 
     if (loginRequired) {
@@ -1944,6 +1979,48 @@ function normalizeAppTab(value) {
     }
 }
 
+function isGuestMode() {
+    return currentAuthState.enabled && currentAuthState.guest;
+}
+
+function getRequestedGuestAppTab() {
+    const requestedTab = getRequestedAppTab();
+    return GUEST_APP_TABS.has(requestedTab) ? requestedTab : null;
+}
+
+function updateGuestViewHistory(tabKey, options = {}) {
+    const { replace = false } = options;
+    const normalizedTab = GUEST_APP_TABS.has(tabKey) ? tabKey : "night-overview";
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", normalizedTab);
+    url.searchParams.delete("tab");
+    url.searchParams.delete("fightId");
+    if (normalizedTab !== "night-overview") {
+        url.searchParams.delete("date");
+    }
+
+    const historyMethod = replace ? "replaceState" : "pushState";
+    window.history[historyMethod]({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function enterGuestMode(options = {}) {
+    const requestedTab = GUEST_APP_TABS.has(options.tabKey)
+        ? options.tabKey
+        : getRequestedGuestAppTab();
+    const guestTab = requestedTab ?? "night-overview";
+    if (!requestedTab || options.updateHistory) {
+        updateGuestViewHistory(guestTab, { replace: true });
+    }
+
+    renderAuthState({ enabled: true, authenticated: false, guest: true, username: null });
+    setActiveAppTab(guestTab, { persist: false, loadAnalysis: false });
+    await loadActiveAppView();
+}
+
+function showAuthLogin() {
+    renderAuthState({ enabled: true, authenticated: false, guest: false, username: null });
+}
+
 function normalizeNightOverviewDate(value) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? "").trim());
     if (!match) {
@@ -2088,7 +2165,10 @@ function resolveInitialAppTab() {
 
 function setActiveAppTab(tabKey, options = {}) {
     const { persist = true, loadAnalysis = true } = options;
-    const normalizedTab = normalizeAppTab(tabKey);
+    const requestedTab = normalizeAppTab(tabKey);
+    const normalizedTab = isGuestMode() && !GUEST_APP_TABS.has(requestedTab)
+        ? "night-overview"
+        : requestedTab;
     activeAppTab = normalizedTab;
 
     document.querySelectorAll("[data-app-tab]").forEach(button => {
@@ -14535,6 +14615,11 @@ function loadActiveAppView() {
 async function initializeApp() {
     try {
         const state = await loadAuthState();
+        if (state?.enabled && !state?.authenticated && getRequestedGuestAppTab()) {
+            await enterGuestMode();
+            return;
+        }
+
         renderAuthState(state);
         if (!currentAuthState.enabled || currentAuthState.authenticated) {
             await loadActiveAppView();
@@ -15060,6 +15145,10 @@ document.querySelector("#analysis-panel-crowd-control").addEventListener("click"
 document.querySelector("#auth-login-form").addEventListener("submit", event => {
     void handleAuthLogin(event);
 });
+document.querySelector("#auth-guest-button").addEventListener("click", () => {
+    void enterGuestMode({ updateHistory: true });
+});
+document.querySelector("#auth-sign-in-button").addEventListener("click", showAuthLogin);
 document.querySelector("#auth-change-password-toggle").addEventListener("click", toggleChangePasswordPanel);
 document.querySelector("#auth-change-password-form").addEventListener("submit", event => {
     void handleChangePasswordSubmit(event);
@@ -15077,7 +15166,19 @@ document.querySelector("#analysis-clear-filters-button").addEventListener("click
 });
 document.querySelector("#analysis-top-five-export-button").addEventListener("click", () => void handleAnalysisTopFiveExport());
 document.querySelectorAll("[data-app-tab]").forEach(button => {
-    button.addEventListener("click", () => setActiveAppTab(button.dataset.appTab));
+    button.addEventListener("click", () => {
+        if (currentAuthState.enabled && !currentAuthState.authenticated && !isGuestMode()) {
+            if (GUEST_APP_TABS.has(button.dataset.appTab)) {
+                void enterGuestMode({ tabKey: button.dataset.appTab, updateHistory: true });
+            }
+            return;
+        }
+
+        if (isGuestMode()) {
+            updateGuestViewHistory(button.dataset.appTab);
+        }
+        setActiveAppTab(button.dataset.appTab);
+    });
 });
 document.querySelector("#one-time-parse-form").addEventListener("submit", event => {
     void handleOneTimeParseSubmit(event);

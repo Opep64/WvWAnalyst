@@ -792,10 +792,30 @@ static void ApplyNoStoreHeaders(HttpResponse response)
 static bool IsPublicApiPath(PathString path)
 {
     var value = path.Value ?? string.Empty;
-    return string.Equals(value, "/api/auth/me", StringComparison.OrdinalIgnoreCase) ||
+    if (string.Equals(value, "/api/auth/me", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(value, "/api/auth/login", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(value, "/api/auth/logout", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(value, "/api/health", StringComparison.OrdinalIgnoreCase);
+        string.Equals(value, "/api/health", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, "/api/night-overview", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, "/api/night-overview/catalog", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, "/api/one-time-parses", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    var segments = value.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    if (segments.Length != 5 ||
+        !string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(segments[3], "artifacts", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var isGuestArtifactOwner = string.Equals(segments[1], "fights", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(segments[1], "one-time-parses", StringComparison.OrdinalIgnoreCase);
+    var isGuestArtifact = string.Equals(segments[4], "html", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(segments[4], "pressure-preview", StringComparison.OrdinalIgnoreCase);
+    return isGuestArtifactOwner && isGuestArtifact;
 }
 
 static string ResolveImportDirectoryPath(string? mode, AppPathService paths)
