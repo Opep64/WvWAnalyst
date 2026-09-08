@@ -16,8 +16,16 @@ public sealed class WorkspaceInventoryProbe
         return new WorkspaceStatusDto(
             ParserPath: parserPath,
             ParserDetected: parserDetected,
+            ParserCliPath: null,
+            ParserCliDetected: false,
             CombinerPath: combinerPath,
             CombinerDetected: combinerDetected,
+            PendingDirectoryPath: null,
+            PendingDirectoryConfigured: false,
+            PendingDirectoryDetected: false,
+            ArchiveLogDirectoryPath: null,
+            ArchiveLogDirectoryConfigured: false,
+            ArchiveLogDirectoryDetected: false,
             Notes: notes);
     }
 }
