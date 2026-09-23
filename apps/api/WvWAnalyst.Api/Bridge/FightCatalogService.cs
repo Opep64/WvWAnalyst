@@ -23,6 +23,7 @@ public sealed class FightCatalogService
     private IReadOnlyList<FightArtifactSummaryDto>? _cachedCanonicalSummaries;
     private FightBrowserSnapshotDto? _cachedFightBrowserSnapshot;
     private IReadOnlyList<NightOverviewCatalogItem>? _cachedNightOverviewItems;
+    private FightIdentityLookup? _identityLookup;
     private long _cacheVersion;
 
     public FightCatalogService(
@@ -72,9 +73,27 @@ public sealed class FightCatalogService
         Directory.CreateDirectory(fightDirectoryPath);
 
         var manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
-        await using var stream = new FileStream(manifestPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await JsonSerializer.SerializeAsync(stream, manifest, ManifestSerializerOptions, cancellationToken);
-        InvalidateCatalogCache();
+        var temporaryPath = manifestPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await JsonSerializer.SerializeAsync(stream, manifest, ManifestSerializerOptions, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_cacheLock)
+            {
+                // Publish the complete file and its lookup entry together. A lookup
+                // rebuild must never read a partially written manifest.
+                File.Move(temporaryPath, manifestPath, overwrite: true);
+                ManifestWritten(manifest);
+            }
+        }
+        finally
+        {
+            File.Delete(temporaryPath);
+        }
     }
 
     public FightArtifactManifest? TryLoadManifest(string fightId)
@@ -428,99 +447,114 @@ public sealed class FightCatalogService
 
     public FightArtifactManifest? TryFindReplacementFight(string? sourceFileSha256, string? fightFingerprint)
     {
-        var manifests = EnumerateCatalogItems()
-            .Select(item => item.Manifest)
-            .Where(manifest => manifest is not null)
-            .Cast<FightArtifactManifest>();
-
-        if (!string.IsNullOrWhiteSpace(sourceFileSha256))
+        if (string.IsNullOrWhiteSpace(sourceFileSha256) && string.IsNullOrWhiteSpace(fightFingerprint))
         {
-            var hashMatch = manifests
-                .Where(manifest => string.Equals(manifest.SourceFileSha256, sourceFileSha256, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(manifest => manifest.ImportedAtUtc)
-                .FirstOrDefault();
-
-            if (hashMatch is not null)
-            {
-                return hashMatch;
-            }
+            return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(fightFingerprint))
+        lock (_cacheLock)
         {
-            return manifests
-                .Where(manifest => string.Equals(manifest.FightFingerprint, fightFingerprint, StringComparison.Ordinal))
-                .OrderByDescending(manifest => manifest.ImportedAtUtc)
-                .FirstOrDefault();
+            var fightId = GetIdentityLookup().FindReplacement(sourceFileSha256, fightFingerprint);
+            return fightId is null ? null : TryLoadManifest(fightId);
         }
-
-        return null;
     }
 
     public HashSet<string> GetKnownSuccessfulSourceHashes()
     {
-        return EnumerateCatalogItems()
-            .Select(item => item.Manifest)
-            .Where(manifest =>
-                manifest is not null &&
-                manifest.Parsed &&
-                !string.IsNullOrWhiteSpace(manifest.SourceFileSha256))
-            .Select(manifest => manifest!.SourceFileSha256!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lock (_cacheLock)
+        {
+            return GetIdentityLookup().GetSuccessfulSourceHashes();
+        }
+    }
+
+    // Called under _cacheLock. Hydrate legacy fingerprints once using the same
+    // path as the old scan, then retain only the compact lookup entries.
+    private FightIdentityLookup GetIdentityLookup()
+    {
+        if (_identityLookup is not null)
+        {
+            return _identityLookup;
+        }
+
+        var lookup = new FightIdentityLookup();
+        foreach (var item in EnumerateCatalogItems())
+        {
+            if (item.Manifest is { } manifest)
+            {
+                lookup.Upsert(manifest);
+            }
+        }
+
+        _identityLookup = lookup;
+        return lookup;
     }
 
     public void ResetCatalog()
     {
-        _paths.EnsureStorageDirectories();
-
-        var fightsRoot = new DirectoryInfo(_paths.FightsPath);
-        if (fightsRoot.Exists)
+        lock (_cacheLock)
         {
-            foreach (var directory in fightsRoot.EnumerateDirectories())
+            try
             {
-                directory.Delete(recursive: true);
+                _paths.EnsureStorageDirectories();
+                var fightsRoot = new DirectoryInfo(_paths.FightsPath);
+                if (fightsRoot.Exists)
+                {
+                    foreach (var directory in fightsRoot.EnumerateDirectories())
+                    {
+                        directory.Delete(recursive: true);
+                    }
+                }
+
+                var databasePath = _paths.DatabasePath;
+                if (File.Exists(databasePath))
+                {
+                    File.Delete(databasePath);
+                }
+            }
+            finally
+            {
+                // A partially completed reset also changes the lookup contents.
+                InvalidateCatalogCache();
             }
         }
-
-        var databasePath = _paths.DatabasePath;
-        if (File.Exists(databasePath))
-        {
-            File.Delete(databasePath);
-        }
-
-        InvalidateCatalogCache();
     }
 
     public int DeleteFightDirectories(IEnumerable<string> fightIds, CancellationToken cancellationToken)
     {
         _paths.EnsureStorageDirectories();
 
-        var fightsRootPath = Path.GetFullPath(_paths.FightsPath);
-        var deletedCount = 0;
-        foreach (var fightId in fightIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+        lock (_cacheLock)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var fightDirectoryPath = Path.GetFullPath(GetFightDirectoryPath(fightId));
-            if (!IsPathInsideDirectory(fightDirectoryPath, fightsRootPath))
+            var fightsRootPath = Path.GetFullPath(_paths.FightsPath);
+            var deletedCount = 0;
+            try
             {
-                throw new InvalidOperationException($"Refusing to delete fight folder outside the configured fight store: {fightDirectoryPath}");
-            }
+                foreach (var fightId in fightIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var fightDirectoryPath = Path.GetFullPath(GetFightDirectoryPath(fightId));
+                    if (!IsPathInsideDirectory(fightDirectoryPath, fightsRootPath))
+                    {
+                        throw new InvalidOperationException($"Refusing to delete fight folder outside the configured fight store: {fightDirectoryPath}");
+                    }
 
-            if (!Directory.Exists(fightDirectoryPath))
+                    if (!Directory.Exists(fightDirectoryPath))
+                    {
+                        continue;
+                    }
+
+                    Directory.Delete(fightDirectoryPath, recursive: true);
+                    deletedCount++;
+                }
+
+                return deletedCount;
+            }
+            finally
             {
-                continue;
+                // Invalidate even if deletion failed partway through a folder.
+                InvalidateCatalogCache();
             }
-
-            Directory.Delete(fightDirectoryPath, recursive: true);
-            deletedCount++;
         }
-
-        if (deletedCount > 0)
-        {
-            InvalidateCatalogCache();
-        }
-
-        return deletedCount;
     }
 
     public bool TryGetFightDetail(string fightId, out FightDetailDto detail)
@@ -777,10 +811,13 @@ public sealed class FightCatalogService
     {
         try
         {
-            Directory.CreateDirectory(fightDirectoryPath);
-            var manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
-            File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestSerializerOptions));
-            InvalidateCatalogCache();
+            lock (_cacheLock)
+            {
+                Directory.CreateDirectory(fightDirectoryPath);
+                var manifestPath = Path.Combine(fightDirectoryPath, "manifest.json");
+                File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, ManifestSerializerOptions));
+                ManifestWritten(manifest);
+            }
         }
         catch (IOException)
         {
@@ -1086,13 +1123,27 @@ public sealed class FightCatalogService
     {
         lock (_cacheLock)
         {
-            _cachedCanonicalSummaries = null;
-            _cachedFightBrowserSnapshot = null;
-            _cachedNightOverviewItems = null;
-            unchecked
-            {
-                _cacheVersion++;
-            }
+            _identityLookup = null;
+            InvalidateSummaryCache();
+        }
+    }
+
+    // Called under _cacheLock after a completed write. Importing a fight must
+    // invalidate analysis/browser snapshots without discarding the identity index.
+    private void ManifestWritten(FightArtifactManifest manifest)
+    {
+        _identityLookup?.Upsert(manifest);
+        InvalidateSummaryCache();
+    }
+
+    private void InvalidateSummaryCache()
+    {
+        _cachedCanonicalSummaries = null;
+        _cachedFightBrowserSnapshot = null;
+        _cachedNightOverviewItems = null;
+        unchecked
+        {
+            _cacheVersion++;
         }
     }
 

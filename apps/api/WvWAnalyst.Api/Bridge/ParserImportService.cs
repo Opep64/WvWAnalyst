@@ -272,7 +272,7 @@ public sealed class ParserImportService
             LatestItem: null));
 
         var reservedHashes = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-        if (!resetCatalog)
+        if (!resetCatalog && files.Length > 0)
         {
             foreach (var hash in _fightCatalog.GetKnownSuccessfulSourceHashes())
             {
